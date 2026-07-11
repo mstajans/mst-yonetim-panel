@@ -568,19 +568,29 @@ function IndirimliOzet({ session, authFetch }) {
 // ============ İndirimli kitap talepleri ============
 function DiscountRequests({ requests, loading, onApprove, onReject, authors, onManualAdd }) {
   const [mAuthor, setMAuthor] = React.useState("");
+  const [mBook, setMBook] = React.useState("");
   const [mQty, setMQty] = React.useState("");
   const [mNote, setMNote] = React.useState("");
   const [mMsg, setMMsg] = React.useState(null);
   const [saving, setSaving] = React.useState(false);
 
+  // Seçili yazarın kitapları (kitap seçimi için)
+  const seciliYazar = (authors || []).find((a) => String(a.id) === String(mAuthor));
+  const yazarKitaplari = seciliYazar?.books || [];
+
   const kaydet = async () => {
-    if (!mAuthor || !mQty) { setMMsg({ ok: false, text: "Yazar ve adet zorunlu." }); return; }
+    if (!mAuthor) { setMMsg({ ok: false, text: "Yazar seçin." }); return; }
+    if (!mBook) { setMMsg({ ok: false, text: "Kitap seçin. İndirimli alım hangi kitaba ait olduğu belirtilmeli." }); return; }
+    if (!mQty) { setMMsg({ ok: false, text: "Adet girin." }); return; }
     setSaving(true); setMMsg(null);
-    const r = await onManualAdd({ authorId: mAuthor, quantity: parseInt(mQty, 10), note: mNote });
+    const r = await onManualAdd({ authorId: mAuthor, bookId: mBook, quantity: parseInt(mQty, 10), note: mNote });
     setSaving(false);
-    if (r?.ok) { setMMsg({ ok: true, text: r.mesaj || "Kaydedildi." }); setMQty(""); setMNote(""); setMAuthor(""); }
+    if (r?.ok) { setMMsg({ ok: true, text: r.mesaj || "Kaydedildi." }); setMQty(""); setMNote(""); setMAuthor(""); setMBook(""); }
     else setMMsg({ ok: false, text: r?.error || "Kaydedilemedi." });
   };
+
+  // Yazar değişince kitap seçimini sıfırla
+  React.useEffect(() => { setMBook(""); }, [mAuthor]);
 
   return (
     <div>
@@ -598,6 +608,13 @@ function DiscountRequests({ requests, loading, onApprove, onReject, authors, onM
             <select value={mAuthor} onChange={(e) => setMAuthor(e.target.value)} style={{ width: "100%", padding: "9px 10px", borderRadius: 7, border: `1px solid ${THEME.border}`, background: THEME.panelBgAlt || "#1a2332", color: THEME.textLight, fontSize: 13 }}>
               <option value="">Yazar seç...</option>
               {(authors || []).map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+            </select>
+          </div>
+          <div style={{ flex: "2 1 200px" }}>
+            <label style={{ color: THEME.textMuted, fontSize: 11, display: "block", marginBottom: 4 }}>Kitap</label>
+            <select value={mBook} onChange={(e) => setMBook(e.target.value)} disabled={!mAuthor} style={{ width: "100%", padding: "9px 10px", borderRadius: 7, border: `1px solid ${THEME.border}`, background: THEME.panelBgAlt || "#1a2332", color: mAuthor ? THEME.textLight : THEME.textFaint, fontSize: 13 }}>
+              <option value="">{mAuthor ? (yazarKitaplari.length ? "Kitap seç..." : "Bu yazarın kitabı yok") : "Önce yazar seçin"}</option>
+              {yazarKitaplari.map((b) => <option key={b.id} value={b.id}>{b.title}</option>)}
             </select>
           </div>
           <div style={{ flex: "1 1 90px" }}>
@@ -1653,17 +1670,24 @@ function TelifOzetiKutu({ book }) {
     <div style={{ fontSize: 11.5, color: THEME.textFaint, padding: "8px 0" }}>Henüz satış yok — telif hesaplanmadı.</div>
   );
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 10, marginBottom: 12 }}>
-      {[
-        { etiket: "Toplam Telif", deger: t.toplamTelif, renk: THEME.textLight },
-        { etiket: "Çekilebilir", deger: t.cekilebilir, renk: THEME.success },
-        { etiket: "Kilitli (stok tükenmeden)", deger: t.kilitli, renk: THEME.warn },
-      ].map((k, i) => (
-        <div key={i} style={{ background: THEME.panelBg, border: `1px solid ${THEME.border}`, borderRadius: 8, padding: "10px 12px" }}>
-          <div style={{ fontSize: 10, color: THEME.textMuted, marginBottom: 4 }}>{k.etiket}</div>
-          <div style={{ fontSize: 15, fontWeight: 700, color: k.renk, fontFamily: "'Space Mono',monospace" }}>{Number(k.deger).toLocaleString("tr-TR")}₺</div>
+    <div style={{ marginBottom: 12 }}>
+      {t.maliyetGirilmemis && (
+        <div style={{ background: "rgba(201,162,39,0.12)", border: `1px solid ${THEME.warn}`, borderRadius: 8, padding: "8px 12px", marginBottom: 10, fontSize: 11.5, color: THEME.warn, lineHeight: 1.5 }}>
+          ⚠️ Baskı maliyeti girilmemiş — telif olduğundan <b>yüksek</b> görünüyor. Doğru hesap için "Baskı Maliyeti" ile sayfa sayısı / maliyet girin.
         </div>
-      ))}
+      )}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 10 }}>
+        {[
+          { etiket: "Toplam Telif", deger: t.toplamTelif, renk: THEME.textLight },
+          { etiket: "Çekilebilir", deger: t.cekilebilir, renk: THEME.success },
+          { etiket: "Kilitli (stok tükenmeden)", deger: t.kilitli, renk: THEME.warn },
+        ].map((k, i) => (
+          <div key={i} style={{ background: THEME.panelBg, border: `1px solid ${THEME.border}`, borderRadius: 8, padding: "10px 12px" }}>
+            <div style={{ fontSize: 10, color: THEME.textMuted, marginBottom: 4 }}>{k.etiket}</div>
+            <div style={{ fontSize: 15, fontWeight: 700, color: k.renk, fontFamily: "'Space Mono',monospace" }}>{Number(k.deger).toLocaleString("tr-TR")}₺</div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -2453,11 +2477,11 @@ export default function AdminPanel() {
     await authFetch(`/api/admin/discount-requests/${id}/reject`, { method: "POST" });
     loadDiscountRequests();
   };
-  const manualDiscountAdd = async ({ authorId, quantity, note }) => {
+  const manualDiscountAdd = async ({ authorId, bookId, quantity, note }) => {
     try {
       const res = await authFetch("/api/admin/discount-manual", {
         method: "POST",
-        body: JSON.stringify({ authorId: parseInt(authorId, 10), quantity, note }),
+        body: JSON.stringify({ authorId: parseInt(authorId, 10), bookId: bookId ? parseInt(bookId, 10) : null, quantity, note }),
       });
       const data = await res.json();
       loadDiscountRequests();
