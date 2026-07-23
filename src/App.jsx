@@ -270,6 +270,9 @@ const PLATFORMS = [
   { key: "pazarama", label: "Pazarama", badgeBg: "#0F2A5C", badgeFg: "#FF2D87" },
 ];
 
+// Yazarın onayını gerektiren adımlar — admin panelden tamamlayamaz
+const ONAY_ADIMLARI = ["kapak", "yazar_onay"];
+
 // API ile senkronlanmayan platformlar — satış ELLE girilir (toplu bildirim gelir)
 const MANUEL_PLATFORMLAR = [
   { key: "kitapyurdu", label: "Kitapyurdu", badgeBg: "#1D7A3C", badgeFg: "#FFFFFF" },
@@ -1913,6 +1916,10 @@ function GorevTakip({ authFetch, onSelectAuthor }) {
   const [veri, setVeri] = useState(null);
   const [yukleniyor, setYukleniyor] = useState(true);
   const [filtre, setFiltre] = useState("surecte"); // surecte | gecikmis | takilan | onay | yayinda | hepsi
+  const [islemde, setIslemde] = useState(null);    // bookId
+  const [msg, setMsg] = useState(null);            // {bookId, ok, text}
+  const [acikKitap, setAcikKitap] = useState(null); // adım listesi açık olan kitap
+  const [yenile, setYenile] = useState(0);
 
   useEffect(() => {
     let iptal = false;
@@ -1922,7 +1929,25 @@ function GorevTakip({ authFetch, onSelectAuthor }) {
       .then((d) => { if (!iptal) { setVeri(d); setYukleniyor(false); } })
       .catch(() => { if (!iptal) { setVeri(null); setYukleniyor(false); } });
     return () => { iptal = true; };
-  }, []);
+  }, [yenile]);
+
+  // Adımı tamamla / belirli adıma taşı
+  const asamayaTasi = async (bookId, stageIndex, adimLabel) => {
+    setIslemde(bookId); setMsg(null);
+    try {
+      const r = await authFetch(`/api/admin/books/${bookId}/stage`, {
+        method: "PATCH", body: JSON.stringify({ stageIndex }),
+      });
+      const d = await r.json();
+      if (d.ok) {
+        setMsg({ bookId, ok: true, text: d.hediye ? `"${adimLabel}" tamamlandı. ${d.hediye}` : `"${adimLabel}" tamamlandı.` });
+        setYenile((n) => n + 1);
+      } else {
+        setMsg({ bookId, ok: false, text: d.error || "İşlem yapılamadı." });
+      }
+    } catch { setMsg({ bookId, ok: false, text: "Sunucuya bağlanılamadı." }); }
+    finally { setIslemde(null); }
+  };
 
   if (yukleniyor) return <div style={{ color: THEME.textMuted, fontSize: 13 }}>Görevler yükleniyor...</div>;
   if (!veri?.ok) return <div style={{ color: THEME.danger, fontSize: 13 }}>Görev listesi alınamadı.</div>;
@@ -2000,7 +2025,7 @@ function GorevTakip({ authFetch, onSelectAuthor }) {
           </div>
 
           {/* Uyarı etiketleri */}
-          <div style={{ display: "flex", gap: 7, flexWrap: "wrap", fontSize: 11 }}>
+          <div style={{ display: "flex", gap: 7, flexWrap: "wrap", fontSize: 11, marginBottom: 8 }}>
             {!k.yayinda && (
               <span style={{ color: k.gecikmis ? THEME.danger : THEME.textMuted }}>
                 {k.gecikmis ? `⚠ ${Math.abs(k.kalanGun)} gün gecikmiş` : `${k.kalanGun} gün kaldı`}
@@ -2011,6 +2036,68 @@ function GorevTakip({ authFetch, onSelectAuthor }) {
             {k.hediyeVerildi && <span style={{ color: THEME.success }}>🎁 Hediye gönderildi</span>}
             {k.redaksiyonIstendi && <span style={{ color: THEME.textMuted }}>📝 Redaksiyon dahil</span>}
           </div>
+
+          {/* İŞLEM BUTONLARI — buradan doğrudan müdahale */}
+          {!k.yayinda && (
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", borderTop: `1px solid ${THEME.divider}`, paddingTop: 9 }}>
+              {k.onayBekliyor ? (
+                <span style={{ fontSize: 11.5, color: THEME.secondary }}>
+                  Bu adımı yazar onaylamalı — panelden tamamlanamaz.
+                </span>
+              ) : (
+                <Btn small variant="success" disabled={islemde === k.bookId}
+                  onClick={() => asamayaTasi(k.bookId, k.aktifAdimIndex, k.aktifAdimLabel)}>
+                  {islemde === k.bookId ? "..." : `✓ "${k.aktifAdimLabel}" Tamamlandı`}
+                </Btn>
+              )}
+              <Btn small variant="ghost" onClick={() => setAcikKitap(acikKitap === k.bookId ? null : k.bookId)}>
+                {acikKitap === k.bookId ? "Adımları gizle" : "Tüm adımlar"}
+              </Btn>
+              <Btn small variant="ghost" onClick={() => onSelectAuthor && onSelectAuthor(k.authorId)}>
+                Yazar detayı
+              </Btn>
+            </div>
+          )}
+
+          {/* TÜM ADIMLAR — istenen adıma doğrudan atlama */}
+          {acikKitap === k.bookId && (
+            <div style={{ marginTop: 10, background: THEME.panelBgAlt, borderRadius: 6, padding: "8px 10px" }}>
+              <div style={{ fontSize: 10.5, color: THEME.textMuted, marginBottom: 6 }}>
+                Bir adıma tıklayarak süreci oraya taşıyabilirsiniz (o adım ve öncesi tamamlanmış sayılır)
+              </div>
+              {(veri.asamalar || []).map((a, i) => {
+                const durum = k.adimlar?.[a.key]?.status || "beklemede";
+                const renk = durum === "tamamlandi" ? THEME.success
+                  : durum === "devam" ? THEME.cyan
+                  : durum === "atlandi" ? THEME.textFaint : THEME.textMuted;
+                const onayli = ONAY_ADIMLARI.includes(a.key);
+                return (
+                  <div key={a.key}
+                    onClick={() => !onayli && islemde !== k.bookId && asamayaTasi(k.bookId, i, a.label)}
+                    style={{
+                      display: "flex", justifyContent: "space-between", alignItems: "center",
+                      padding: "5px 7px", borderRadius: 4, fontSize: 12,
+                      cursor: onayli ? "default" : "pointer",
+                      background: durum === "devam" ? THEME.successBg : "transparent",
+                      opacity: onayli ? 0.65 : 1,
+                    }}>
+                    <span style={{ color: renk }}>
+                      {durum === "tamamlandi" ? "✓" : durum === "devam" ? "▶" : durum === "atlandi" ? "–" : "○"} {i + 1}. {a.label}
+                    </span>
+                    <span style={{ fontSize: 10, color: THEME.textFaint }}>
+                      {onayli ? "yazar onayı" : durum === "atlandi" ? "atlandı" : ""}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {msg && msg.bookId === k.bookId && (
+            <div style={{ marginTop: 8, fontSize: 11.5, padding: "6px 10px", borderRadius: 5,
+              color: msg.ok ? THEME.success : THEME.danger,
+              background: msg.ok ? THEME.successBg : THEME.dangerBg }}>{msg.text}</div>
+          )}
         </div>
       ))}
     </div>
