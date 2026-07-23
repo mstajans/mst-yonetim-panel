@@ -276,10 +276,25 @@ const MANUEL_PLATFORMLAR = [
   { key: "dr", label: "D&R", badgeBg: "#FFFFFF", badgeFg: "#E4032E" },
 ];
 
+// 17 ADIMLI YAYIN SÜRECİ — backend ile birebir aynı sıra
 const PIPELINE_STAGES = [
-  { key: "teslim", label: "Kitap Teslim Alındı" }, { key: "editor", label: "Editör Hizmeti" }, { key: "kapak", label: "Kapak Tasarımı" },
-  { key: "isbn", label: "Bandrol Alımı" }, { key: "sosyal", label: "Sosyal Medya Tanıtımı" }, { key: "baski", label: "Baskı" },
-  { key: "satis", label: "Satışa Sunum" }, { key: "yayin", label: "Yayında" },
+  { key: "teslim", label: "Kitap Teslim Alındı" },
+  { key: "isbn", label: "ISBN Alımı" },
+  { key: "kapak", label: "Kapak Tasarımı", onay: true },
+  { key: "tanitim_video", label: "Tanıtım Videosu (Yakında)" },
+  { key: "editor", label: "Editörlük Süreci" },
+  { key: "bandrol", label: "Bandrol Alımı" },
+  { key: "redaksiyon", label: "Redaksiyon", opsiyonel: true },
+  { key: "mizanpaj", label: "Mizanpaj / Baskıya Hazırlık" },
+  { key: "yazar_onay", label: "Yazar Onayı (Kapak + Editörlük)", onay: true },
+  { key: "baskiya_gonderim", label: "Baskıya Gönderim" },
+  { key: "satis_video", label: "Satış Videosu Hazırlığı" },
+  { key: "on_satis", label: "Ön Satışa Açılma" },
+  { key: "depo_giris", label: "Matbaadan Depoya Giriş" },
+  { key: "hediye_gonderim", label: "Hediye Kitap Gönderimi" },
+  { key: "normal_satis", label: "Normal Satışa Açılma" },
+  { key: "dagitim", label: "Dağıtım Ağlarına Yükleme" },
+  { key: "yayin", label: "Yayında" },
 ];
 
 function clonePipeline() {
@@ -1892,6 +1907,116 @@ function CredentialsPanel({ author, onSave, flash, onClose }) {
   );
 }
 
+// ============ GÖREV TAKİP (CRM) ============
+// Tüm kitapların bekleyen işleri tek ekranda: kim nerede takıldı, ne gecikti?
+function GorevTakip({ authFetch, onSelectAuthor }) {
+  const [veri, setVeri] = useState(null);
+  const [yukleniyor, setYukleniyor] = useState(true);
+  const [filtre, setFiltre] = useState("surecte"); // surecte | gecikmis | takilan | onay | yayinda | hepsi
+
+  useEffect(() => {
+    let iptal = false;
+    setYukleniyor(true);
+    authFetch("/api/admin/gorev-takip")
+      .then((r) => r.json())
+      .then((d) => { if (!iptal) { setVeri(d); setYukleniyor(false); } })
+      .catch(() => { if (!iptal) { setVeri(null); setYukleniyor(false); } });
+    return () => { iptal = true; };
+  }, []);
+
+  if (yukleniyor) return <div style={{ color: THEME.textMuted, fontSize: 13 }}>Görevler yükleniyor...</div>;
+  if (!veri?.ok) return <div style={{ color: THEME.danger, fontSize: 13 }}>Görev listesi alınamadı.</div>;
+
+  const { kitaplar = [], ozet = {}, hedefSure = 30 } = veri;
+  const filtreli = kitaplar.filter((k) => {
+    if (filtre === "hepsi") return true;
+    if (filtre === "surecte") return !k.yayinda;
+    if (filtre === "gecikmis") return k.gecikmis;
+    if (filtre === "takilan") return k.takildi;
+    if (filtre === "onay") return k.onayBekliyor;
+    if (filtre === "yayinda") return k.yayinda;
+    return true;
+  });
+
+  const kart = (etiket, deger, renk, key) => (
+    <div onClick={() => setFiltre(key)} style={{
+      background: filtre === key ? renk : THEME.panelBg,
+      border: `1px solid ${filtre === key ? renk : THEME.border}`,
+      borderRadius: 8, padding: "10px 12px", cursor: "pointer", flex: 1, minWidth: 96,
+    }}>
+      <div style={{ fontSize: 10, color: filtre === key ? THEME.onAccent : THEME.textMuted, marginBottom: 3 }}>{etiket}</div>
+      <div style={{ fontSize: 19, fontWeight: 700, fontFamily: FONT_MONO, color: filtre === key ? THEME.onAccent : renk }}>{deger}</div>
+    </div>
+  );
+
+  return (
+    <div>
+      <h2 style={{ color: THEME.textLight, fontFamily: FONT, fontSize: 20, margin: "0 0 4px" }}>Görev Takip</h2>
+      <div style={{ fontSize: 12, color: THEME.textMuted, marginBottom: 14 }}>
+        Yayın süreci {veri.asamalar?.length || 17} adımdan oluşur · hedef süre {hedefSure} gün
+      </div>
+
+      <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
+        {kart("SÜREÇTE", ozet.surecte || 0, THEME.cyan, "surecte")}
+        {kart("GECİKMİŞ", ozet.gecikmis || 0, THEME.danger, "gecikmis")}
+        {kart("TAKILAN", ozet.takilan || 0, THEME.warn, "takilan")}
+        {kart("ONAY BEKLİYOR", ozet.onayBekleyen || 0, THEME.secondary, "onay")}
+        {kart("YAYINDA", ozet.yayinda || 0, THEME.success, "yayinda")}
+        {kart("TÜMÜ", ozet.toplam || 0, THEME.textMuted, "hepsi")}
+      </div>
+
+      {filtreli.length === 0 ? (
+        <div style={{ background: THEME.panelBg, border: `1px solid ${THEME.border}`, borderRadius: 8, padding: "22px 16px", textAlign: "center", color: THEME.textMuted, fontSize: 13 }}>
+          Bu filtrede kitap yok.
+        </div>
+      ) : filtreli.map((k) => (
+        <div key={k.bookId} style={{
+          background: THEME.panelBg,
+          border: `1px solid ${k.gecikmis ? THEME.danger : k.takildi ? THEME.warn : THEME.border}`,
+          borderLeft: `4px solid ${k.yayinda ? THEME.success : k.gecikmis ? THEME.danger : k.takildi ? THEME.warn : THEME.cyan}`,
+          borderRadius: 8, padding: "12px 14px", marginBottom: 10,
+        }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, flexWrap: "wrap" }}>
+            <div style={{ flex: "1 1 240px" }}>
+              <div style={{ fontSize: 14.5, fontWeight: 700, color: THEME.textLight }}>{k.title}</div>
+              <div style={{ fontSize: 12, color: THEME.textMuted, marginTop: 2 }}>
+                <span onClick={() => onSelectAuthor && onSelectAuthor(k.authorId)} style={{ color: THEME.cyan, cursor: "pointer" }}>{k.yazar}</span>
+                {" · "}{String(k.plan || "").toUpperCase()}
+              </div>
+            </div>
+            <div style={{ textAlign: "right" }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: k.yayinda ? THEME.success : THEME.textLight }}>
+                {k.aktifAdimLabel}
+              </div>
+              <div style={{ fontSize: 11, color: THEME.textMuted, marginTop: 2 }}>
+                {k.tamamlanan}/{k.toplamAdim} adım · %{k.yuzde}
+              </div>
+            </div>
+          </div>
+
+          {/* İlerleme çubuğu */}
+          <div style={{ height: 6, background: THEME.panelBgAlt, borderRadius: 3, overflow: "hidden", margin: "10px 0 8px" }}>
+            <div style={{ height: "100%", width: `${k.yuzde}%`, background: k.yayinda ? THEME.success : k.gecikmis ? THEME.danger : THEME.cyan }} />
+          </div>
+
+          {/* Uyarı etiketleri */}
+          <div style={{ display: "flex", gap: 7, flexWrap: "wrap", fontSize: 11 }}>
+            {!k.yayinda && (
+              <span style={{ color: k.gecikmis ? THEME.danger : THEME.textMuted }}>
+                {k.gecikmis ? `⚠ ${Math.abs(k.kalanGun)} gün gecikmiş` : `${k.kalanGun} gün kaldı`}
+              </span>
+            )}
+            {k.takildi && <span style={{ color: THEME.warn, fontWeight: 600 }}>⏸ {k.adimGun} gündür aynı adımda</span>}
+            {k.onayBekliyor && <span style={{ color: THEME.secondary, fontWeight: 600 }}>✋ Yazar onayı bekliyor</span>}
+            {k.hediyeVerildi && <span style={{ color: THEME.success }}>🎁 Hediye gönderildi</span>}
+            {k.redaksiyonIstendi && <span style={{ color: THEME.textMuted }}>📝 Redaksiyon dahil</span>}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // ============ İndirimli & Hediye Kayıtları Paneli ============
 // Yazar detayında: hangi kitap, kaç adet, hediye mi indirimli mi, neden verildi.
 function IndirimliHediyePanel({ author, authFetch }) {
@@ -2954,7 +3079,7 @@ export default function AdminPanel() {
   };
 
   const nav = [
-    ["overview", "Genel Bakış"], ["authors", "Yazarlar"], ["discounts", "Hediye & İndirimli"],
+    ["overview", "Genel Bakış"], ["gorevTakip", "Görev Takip"], ["authors", "Yazarlar"], ["discounts", "Hediye & İndirimli"],
     ["indirimliOzet", "Hediye & İnd. Özet"],
     ["orders", "Mağaza Siparişleri"], ["ads", "Reklam Talepleri"], ["translations", "Çeviri Talepleri"],
     ["destek", "Destek & Şikayet"], ["duyurular", "Duyurular"], ["meta", "Meta Reklam"],
@@ -3067,6 +3192,7 @@ export default function AdminPanel() {
         {view === "discounts" && (
           <DiscountRequests requests={discountRequests} loading={loadingDiscounts} onApprove={approveDiscount} onReject={rejectDiscount} authors={authors} onManualAdd={manualDiscountAdd} />
         )}
+        {view === "gorevTakip" && <GorevTakip authFetch={authFetch} onSelectAuthor={(id) => { setView("authors"); setSelectedId(id); }} />}
         {view === "indirimliOzet" && <IndirimliOzet session={session} authFetch={authFetch} />}
         {view === "orders" && <ServiceOrdersView orders={serviceOrders} loading={loadingOrders} onUpdateStatus={updateOrderStatus} />}
         {view === "ads" && <AdRequestsView requests={adRequests} loading={loadingAdRequests} onUpdateStatus={updateAdRequestStatus} />}
