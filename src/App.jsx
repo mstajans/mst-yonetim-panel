@@ -270,6 +270,12 @@ const PLATFORMS = [
   { key: "pazarama", label: "Pazarama", badgeBg: "#0F2A5C", badgeFg: "#FF2D87" },
 ];
 
+// API ile senkronlanmayan platformlar — satış ELLE girilir (toplu bildirim gelir)
+const MANUEL_PLATFORMLAR = [
+  { key: "kitapyurdu", label: "Kitapyurdu", badgeBg: "#1D7A3C", badgeFg: "#FFFFFF" },
+  { key: "dr", label: "D&R", badgeBg: "#FFFFFF", badgeFg: "#E4032E" },
+];
+
 const PIPELINE_STAGES = [
   { key: "teslim", label: "Kitap Teslim Alındı" }, { key: "editor", label: "Editör Hizmeti" }, { key: "kapak", label: "Kapak Tasarımı" },
   { key: "isbn", label: "Bandrol Alımı" }, { key: "sosyal", label: "Sosyal Medya Tanıtımı" }, { key: "baski", label: "Baskı" },
@@ -551,7 +557,7 @@ function IndirimliOzet({ session, authFetch }) {
   const toplam = ozet.reduce((s, o) => s + Number(o.toplam_indirimli_adet || 0), 0);
   return (
     <div>
-      <h2 style={{ color: THEME.textLight, fontFamily: FONT, fontSize: 20, marginBottom: 6 }}>İndirimli Alım Özeti</h2>
+      <h2 style={{ color: THEME.textLight, fontFamily: FONT, fontSize: 20, marginBottom: 6 }}>Hediye & İndirimli Alım Özeti</h2>
       <div style={{ color: THEME.textMuted, fontSize: 12.5, marginBottom: 18 }}>
         Bu adetler yazarların telif, puan ve ödül hesabına <b>sayılmaz</b>. Toplam indirimli: <b style={{ color: THEME.cyan }}>{toplam} adet</b>
       </div>
@@ -607,11 +613,11 @@ function DiscountRequests({ requests, loading, onApprove, onReject, authors, onM
 
   return (
     <div>
-      <h2 style={{ color: THEME.textLight, fontFamily: FONT, fontSize: 20, marginBottom: 18 }}>İndirimli Kitap Talepleri</h2>
+      <h2 style={{ color: THEME.textLight, fontFamily: FONT, fontSize: 20, marginBottom: 18 }}>Hediye Gönderim & İndirimli Talepler</h2>
 
       {/* MANUEL GİRİŞ — telefon/yüz yüze indirimli satışlar için */}
       <div style={{ background: THEME.panelBg, border: `1px solid ${THEME.cyan}`, borderRadius: 10, padding: 18, marginBottom: 22 }}>
-        <div style={{ color: THEME.cyan, fontWeight: 700, fontSize: 14, marginBottom: 4 }}>+ Manuel İndirimli Alım Girişi</div>
+        <div style={{ color: THEME.cyan, fontWeight: 700, fontSize: 14, marginBottom: 4 }}>+ Manuel Hediye / İndirimli Alım Girişi</div>
         <div style={{ color: THEME.textMuted, fontSize: 12, marginBottom: 14 }}>
           Telefon/yüz yüze indirimli satılan kitapları buradan gir. Bu adetler yazarın telif, puan ve ödül hesabına <b>sayılmaz</b> (çifte kazanç önlenir).
         </div>
@@ -2236,6 +2242,25 @@ function CuzdanGecmisi({ authorId, authFetch }) {
 function AuthorDetail({ author, onBack, onAdvanceStage, onApproveCover, onEditStock, onApprovePayment, onRejectPayment, onEditIsbn, onEditCover, onSyncStock, onAddBook, onDeleteAuthor, onUpdateCredentials, onPayout, onUpdateRoyalty, onUpdateWallet, onUpdateContract, onUpdateMatching, onUpdateMaliyet, authFetch }) {
   const [editingStock, setEditingStock] = useState(null); // {bookId, key}
   const [stockDraft, setStockDraft] = useState("");
+  // Manuel satış girişi (D&R / Kitapyurdu)
+  const [editingManuel, setEditingManuel] = useState(null); // {bookId, key}
+  const [manuelDraft, setManuelDraft] = useState("");
+  const [manuelMsg, setManuelMsg] = useState(null);
+
+  const manuelSatisKaydet = async (bookId, platform, satis) => {
+    setManuelMsg(null);
+    try {
+      const r = await authFetch(`/api/admin/books/${bookId}/manuel-satis`, {
+        method: "PATCH", body: JSON.stringify({ platform, satis }),
+      });
+      const d = await r.json();
+      if (d.ok) {
+        setManuelMsg({ bookId, ok: true, text: d.mesaj || "Kaydedildi." });
+        setTimeout(() => window.location.reload(), 900);
+      } else setManuelMsg({ bookId, ok: false, text: d.error || "Kaydedilemedi." });
+    } catch { setManuelMsg({ bookId, ok: false, text: "Sunucuya bağlanılamadı." }); }
+  };
+
   // Dekont geri alma (yanlış onaylanan ödemeler için)
   const [dekontGeriAl, setDekontGeriAl] = useState(null); // receipt id
   const [dekontSebep, setDekontSebep] = useState("");
@@ -2586,6 +2611,45 @@ function AuthorDetail({ author, onBack, onAdvanceStage, onApproveCover, onEditSt
                 );
               })}
             </div>
+
+            {/* MANUEL SATIŞ GİRİŞİ — D&R ve Kitapyurdu (API senkronu yok, toplu bildirim gelir) */}
+            <div style={{ marginTop: 12, background: THEME.warnBg, border: `1px solid ${THEME.warn}`, borderRadius: 6, padding: "10px 12px" }}>
+              <div style={{ fontSize: 10.5, color: THEME.warn, marginBottom: 3, fontWeight: 600 }}>
+                MANUEL SATIŞ GİRİŞİ — D&R / KİTAPYURDU
+              </div>
+              <div style={{ fontSize: 11, color: THEME.textMuted, marginBottom: 8, lineHeight: 1.5 }}>
+                Bu platformlar otomatik senkronlanmaz. Toplu bildirim geldiğinde <b>toplam satış adedini</b> girin
+                (ekleme değil, güncel toplam).
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                {MANUEL_PLATFORMLAR.map((p) => {
+                  const isEditing = editingManuel && editingManuel.bookId === book.id && editingManuel.key === p.key;
+                  return (
+                    <div key={p.key} style={{ background: THEME.panelBg, border: `1px solid ${THEME.border}`, borderRadius: 6, padding: "8px 10px", textAlign: "center" }}>
+                      <div style={{ fontSize: 9.5, color: THEME.textMuted, marginBottom: 4 }}>{p.label}</div>
+                      {isEditing ? (
+                        <input
+                          autoFocus type="number" min="0" value={manuelDraft}
+                          onChange={(e) => setManuelDraft(e.target.value)}
+                          onBlur={() => { manuelSatisKaydet(book.id, p.key, Number(manuelDraft) || 0); setEditingManuel(null); }}
+                          onKeyDown={(e) => { if (e.key === "Enter") e.target.blur(); }}
+                          style={{ width: "100%", background: THEME.panelBgAlt, color: THEME.textLight, border: `1px solid ${THEME.warn}`, borderRadius: 4, textAlign: "center", fontSize: 14, fontFamily: FONT_MONO }}
+                        />
+                      ) : (
+                        <div onClick={() => { setEditingManuel({ bookId: book.id, key: p.key }); setManuelDraft(String(book.stock?.[p.key] ?? 0)); }}
+                          style={{ fontFamily: FONT_MONO, fontSize: 16, fontWeight: 700, color: THEME.textLight, cursor: "pointer" }}>
+                          {book.stock?.[p.key] ?? 0}
+                          <span style={{ fontSize: 9.5, color: THEME.textFaint, fontWeight: 400, marginLeft: 4 }}>satış</span>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+              {manuelMsg && manuelMsg.bookId === book.id && (
+                <div style={{ marginTop: 7, fontSize: 11.5, color: manuelMsg.ok ? THEME.success : THEME.danger }}>{manuelMsg.text}</div>
+              )}
+            </div>
           </div>
         );
       })}
@@ -2890,8 +2954,8 @@ export default function AdminPanel() {
   };
 
   const nav = [
-    ["overview", "Genel Bakış"], ["authors", "Yazarlar"], ["discounts", "İndirimli Talepler"],
-    ["indirimliOzet", "İndirimli Özet"],
+    ["overview", "Genel Bakış"], ["authors", "Yazarlar"], ["discounts", "Hediye & İndirimli"],
+    ["indirimliOzet", "Hediye & İnd. Özet"],
     ["orders", "Mağaza Siparişleri"], ["ads", "Reklam Talepleri"], ["translations", "Çeviri Talepleri"],
     ["destek", "Destek & Şikayet"], ["duyurular", "Duyurular"], ["meta", "Meta Reklam"],
     ["oyun", "Görev & Ödül"],
