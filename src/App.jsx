@@ -3,25 +3,36 @@ import React, { useState, useEffect } from "react";
 const BACKEND_URL = "https://mst-backend-mauve.vercel.app";
 
 // ============ Ortak tema (mobil yazar uygulamasıyla aynı marka dili) ============
+// ============================================================
+// AÇIK TEMA — modern, yüksek okunabilirlik
+// Not: Anahtar isimleri (cyan, textLight vb.) eskiden kalma;
+// değerleri açık temaya göre yeniden tanımlandı. İsimleri
+// değiştirmedim ki kodun tamamı çalışmaya devam etsin.
+// ============================================================
 const THEME = {
-  bg: "#03040A",
-  panelBg: "#0B0F1C",
-  panelBgAlt: "#0E1424",
-  sidebarBg: "#080B14",
-  border: "#1C2438",
-  divider: "#161C2E",
-  cyan: "#7CE7FF",
-  secondary: "#B25CFF",
-  textLight: "#EAF2FF",
-  textMuted: "#7683A6",
-  textFaint: "#4A5578",
-  success: "#59E39D",
-  successBg: "rgba(89,227,157,0.12)",
-  warn: "#FF8A3D",
-  warnBg: "rgba(255,138,61,0.12)",
-  danger: "#FF6B6B",
-  dangerBg: "rgba(255,107,107,0.12)",
+  bg: "#F1F3F7",           // sayfa zemini — yumuşak gri
+  panelBg: "#FFFFFF",      // kart/panel zemini — beyaz
+  panelBgAlt: "#F7F9FC",   // input/ikincil zemin
+  sidebarBg: "#FFFFFF",    // sol menü — beyaz
+  border: "#D8DEE9",       // kenarlık — belirgin ama yumuşak
+  divider: "#E8ECF3",      // ince ayırıcı
+  cyan: "#1B5FA8",         // ANA VURGU — kurumsal mavi (buton, aktif menü)
+  secondary: "#6B4BA8",    // ikincil vurgu — mor
+  textLight: "#16202E",    // ANA METİN — koyu, yüksek kontrast
+  textMuted: "#55637A",    // ikincil metin — okunaklı gri
+  textFaint: "#8593A8",    // soluk metin (etiketler)
+  success: "#1B7F4B",      // başarı — koyu yeşil (okunaklı)
+  successBg: "rgba(27,127,75,0.10)",
+  warn: "#A66A00",         // uyarı — koyu amber (okunaklı)
+  warnBg: "rgba(166,106,0,0.10)",
+  danger: "#B3261E",       // hata — koyu kırmızı
+  dangerBg: "rgba(179,38,30,0.10)",
+  onAccent: "#FFFFFF",     // vurgu rengi üzerindeki metin
 };
+
+// Tüm panelde kullanılacak yazı tipi
+const FONT = "Arial, 'Helvetica Neue', Helvetica, sans-serif";
+const FONT_MONO = "'Consolas', 'Courier New', monospace";
 
 // Bildirim türlerine göre ikonlar
 const BILDIRIM_IKON = {
@@ -185,7 +196,7 @@ function OzetKartlar({ spend = 0, impressions = 0, clicks = 0, conversions = 0, 
       {kartlar.map((k, i) => (
         <div key={i} style={{ background: C.panel, border: `1px solid ${C.grid}`, borderRadius: 10, padding: "12px 14px" }}>
           <div style={{ fontSize: 10.5, color: C.muted, marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.4 }}>{k.etiket}</div>
-          <div style={{ fontSize: 20, fontWeight: 800, color: k.renk, fontFamily: "monospace", lineHeight: 1 }}>{k.deger}</div>
+          <div style={{ fontSize: 20, fontWeight: 800, color: k.renk, fontFamily: FONT_MONO, lineHeight: 1 }}>{k.deger}</div>
           <div style={{ fontSize: 10, color: C.faint, marginTop: 4 }}>{k.alt}</div>
         </div>
       ))}
@@ -252,7 +263,7 @@ function ReklamDashboard({ kampanyalar = [], C, baslik = "Reklam Performansı" }
 
 
 const PLATFORMS = [
-  { key: "mst", label: "MST Yayıncılık", badgeBg: THEME.cyan, badgeFg: "#0A0E1A" },
+  { key: "mst", label: "MST Yayıncılık", badgeBg: THEME.cyan, badgeFg: THEME.onAccent },
   { key: "trendyol", label: "Trendyol", badgeBg: "#0A0A0A", badgeFg: "#FF6A00" },
   { key: "n11", label: "N11", badgeBg: "#5B21B6", badgeFg: "#FFFFFF" },
   { key: "hepsiburada", label: "Hepsiburada", badgeBg: "#FFFFFF", badgeFg: "#FF6000" },
@@ -309,7 +320,7 @@ function Badge({ children, fg, bg }) {
 
 function Btn({ children, onClick, variant = "primary", small, disabled }) {
   const styles = {
-    primary: { bg: THEME.cyan, fg: "#0A0E1A" },
+    primary: { bg: THEME.cyan, fg: THEME.onAccent },
     ghost: { bg: "transparent", fg: THEME.textLight, border: `1px solid ${THEME.border}` },
     danger: { bg: THEME.dangerBg, fg: THEME.danger, border: `1px solid rgba(255,107,107,.3)` },
     success: { bg: THEME.successBg, fg: THEME.success, border: `1px solid rgba(89,227,157,.3)` },
@@ -360,9 +371,9 @@ function AdminLogin({ onLogin }) {
   };
 
   return (
-    <div style={{ minHeight: "100vh", background: THEME.bg, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'Manrope',sans-serif" }}>
+    <div style={{ minHeight: "100vh", background: THEME.bg, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: FONT }}>
       <div style={{ width: 360, background: THEME.panelBg, border: `1px solid ${THEME.border}`, borderRadius: 10, padding: 28 }}>
-        <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 20, fontWeight: 800, color: THEME.textLight, marginBottom: 2 }}>MST Yayıncılık</div>
+        <div style={{ fontFamily: FONT, fontSize: 20, fontWeight: 800, color: THEME.textLight, marginBottom: 2 }}>MST Yayıncılık</div>
         <div style={{ fontSize: 12, color: THEME.textMuted, marginBottom: 22, letterSpacing: "0.05em" }}>YÖNETİM PANELİ</div>
         <Field label="E-POSTA">
           <input style={inputStyle} value={email} onChange={(e) => setEmail(e.target.value)} placeholder="admin@mstyayincilik.com" onKeyDown={(e) => e.key === "Enter" && submit()} />
@@ -417,7 +428,7 @@ function Overview({ authors, onSyncAll }) {
   return (
     <div>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12, marginBottom: 18 }}>
-        <h2 style={{ color: THEME.textLight, fontFamily: "'Space Grotesk',sans-serif", fontSize: 20, margin: 0 }}>Genel Bakış</h2>
+        <h2 style={{ color: THEME.textLight, fontFamily: FONT, fontSize: 20, margin: 0 }}>Genel Bakış</h2>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           {syncMsg && (
             <span style={{ fontSize: 12, color: syncMsg.ok ? THEME.gold : THEME.warn, maxWidth: 320 }}>{syncMsg.text}</span>
@@ -433,7 +444,7 @@ function Overview({ authors, onSyncAll }) {
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 12 }}>
         {cards.map((c) => (
           <div key={c.label} style={{ background: THEME.panelBg, border: `1px solid ${c.warn ? "rgba(255,138,61,.35)" : THEME.border}`, borderRadius: 8, padding: 16 }}>
-            <div style={{ fontSize: 24, fontWeight: 800, fontFamily: "'Space Mono',monospace", color: c.warn ? THEME.warn : THEME.textLight }}>{c.value}</div>
+            <div style={{ fontSize: 24, fontWeight: 800, fontFamily: FONT_MONO, color: c.warn ? THEME.warn : THEME.textLight }}>{c.value}</div>
             <div style={{ fontSize: 10.5, color: THEME.textMuted, marginTop: 4, letterSpacing: "0.04em" }}>{c.label}</div>
           </div>
         ))}
@@ -486,11 +497,11 @@ function KullaniciYonetimi({ authFetch }) {
     else setMsg({ ok: false, text: d.error });
   };
 
-  const inp = { width: "100%", boxSizing: "border-box", padding: "9px 11px", borderRadius: 7, border: `1px solid ${THEME.border}`, background: THEME.panelBgAlt || "#1a2332", color: THEME.textLight, fontSize: 13, marginBottom: 8 };
+  const inp = { width: "100%", boxSizing: "border-box", padding: "9px 11px", borderRadius: 7, border: `1px solid ${THEME.border}`, background: THEME.panelBgAlt, color: THEME.textLight, fontSize: 13, marginBottom: 8 };
 
   return (
     <div>
-      <h2 style={{ color: THEME.textLight, fontFamily: "'Space Grotesk',sans-serif", fontSize: 20, marginBottom: 18 }}>Kullanıcı Yönetimi</h2>
+      <h2 style={{ color: THEME.textLight, fontFamily: FONT, fontSize: 20, marginBottom: 18 }}>Kullanıcı Yönetimi</h2>
       {msg && <div style={{ marginBottom: 16, fontSize: 13, color: msg.ok ? THEME.success : THEME.danger, background: THEME.panelBg, border: `1px solid ${msg.ok ? THEME.success : THEME.danger}`, borderRadius: 8, padding: "10px 14px" }}>{msg.text}</div>}
 
       {/* Mevcut adminler */}
@@ -540,7 +551,7 @@ function IndirimliOzet({ session, authFetch }) {
   const toplam = ozet.reduce((s, o) => s + Number(o.toplam_indirimli_adet || 0), 0);
   return (
     <div>
-      <h2 style={{ color: THEME.textLight, fontFamily: "'Space Grotesk',sans-serif", fontSize: 20, marginBottom: 6 }}>İndirimli Alım Özeti</h2>
+      <h2 style={{ color: THEME.textLight, fontFamily: FONT, fontSize: 20, marginBottom: 6 }}>İndirimli Alım Özeti</h2>
       <div style={{ color: THEME.textMuted, fontSize: 12.5, marginBottom: 18 }}>
         Bu adetler yazarların telif, puan ve ödül hesabına <b>sayılmaz</b>. Toplam indirimli: <b style={{ color: THEME.cyan }}>{toplam} adet</b>
       </div>
@@ -558,7 +569,7 @@ function IndirimliOzet({ session, authFetch }) {
               {o.talep_sayisi} kayıt{o.son_alim ? ` · son: ${new Date(o.son_alim).toLocaleDateString("tr-TR")}` : ""}
             </div>
           </div>
-          <div style={{ color: THEME.cyan, fontFamily: "'Space Mono',monospace", fontSize: 16, fontWeight: 700 }}>{o.toplam_indirimli_adet} adet</div>
+          <div style={{ color: THEME.cyan, fontFamily: FONT_MONO, fontSize: 16, fontWeight: 700 }}>{o.toplam_indirimli_adet} adet</div>
         </div>
       ))}
     </div>
@@ -570,6 +581,8 @@ function DiscountRequests({ requests, loading, onApprove, onReject, authors, onM
   const [mAuthor, setMAuthor] = React.useState("");
   const [mBook, setMBook] = React.useState("");
   const [mQty, setMQty] = React.useState("");
+  const [mTur, setMTur] = React.useState("indirimli");
+  const [mSebep, setMSebep] = React.useState("");
   const [mNote, setMNote] = React.useState("");
   const [mMsg, setMMsg] = React.useState(null);
   const [saving, setSaving] = React.useState(false);
@@ -580,12 +593,12 @@ function DiscountRequests({ requests, loading, onApprove, onReject, authors, onM
 
   const kaydet = async () => {
     if (!mAuthor) { setMMsg({ ok: false, text: "Yazar seçin." }); return; }
-    if (!mBook) { setMMsg({ ok: false, text: "Kitap seçin. İndirimli alım hangi kitaba ait olduğu belirtilmeli." }); return; }
+    if (!mBook) { setMMsg({ ok: false, text: "Kitap seçin. Kayıt hangi kitaba ait olduğu belirtilmeli." }); return; }
     if (!mQty) { setMMsg({ ok: false, text: "Adet girin." }); return; }
     setSaving(true); setMMsg(null);
-    const r = await onManualAdd({ authorId: mAuthor, bookId: mBook, quantity: parseInt(mQty, 10), note: mNote });
+    const r = await onManualAdd({ authorId: mAuthor, bookId: mBook, quantity: parseInt(mQty, 10), note: mNote, tur: mTur, sebep: mSebep });
     setSaving(false);
-    if (r?.ok) { setMMsg({ ok: true, text: r.mesaj || "Kaydedildi." }); setMQty(""); setMNote(""); setMAuthor(""); setMBook(""); }
+    if (r?.ok) { setMMsg({ ok: true, text: r.mesaj || "Kaydedildi." }); setMQty(""); setMNote(""); setMSebep(""); setMAuthor(""); setMBook(""); }
     else setMMsg({ ok: false, text: r?.error || "Kaydedilemedi." });
   };
 
@@ -594,7 +607,7 @@ function DiscountRequests({ requests, loading, onApprove, onReject, authors, onM
 
   return (
     <div>
-      <h2 style={{ color: THEME.textLight, fontFamily: "'Space Grotesk',sans-serif", fontSize: 20, marginBottom: 18 }}>İndirimli Kitap Talepleri</h2>
+      <h2 style={{ color: THEME.textLight, fontFamily: FONT, fontSize: 20, marginBottom: 18 }}>İndirimli Kitap Talepleri</h2>
 
       {/* MANUEL GİRİŞ — telefon/yüz yüze indirimli satışlar için */}
       <div style={{ background: THEME.panelBg, border: `1px solid ${THEME.cyan}`, borderRadius: 10, padding: 18, marginBottom: 22 }}>
@@ -605,27 +618,44 @@ function DiscountRequests({ requests, loading, onApprove, onReject, authors, onM
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
           <div style={{ flex: "2 1 200px" }}>
             <label style={{ color: THEME.textMuted, fontSize: 11, display: "block", marginBottom: 4 }}>Yazar</label>
-            <select value={mAuthor} onChange={(e) => setMAuthor(e.target.value)} style={{ width: "100%", padding: "9px 10px", borderRadius: 7, border: `1px solid ${THEME.border}`, background: THEME.panelBgAlt || "#1a2332", color: THEME.textLight, fontSize: 13 }}>
+            <select value={mAuthor} onChange={(e) => setMAuthor(e.target.value)} style={{ width: "100%", padding: "9px 10px", borderRadius: 7, border: `1px solid ${THEME.border}`, background: THEME.panelBgAlt, color: THEME.textLight, fontSize: 13 }}>
               <option value="">Yazar seç...</option>
               {(authors || []).map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
             </select>
           </div>
           <div style={{ flex: "2 1 200px" }}>
             <label style={{ color: THEME.textMuted, fontSize: 11, display: "block", marginBottom: 4 }}>Kitap</label>
-            <select value={mBook} onChange={(e) => setMBook(e.target.value)} disabled={!mAuthor} style={{ width: "100%", padding: "9px 10px", borderRadius: 7, border: `1px solid ${THEME.border}`, background: THEME.panelBgAlt || "#1a2332", color: mAuthor ? THEME.textLight : THEME.textFaint, fontSize: 13 }}>
+            <select value={mBook} onChange={(e) => setMBook(e.target.value)} disabled={!mAuthor} style={{ width: "100%", padding: "9px 10px", borderRadius: 7, border: `1px solid ${THEME.border}`, background: THEME.panelBgAlt, color: mAuthor ? THEME.textLight : THEME.textFaint, fontSize: 13 }}>
               <option value="">{mAuthor ? (yazarKitaplari.length ? "Kitap seç..." : "Bu yazarın kitabı yok") : "Önce yazar seçin"}</option>
               {yazarKitaplari.map((b) => <option key={b.id} value={b.id}>{b.title}</option>)}
             </select>
           </div>
           <div style={{ flex: "1 1 90px" }}>
             <label style={{ color: THEME.textMuted, fontSize: 11, display: "block", marginBottom: 4 }}>Adet</label>
-            <input type="number" min="1" value={mQty} onChange={(e) => setMQty(e.target.value)} placeholder="0" style={{ width: "100%", boxSizing: "border-box", padding: "9px 10px", borderRadius: 7, border: `1px solid ${THEME.border}`, background: THEME.panelBgAlt || "#1a2332", color: THEME.textLight, fontSize: 13 }} />
+            <input type="number" min="1" value={mQty} onChange={(e) => setMQty(e.target.value)} placeholder="0" style={{ width: "100%", boxSizing: "border-box", padding: "9px 10px", borderRadius: 7, border: `1px solid ${THEME.border}`, background: THEME.panelBgAlt, color: THEME.textLight, fontSize: 13 }} />
+          </div>
+          <div style={{ flex: "1 1 130px" }}>
+            <label style={{ color: THEME.textMuted, fontSize: 11, display: "block", marginBottom: 4 }}>Tür</label>
+            <select value={mTur} onChange={(e) => setMTur(e.target.value)} style={{ width: "100%", padding: "9px 10px", borderRadius: 7, border: `1px solid ${mTur === "hediye" ? THEME.warn : THEME.border}`, background: THEME.panelBgAlt, color: THEME.textLight, fontSize: 13, fontWeight: 600 }}>
+              <option value="indirimli">🏷️ İndirimli</option>
+              <option value="hediye">🎁 Hediye</option>
+            </select>
+          </div>
+          <div style={{ flex: "2 1 160px" }}>
+            <label style={{ color: THEME.textMuted, fontSize: 11, display: "block", marginBottom: 4 }}>Sebep</label>
+            <input value={mSebep} onChange={(e) => setMSebep(e.target.value)} placeholder={mTur === "hediye" ? "Örn: fuar standı" : "Örn: yazar talebi"} style={{ width: "100%", boxSizing: "border-box", padding: "9px 10px", borderRadius: 7, border: `1px solid ${THEME.border}`, background: THEME.panelBgAlt, color: THEME.textLight, fontSize: 13 }} />
           </div>
           <div style={{ flex: "2 1 160px" }}>
             <label style={{ color: THEME.textMuted, fontSize: 11, display: "block", marginBottom: 4 }}>Not (opsiyonel)</label>
-            <input value={mNote} onChange={(e) => setMNote(e.target.value)} placeholder="Örn: imza günü" style={{ width: "100%", boxSizing: "border-box", padding: "9px 10px", borderRadius: 7, border: `1px solid ${THEME.border}`, background: THEME.panelBgAlt || "#1a2332", color: THEME.textLight, fontSize: 13 }} />
+            <input value={mNote} onChange={(e) => setMNote(e.target.value)} placeholder="Örn: imza günü" style={{ width: "100%", boxSizing: "border-box", padding: "9px 10px", borderRadius: 7, border: `1px solid ${THEME.border}`, background: THEME.panelBgAlt, color: THEME.textLight, fontSize: 13 }} />
           </div>
           <Btn small variant="success" onClick={kaydet} disabled={saving}>{saving ? "..." : "Kaydet"}</Btn>
+        </div>
+        {/* Türün telife etkisi — yanlış giriş yapılmasın diye açıkça yazıyoruz */}
+        <div style={{ marginTop: 8, fontSize: 11.5, color: mTur === "hediye" ? THEME.warn : THEME.textMuted, background: mTur === "hediye" ? THEME.warnBg : "transparent", padding: mTur === "hediye" ? "6px 10px" : 0, borderRadius: 6 }}>
+          {mTur === "hediye"
+            ? "🎁 Hediye: Telif hesabından düşülür (gerçek satış değil). Stoğu MST sitesinden ELLE düşmeyi unutmayın."
+            : "🏷️ İndirimli: Telif hesabından düşülür. Stoğu MST sitesinden elle düşmeyi unutmayın."}
         </div>
         {mMsg && <div style={{ marginTop: 10, fontSize: 12.5, color: mMsg.ok ? THEME.success : THEME.danger }}>{mMsg.text}</div>}
       </div>
@@ -642,7 +672,7 @@ function DiscountRequests({ requests, loading, onApprove, onReject, authors, onM
           <div>
             <div style={{ color: THEME.textLight, fontWeight: 700, fontSize: 14 }}>{r.author_name}</div>
             <div style={{ color: THEME.textMuted, fontSize: 12.5, marginTop: 2 }}>
-              {r.book_title || "Kitap belirtilmemiş"} · <span style={{ color: THEME.cyan, fontFamily: "'Space Mono',monospace" }}>{r.quantity} adet</span>
+              {r.book_title || "Kitap belirtilmemiş"} · <span style={{ color: THEME.cyan, fontFamily: FONT_MONO }}>{r.quantity} adet</span>
             </div>
             {r.note && <div style={{ color: THEME.textFaint, fontSize: 12, marginTop: 4, fontStyle: "italic" }}>"{r.note}"</div>}
             <div style={{ color: THEME.textFaint, fontSize: 10.5, marginTop: 4 }}>{new Date(r.created_at).toLocaleDateString("tr-TR")}</div>
@@ -662,7 +692,7 @@ function DiscountRequests({ requests, loading, onApprove, onReject, authors, onM
 function ServiceOrdersView({ orders, loading, onUpdateStatus }) {
   return (
     <div>
-      <h2 style={{ color: THEME.textLight, fontFamily: "'Space Grotesk',sans-serif", fontSize: 20, marginBottom: 18 }}>Mağaza Siparişleri</h2>
+      <h2 style={{ color: THEME.textLight, fontFamily: FONT, fontSize: 20, marginBottom: 18 }}>Mağaza Siparişleri</h2>
       {loading && orders.length === 0 && <div style={{ color: THEME.textMuted, fontSize: 13 }}>Yükleniyor...</div>}
       {!loading && orders.length === 0 && (
         <div style={{ color: THEME.textMuted, fontSize: 13, background: THEME.panelBg, border: `1px solid ${THEME.border}`, borderRadius: 8, padding: 20 }}>
@@ -674,7 +704,7 @@ function ServiceOrdersView({ orders, loading, onUpdateStatus }) {
           <div>
             <div style={{ color: THEME.textLight, fontWeight: 700, fontSize: 14 }}>{o.author_name} <span style={{ color: THEME.textMuted, fontWeight: 400 }}>— {o.title}</span></div>
             <div style={{ color: THEME.textMuted, fontSize: 12.5, marginTop: 2 }}>
-              {o.bookTitle && <>{o.bookTitle} · </>}{o.detail && <>{o.detail} · </>}{o.price != null ? <span style={{ color: THEME.cyan, fontFamily: "'Space Mono',monospace" }}>{Number(o.price).toLocaleString("tr-TR")}₺</span> : "Ücretsiz başvuru"}
+              {o.bookTitle && <>{o.bookTitle} · </>}{o.detail && <>{o.detail} · </>}{o.price != null ? <span style={{ color: THEME.cyan, fontFamily: FONT_MONO }}>{Number(o.price).toLocaleString("tr-TR")}₺</span> : "Ücretsiz başvuru"}
             </div>
             <div style={{ color: THEME.textFaint, fontSize: 10.5, marginTop: 4 }}>{new Date(o.createdAt).toLocaleDateString("tr-TR")}</div>
           </div>
@@ -695,7 +725,7 @@ function AdRequestsView({ requests, loading, onUpdateStatus }) {
   const kampanyalar = requests.filter((r) => r.kind === "campaign");
   return (
     <div>
-      <h2 style={{ color: THEME.textLight, fontFamily: "'Space Grotesk',sans-serif", fontSize: 20, marginBottom: 8 }}>Reklam Talepleri</h2>
+      <h2 style={{ color: THEME.textLight, fontFamily: FONT, fontSize: 20, marginBottom: 8 }}>Reklam Talepleri</h2>
       {loading && requests.length === 0 && <div style={{ color: THEME.textMuted, fontSize: 13 }}>Yükleniyor...</div>}
 
       <div style={{ fontSize: 11, letterSpacing: "0.05em", color: THEME.textMuted, margin: "16px 0 10px" }}>YÖNETİLEN TALEPLER (STANDART/PROFESYONEL)</div>
@@ -704,7 +734,7 @@ function AdRequestsView({ requests, loading, onUpdateStatus }) {
         <div key={r.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: THEME.panelBg, border: `1px solid ${THEME.border}`, borderRadius: 8, padding: "14px 18px", marginBottom: 10 }}>
           <div>
             <div style={{ color: THEME.textLight, fontWeight: 700, fontSize: 14 }}>{r.author_name}</div>
-            <div style={{ color: THEME.textMuted, fontSize: 12.5, marginTop: 2 }}>{r.bookTitle} · Bütçe <span style={{ color: THEME.cyan, fontFamily: "'Space Mono',monospace" }}>{Number(r.budget).toLocaleString("tr-TR")}₺</span></div>
+            <div style={{ color: THEME.textMuted, fontSize: 12.5, marginTop: 2 }}>{r.bookTitle} · Bütçe <span style={{ color: THEME.cyan, fontFamily: FONT_MONO }}>{Number(r.budget).toLocaleString("tr-TR")}₺</span></div>
             {r.note && <div style={{ color: THEME.textFaint, fontSize: 12, marginTop: 4, fontStyle: "italic" }}>"{r.note}"</div>}
           </div>
           <div style={{ display: "flex", gap: 8, alignItems: "center", flexShrink: 0 }}>
@@ -723,7 +753,7 @@ function AdRequestsView({ requests, loading, onUpdateStatus }) {
         <div key={c.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: THEME.panelBg, border: `1px solid ${THEME.border}`, borderRadius: 8, padding: "14px 18px", marginBottom: 10 }}>
           <div>
             <div style={{ color: THEME.textLight, fontWeight: 700, fontSize: 14 }}>{c.author_name}</div>
-            <div style={{ color: THEME.textMuted, fontSize: 12.5, marginTop: 2 }}>{c.bookTitle} · {c.platform} · <span style={{ color: THEME.cyan, fontFamily: "'Space Mono',monospace" }}>{Number(c.budget).toLocaleString("tr-TR")}₺</span> · {c.duration} gün</div>
+            <div style={{ color: THEME.textMuted, fontSize: 12.5, marginTop: 2 }}>{c.bookTitle} · {c.platform} · <span style={{ color: THEME.cyan, fontFamily: FONT_MONO }}>{Number(c.budget).toLocaleString("tr-TR")}₺</span> · {c.duration} gün</div>
           </div>
           <div style={{ display: "flex", gap: 8, alignItems: "center", flexShrink: 0 }}>
             <Badge fg={c.status === "Aktif" ? THEME.success : THEME.textMuted} bg={c.status === "Aktif" ? "rgba(93,214,163,.1)" : THEME.panelBgAlt}>{c.status}</Badge>
@@ -739,7 +769,7 @@ function AdRequestsView({ requests, loading, onUpdateStatus }) {
 function TranslationRequestsView({ requests, loading, onUpdateStatus }) {
   return (
     <div>
-      <h2 style={{ color: THEME.textLight, fontFamily: "'Space Grotesk',sans-serif", fontSize: 20, marginBottom: 18 }}>Çeviri Talepleri</h2>
+      <h2 style={{ color: THEME.textLight, fontFamily: FONT, fontSize: 20, marginBottom: 18 }}>Çeviri Talepleri</h2>
       {loading && requests.length === 0 && <div style={{ color: THEME.textMuted, fontSize: 13 }}>Yükleniyor...</div>}
       {!loading && requests.length === 0 && (
         <div style={{ color: THEME.textMuted, fontSize: 13, background: THEME.panelBg, border: `1px solid ${THEME.border}`, borderRadius: 8, padding: 20 }}>
@@ -769,7 +799,7 @@ function DestekTalepleriView({ requests, loading, onUpdateStatus }) {
   const KAT = { sikayet: "Şikayet", destek: "Destek" };
   return (
     <div>
-      <h2 style={{ color: THEME.textLight, fontFamily: "'Space Grotesk',sans-serif", fontSize: 20, marginBottom: 18 }}>Destek & Şikayet Talepleri</h2>
+      <h2 style={{ color: THEME.textLight, fontFamily: FONT, fontSize: 20, marginBottom: 18 }}>Destek & Şikayet Talepleri</h2>
       {loading && requests.length === 0 && <div style={{ color: THEME.textMuted, fontSize: 13 }}>Yükleniyor...</div>}
       {!loading && requests.length === 0 && (
         <div style={{ color: THEME.textMuted, fontSize: 13, background: THEME.panelBg, border: `1px solid ${THEME.border}`, borderRadius: 8, padding: 20 }}>
@@ -1041,7 +1071,7 @@ function OdulYonetimi({ authFetch }) {
       <div style={{ fontSize: 12, color: THEME.textMuted, marginBottom: 10 }}>MEVCUT ÖDÜLLER ({list.length})</div>
       {list.map((o) => (
         <div key={o.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: THEME.panelBg, border: `1px solid ${THEME.border}`, borderRadius: 8, padding: "10px 14px", marginBottom: 6 }}>
-          <div style={{ fontSize: 13, color: THEME.textLight }}>{o.gorsel} {o.baslik} <span style={{ fontSize: 11, color: THEME.warn, fontFamily: "monospace" }}>{Number(o.kredi_fiyat)}₺</span> <span style={{ fontSize: 10, color: THEME.textFaint }}>(sv{o.min_seviye})</span></div>
+          <div style={{ fontSize: 13, color: THEME.textLight }}>{o.gorsel} {o.baslik} <span style={{ fontSize: 11, color: THEME.warn, fontFamily: FONT_MONO }}>{Number(o.kredi_fiyat)}₺</span> <span style={{ fontSize: 10, color: THEME.textFaint }}>(sv{o.min_seviye})</span></div>
           <Btn small variant="danger" onClick={() => sil(o.id)}>Sil</Btn>
         </div>
       ))}
@@ -1232,7 +1262,7 @@ function DuyurularView({ authFetch, authors }) {
 
   return (
     <div>
-      <h2 style={{ color: THEME.textLight, fontFamily: "'Space Grotesk',sans-serif", fontSize: 20, marginBottom: 18 }}>Duyurular</h2>
+      <h2 style={{ color: THEME.textLight, fontFamily: FONT, fontSize: 20, marginBottom: 18 }}>Duyurular</h2>
       <div style={{ background: THEME.panelBg, border: `1px solid ${THEME.cyan}`, borderRadius: 8, padding: 18, marginBottom: 22 }}>
         <div style={{ fontSize: 12, letterSpacing: "0.05em", color: THEME.textMuted, marginBottom: 12 }}>YENİ DUYURU</div>
         <Field label="BAŞLIK"><input style={inputStyle} value={baslik} onChange={(e) => setBaslik(e.target.value)} /></Field>
@@ -1310,7 +1340,7 @@ function MetaReklamView({ authFetch }) {
   return (
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18 }}>
-        <h2 style={{ color: THEME.textLight, fontFamily: "'Space Grotesk',sans-serif", fontSize: 20, margin: 0 }}>Meta Reklam</h2>
+        <h2 style={{ color: THEME.textLight, fontFamily: FONT, fontSize: 20, margin: 0 }}>Meta Reklam</h2>
         <Btn onClick={senkron} disabled={syncing}>{syncing ? "Senkronlanıyor..." : "↻ Verileri Senkronla"}</Btn>
       </div>
       {msg && <div style={{ color: msg.ok ? THEME.success : THEME.danger, fontSize: 13, marginBottom: 14 }}>{msg.text}</div>}
@@ -1339,7 +1369,7 @@ function MetaReklamView({ authFetch }) {
                 <div style={{ flex: 1 }}>
                   <div style={{ color: THEME.textLight, fontWeight: 700, fontSize: 14 }}>{c.name}</div>
                   <div style={{ display: "flex", gap: 16, marginTop: 6, flexWrap: "wrap", fontSize: 12.5 }}>
-                    <span style={{ color: THEME.textMuted }}>Harcama <span style={{ color: THEME.cyan, fontFamily: "'Space Mono',monospace" }}>{Number(c.spend).toLocaleString("tr-TR")}₺</span></span>
+                    <span style={{ color: THEME.textMuted }}>Harcama <span style={{ color: THEME.cyan, fontFamily: FONT_MONO }}>{Number(c.spend).toLocaleString("tr-TR")}₺</span></span>
                     <span style={{ color: THEME.textMuted }}>Gösterim <span style={{ color: THEME.textLight }}>{Number(c.impressions).toLocaleString("tr-TR")}</span></span>
                     <span style={{ color: THEME.textMuted }}>Tıklama <span style={{ color: THEME.textLight }}>{Number(c.clicks).toLocaleString("tr-TR")}</span></span>
                     <span style={{ color: THEME.textMuted }}>Satış <span style={{ color: THEME.success }}>{Number(c.conversions).toLocaleString("tr-TR")}</span></span>
@@ -1399,7 +1429,7 @@ function BulkIsbnUpload({ onSubmit }) {
 
   return (
     <div>
-      <h2 style={{ color: THEME.textLight, fontFamily: "'Space Grotesk',sans-serif", fontSize: 20, marginBottom: 8 }}>Toplu ISBN Yükleme</h2>
+      <h2 style={{ color: THEME.textLight, fontFamily: FONT, fontSize: 20, marginBottom: 8 }}>Toplu ISBN Yükleme</h2>
       <div style={{ color: THEME.textMuted, fontSize: 12.5, marginBottom: 14, lineHeight: 1.6 }}>
         Her satıra bir kitap: <strong style={{ color: THEME.textLight }}>Kitap Adı,ISBN</strong> formatında yapıştırın.
         Örnek: <code style={{ color: THEME.cyan }}>Meçhul Tren,9786258758153</code><br />
@@ -1409,7 +1439,7 @@ function BulkIsbnUpload({ onSubmit }) {
         value={text} onChange={(e) => setText(e.target.value)}
         placeholder={"Meçhul Tren,978-625-8758-15-3\nBlue Sandal,9786258758016"}
         rows={10}
-        style={{ width: "100%", boxSizing: "border-box", padding: 12, border: `1px solid ${THEME.border}`, borderRadius: 6, background: THEME.panelBgAlt, color: THEME.textLight, fontFamily: "'Space Mono',monospace", fontSize: 13, resize: "vertical", marginBottom: 10 }}
+        style={{ width: "100%", boxSizing: "border-box", padding: 12, border: `1px solid ${THEME.border}`, borderRadius: 6, background: THEME.panelBgAlt, color: THEME.textLight, fontFamily: FONT_MONO, fontSize: 13, resize: "vertical", marginBottom: 10 }}
       />
       {error && <div style={{ color: THEME.danger, fontSize: 12.5, marginBottom: 10 }}>{error}</div>}
       <Btn onClick={submit} disabled={busy}>{busy ? "Yükleniyor..." : "Toplu Yükle"}</Btn>
@@ -1419,15 +1449,15 @@ function BulkIsbnUpload({ onSubmit }) {
           <div style={{ display: "flex", gap: 10, marginBottom: 14 }}>
             <div style={{ background: THEME.panelBg, border: `1px solid ${THEME.border}`, borderRadius: 6, padding: "10px 14px" }}>
               <div style={{ fontSize: 10.5, color: THEME.textMuted }}>TOPLAM</div>
-              <div style={{ fontSize: 18, color: THEME.textLight, fontFamily: "'Space Mono',monospace" }}>{result.toplam}</div>
+              <div style={{ fontSize: 18, color: THEME.textLight, fontFamily: FONT_MONO }}>{result.toplam}</div>
             </div>
             <div style={{ background: THEME.panelBg, border: `1px solid ${THEME.border}`, borderRadius: 6, padding: "10px 14px" }}>
               <div style={{ fontSize: 10.5, color: THEME.textMuted }}>EŞLEŞEN</div>
-              <div style={{ fontSize: 18, color: THEME.success, fontFamily: "'Space Mono',monospace" }}>{result.eslesen}</div>
+              <div style={{ fontSize: 18, color: THEME.success, fontFamily: FONT_MONO }}>{result.eslesen}</div>
             </div>
             <div style={{ background: THEME.panelBg, border: `1px solid ${THEME.border}`, borderRadius: 6, padding: "10px 14px" }}>
               <div style={{ fontSize: 10.5, color: THEME.textMuted }}>EŞLEŞMEYEN</div>
-              <div style={{ fontSize: 18, color: result.eslesmeyen > 0 ? THEME.danger : THEME.textLight, fontFamily: "'Space Mono',monospace" }}>{result.eslesmeyen}</div>
+              <div style={{ fontSize: 18, color: result.eslesmeyen > 0 ? THEME.danger : THEME.textLight, fontFamily: FONT_MONO }}>{result.eslesmeyen}</div>
             </div>
           </div>
           <div style={{ background: THEME.panelBg, border: `1px solid ${THEME.border}`, borderRadius: 8, overflow: "hidden" }}>
@@ -1458,15 +1488,58 @@ function BulkIsbnUpload({ onSubmit }) {
 
 
 function AuthorList({ authors, onSelect, onAddClick, onSetStatus, showPassive, onTogglePassive }) {
+  const [arama, setArama] = React.useState("");
+
+  // Ad, e-posta veya kitap adına göre filtrele
+  const q = arama.trim().toLocaleLowerCase("tr");
+  const goruntulenen = !q ? authors : authors.filter((a) => {
+    const kitapEslesme = (a.books || []).some((b) => (b.title || "").toLocaleLowerCase("tr").includes(q));
+    return (a.name || "").toLocaleLowerCase("tr").includes(q)
+      || (a.email || "").toLocaleLowerCase("tr").includes(q)
+      || kitapEslesme;
+  });
+
   return (
     <div>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 18 }}>
-        <h2 style={{ color: THEME.textLight, fontFamily: "'Space Grotesk',sans-serif", fontSize: 20, margin: 0 }}>Yazarlar</h2>
-        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          <Btn small variant="ghost" onClick={onTogglePassive}>{showPassive ? "Aktifleri Göster" : "Pasifleri Göster"}</Btn>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14, gap: 12, flexWrap: "wrap" }}>
+        {/* SOL: yeni yazar butonu + başlık */}
+        <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
           <Btn onClick={onAddClick}>+ Yeni Yazar Ekle</Btn>
+          <h2 style={{ color: THEME.textLight, fontFamily: FONT, fontSize: 20, margin: 0 }}>Yazarlar</h2>
         </div>
+        {/* SAĞ: pasif göster */}
+        <Btn small variant="ghost" onClick={onTogglePassive}>{showPassive ? "Aktifleri Göster" : "Pasifleri Göster"}</Btn>
       </div>
+
+      {/* ARAMA ÇUBUĞU */}
+      <div style={{ marginBottom: 14, position: "relative" }}>
+        <input
+          value={arama}
+          onChange={(e) => setArama(e.target.value)}
+          placeholder="Yazar adı, e-posta veya kitap adı ile ara..."
+          style={{
+            width: "100%", boxSizing: "border-box", padding: "10px 12px 10px 34px",
+            borderRadius: 8, border: `1px solid ${THEME.border}`,
+            background: THEME.panelBg, color: THEME.textLight,
+            fontSize: 13.5, fontFamily: FONT,
+          }}
+        />
+        <span style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: THEME.textFaint, fontSize: 14 }}>⌕</span>
+        {arama && (
+          <span
+            onClick={() => setArama("")}
+            style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", color: THEME.textMuted, fontSize: 16, cursor: "pointer" }}
+            title="Aramayı temizle"
+          >×</span>
+        )}
+      </div>
+
+      {arama && (
+        <div style={{ fontSize: 12, color: THEME.textMuted, marginBottom: 10 }}>
+          <b style={{ color: THEME.textLight }}>{goruntulenen.length}</b> sonuç bulundu
+          {goruntulenen.length === 0 && " — arama teriminizi değiştirmeyi deneyin."}
+        </div>
+      )}
       <div style={{ background: THEME.panelBg, border: `1px solid ${THEME.border}`, borderRadius: 8, overflow: "hidden" }}>
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
           <thead>
@@ -1477,7 +1550,7 @@ function AuthorList({ authors, onSelect, onAddClick, onSetStatus, showPassive, o
             </tr>
           </thead>
           <tbody>
-            {authors.map((a) => {
+            {goruntulenen.map((a) => {
               const sold = a.books.reduce((s, b) => s + b.totalSold, 0);
               const pending = a.wallet.pendingReceipts.length;
               const pasif = a.status === "pasif";
@@ -1489,7 +1562,7 @@ function AuthorList({ authors, onSelect, onAddClick, onSetStatus, showPassive, o
                   <td style={{ padding: "12px 14px", color: THEME.textMuted }}>{a.email}</td>
                   <td style={{ padding: "12px 14px" }}><Badge fg={THEME.cyan} bg="rgba(124,231,255,.1)">{PLAN_LABELS[a.plan]}</Badge></td>
                   <td style={{ padding: "12px 14px", color: THEME.textLight }}>{a.books.length}</td>
-                  <td style={{ padding: "12px 14px", color: THEME.textLight, fontFamily: "'Space Mono',monospace" }}>{sold}</td>
+                  <td style={{ padding: "12px 14px", color: THEME.textLight, fontFamily: FONT_MONO }}>{sold}</td>
                   <td style={{ padding: "12px 14px" }}>
                     {pending > 0 ? <Badge fg={THEME.warn} bg={THEME.warnBg}>{pending} bekleyen dekont</Badge> : <span style={{ color: THEME.textFaint }}>—</span>}
                   </td>
@@ -1545,16 +1618,16 @@ function AddAuthorModal({ onClose, onAdd }) {
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(3,4,10,.7)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50 }}>
       <div style={{ width: 400, background: THEME.panelBg, border: `1px solid ${THEME.border}`, borderRadius: 10, padding: 24 }}>
-        <h3 style={{ color: THEME.textLight, fontFamily: "'Space Grotesk',sans-serif", marginTop: 0 }}>Yeni Yazar Ekle</h3>
+        <h3 style={{ color: THEME.textLight, fontFamily: FONT, marginTop: 0 }}>Yeni Yazar Ekle</h3>
 
         {result ? (
           <>
             <div style={{ color: THEME.success, fontSize: 13, marginBottom: 14 }}>✓ Yazar oluşturuldu. Bu bilgileri yazara iletin:</div>
             <Field label="KULLANICI ADI">
-              <div style={{ ...inputStyle, fontFamily: "'Space Mono',monospace", color: THEME.cyan }}>{result.username}</div>
+              <div style={{ ...inputStyle, fontFamily: FONT_MONO, color: THEME.cyan }}>{result.username}</div>
             </Field>
             <Field label="GEÇİCİ ŞİFRE">
-              <div style={{ ...inputStyle, fontFamily: "'Space Mono',monospace", color: THEME.cyan }}>{result.tempPassword}</div>
+              <div style={{ ...inputStyle, fontFamily: FONT_MONO, color: THEME.cyan }}>{result.tempPassword}</div>
             </Field>
             <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 18 }}>
               <Btn onClick={onClose}>Kapat</Btn>
@@ -1584,7 +1657,7 @@ function AddAuthorModal({ onClose, onAdd }) {
               </div>
               <Field label="KİTAP ADI"><input style={inputStyle} value={bookTitle} onChange={(e) => setBookTitle(e.target.value)} placeholder="örn. Meçhul Tren" /></Field>
               <Field label="ISBN (13 HANE — BARKOD)">
-                <input style={{ ...inputStyle, fontFamily: "'Space Mono',monospace", borderColor: isbnGecerli ? undefined : THEME.danger }}
+                <input style={{ ...inputStyle, fontFamily: FONT_MONO, borderColor: isbnGecerli ? undefined : THEME.danger }}
                   value={bookIsbn} onChange={(e) => setBookIsbn(e.target.value)} placeholder="9786250000000" />
               </Field>
               {bookTitle.trim() && (
@@ -1643,7 +1716,7 @@ function MaliyetEditor({ book, onSave, flash }) {
         </Field>
         <Field label="SAYFA SAYISI"><input style={inputStyle} value={sayfa} onChange={(e) => setSayfa(e.target.value.replace(/[^0-9]/g, ""))} placeholder="200" /></Field>
         <Field label="FORMÜL MALİYETİ">
-          <div style={{ ...inputStyle, display: "flex", alignItems: "center", color: THEME.textMuted, fontFamily: "'Space Mono',monospace" }}>
+          <div style={{ ...inputStyle, display: "flex", alignItems: "center", color: THEME.textMuted, fontFamily: FONT_MONO }}>
             {formulMaliyet != null ? `${formulMaliyet.toFixed(2)}₺` : "—"}
           </div>
         </Field>
@@ -1653,7 +1726,7 @@ function MaliyetEditor({ book, onSave, flash }) {
           onChange={(e) => setOverride(e.target.value.replace(/[^0-9.]/g, ""))} placeholder="örn. 80 (özel baskı maliyeti)" />
       </Field>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 12 }}>
-        <div style={{ fontSize: 12, color: THEME.cyan, fontFamily: "'Space Mono',monospace" }}>
+        <div style={{ fontSize: 12, color: THEME.cyan, fontFamily: FONT_MONO }}>
           Etkin maliyet: {etkinMaliyet != null ? `${Number(etkinMaliyet).toFixed(2)}₺` : "—"}
           {override !== "" && <span style={{ color: THEME.warn, fontSize: 10, marginLeft: 8 }}>(istisna)</span>}
         </div>
@@ -1684,7 +1757,7 @@ function TelifOzetiKutu({ book }) {
         ].map((k, i) => (
           <div key={i} style={{ background: THEME.panelBg, border: `1px solid ${THEME.border}`, borderRadius: 8, padding: "10px 12px" }}>
             <div style={{ fontSize: 10, color: THEME.textMuted, marginBottom: 4 }}>{k.etiket}</div>
-            <div style={{ fontSize: 15, fontWeight: 700, color: k.renk, fontFamily: "'Space Mono',monospace" }}>{Number(k.deger).toLocaleString("tr-TR")}₺</div>
+            <div style={{ fontSize: 15, fontWeight: 700, color: k.renk, fontFamily: FONT_MONO }}>{Number(k.deger).toLocaleString("tr-TR")}₺</div>
           </div>
         ))}
       </div>
@@ -1738,8 +1811,8 @@ function MatchingEditor({ book, onSave, flash }) {
         <div key={p.key} style={{ display: "grid", gridTemplateColumns: "1.3fr 1fr 1fr 1.3fr", gap: 8, alignItems: "center", marginBottom: 6 }}>
           <div style={{ fontSize: 12.5, color: THEME.textLight }}>{p.label}</div>
           <input style={{ ...inputStyle, padding: "5px 8px", fontSize: 12 }} value={baslangic[p.key]} onChange={(e) => setBaslangic({ ...baslangic, [p.key]: e.target.value.replace(/[^0-9]/g, "") })} placeholder="—" />
-          <div style={{ fontSize: 12.5, color: THEME.textMuted, fontFamily: "'Space Mono',monospace" }}>{kalan[p.key] != null ? kalan[p.key] : "—"}</div>
-          <input style={{ ...inputStyle, padding: "5px 8px", fontSize: 12, fontFamily: "'Space Mono',monospace" }} value={kodlar[p.key]} onChange={(e) => setKodlar({ ...kodlar, [p.key]: e.target.value })} placeholder="ISBN kullanılır" />
+          <div style={{ fontSize: 12.5, color: THEME.textMuted, fontFamily: FONT_MONO }}>{kalan[p.key] != null ? kalan[p.key] : "—"}</div>
+          <input style={{ ...inputStyle, padding: "5px 8px", fontSize: 12, fontFamily: FONT_MONO }} value={kodlar[p.key]} onChange={(e) => setKodlar({ ...kodlar, [p.key]: e.target.value })} placeholder="ISBN kullanılır" />
         </div>
       ))}
       <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 10 }}>
@@ -1751,6 +1824,9 @@ function MatchingEditor({ book, onSave, flash }) {
 
 // ============ Giriş Bilgileri Paneli ============
 function CredentialsPanel({ author, onSave, flash, onClose }) {
+  const [name, setName] = useState(author.name || "");
+  const [title, setTitle] = useState(author.title || "");
+  const [plan, setPlan] = useState(author.plan || "standart");
   const [username, setUsername] = useState(author.username || "");
   const [email, setEmail] = useState(author.email || "");
   const [yeniSifre, setYeniSifre] = useState("");
@@ -1760,6 +1836,9 @@ function CredentialsPanel({ author, onSave, flash, onClose }) {
     setBusy(true);
     try {
       const body = {};
+      if (name.trim() && name.trim() !== author.name) body.name = name.trim();
+      if (title.trim() !== (author.title || "")) body.title = title.trim();
+      if (plan !== author.plan) body.plan = plan;
       if (username.trim() && username.trim() !== author.username) body.username = username.trim();
       if (email.trim() && email.trim() !== author.email) body.email = email.trim();
       if (yeniSifre) body.yeniSifre = yeniSifre;
@@ -1773,19 +1852,234 @@ function CredentialsPanel({ author, onSave, flash, onClose }) {
 
   return (
     <div style={{ background: THEME.panelBg, border: `1px solid ${THEME.cyan}`, borderRadius: 8, padding: 18, marginBottom: 22 }}>
+      <div style={{ fontSize: 12, letterSpacing: "0.05em", color: THEME.textMuted, marginBottom: 12 }}>YAZAR BİLGİLERİ</div>
+
+      {/* Kimlik bilgileri — yanlış girişleri buradan düzeltebilirsiniz */}
+      <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr", gap: 12 }}>
+        <Field label="AD SOYAD"><input style={inputStyle} value={name} onChange={(e) => setName(e.target.value)} /></Field>
+        <Field label="UNVAN"><input style={inputStyle} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Bey / Hanım" /></Field>
+        <Field label="PAKET">
+          <select style={inputStyle} value={plan} onChange={(e) => setPlan(e.target.value)}>
+            <option value="standart">Standart</option>
+            <option value="profesyonel">Profesyonel</option>
+            <option value="vip">VIP</option>
+          </select>
+        </Field>
+      </div>
+
+      <div style={{ height: 1, background: THEME.divider, margin: "6px 0 14px" }} />
       <div style={{ fontSize: 12, letterSpacing: "0.05em", color: THEME.textMuted, marginBottom: 12 }}>GİRİŞ BİLGİLERİ</div>
+
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-        <Field label="KULLANICI ADI"><input style={{ ...inputStyle, fontFamily: "'Space Mono',monospace" }} value={username} onChange={(e) => setUsername(e.target.value)} /></Field>
+        <Field label="KULLANICI ADI"><input style={{ ...inputStyle, fontFamily: FONT_MONO }} value={username} onChange={(e) => setUsername(e.target.value)} /></Field>
         <Field label="E-POSTA"><input style={inputStyle} value={email} onChange={(e) => setEmail(e.target.value)} /></Field>
       </div>
       <Field label="YENİ ŞİFRE (belirlemek için yaz, boş bırakırsan değişmez)">
-        <input style={{ ...inputStyle, fontFamily: "'Space Mono',monospace" }} value={yeniSifre} onChange={(e) => setYeniSifre(e.target.value)} placeholder="En az 4 hane" />
+        <input style={{ ...inputStyle, fontFamily: FONT_MONO }} value={yeniSifre} onChange={(e) => setYeniSifre(e.target.value)} placeholder="En az 4 hane" />
       </Field>
       <div style={{ fontSize: 11, color: THEME.textFaint, margin: "-4px 0 12px" }}>Not: Şifreler güvenlik için gizli tutulur; eskisini göremezsin ama yenisini belirleyebilirsin.</div>
       <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
         <Btn variant="ghost" small onClick={onClose}>Kapat</Btn>
         <Btn disabled={busy} onClick={kaydet}>{busy ? "Kaydediliyor..." : "Kaydet"}</Btn>
       </div>
+    </div>
+  );
+}
+
+// ============ İndirimli & Hediye Kayıtları Paneli ============
+// Yazar detayında: hangi kitap, kaç adet, hediye mi indirimli mi, neden verildi.
+function IndirimliHediyePanel({ author, authFetch }) {
+  const [veri, setVeri] = useState(null);
+  const [yukleniyor, setYukleniyor] = useState(true);
+  const [filtre, setFiltre] = useState("hepsi"); // hepsi | indirimli | hediye
+  const [iptalEdilen, setIptalEdilen] = useState(null); // iptal formu açık olan kayıt id
+  const [iptalSebep, setIptalSebep] = useState("");
+  const [islemMsg, setIslemMsg] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [yenile, setYenile] = useState(0);
+
+  useEffect(() => {
+    let iptal = false;
+    setYukleniyor(true);
+    authFetch(`/api/admin/authors/${author.id}/indirimli-hediye`)
+      .then((r) => r.json())
+      .then((d) => { if (!iptal) { setVeri(d); setYukleniyor(false); } })
+      .catch(() => { if (!iptal) { setVeri(null); setYukleniyor(false); } });
+    return () => { iptal = true; };
+  }, [author.id, yenile]);
+
+  // Kaydı iptal et (kayıt kalır, telife girmez)
+  const kaydiIptalEt = async (id) => {
+    if (!iptalSebep.trim()) { setIslemMsg({ ok: false, text: "İptal sebebi yazın." }); return; }
+    setBusy(true); setIslemMsg(null);
+    try {
+      const r = await authFetch(`/api/admin/discount/${id}/iptal`, {
+        method: "PATCH", body: JSON.stringify({ sebep: iptalSebep.trim() }),
+      });
+      const d = await r.json();
+      if (d.ok) {
+        setIslemMsg({ ok: true, text: d.mesaj || "İptal edildi." });
+        setIptalEdilen(null); setIptalSebep(""); setYenile((n) => n + 1);
+      } else setIslemMsg({ ok: false, text: d.error || "İptal edilemedi." });
+    } catch { setIslemMsg({ ok: false, text: "Sunucuya bağlanılamadı." }); }
+    finally { setBusy(false); }
+  };
+
+  // Kaydı kalıcı sil (geri alınamaz)
+  const kaydiSil = async (id, adet, tur) => {
+    const etiket = tur === "hediye" ? "hediye" : "indirimli alım";
+    if (!window.confirm(`${adet} adetlik ${etiket} kaydı KALICI olarak silinecek.\n\nBu işlem geri alınamaz. Kayıt geçmişte kalmaz.\n\nDevam edilsin mi?`)) return;
+    setBusy(true); setIslemMsg(null);
+    try {
+      const r = await authFetch(`/api/admin/discount/${id}`, { method: "DELETE" });
+      const d = await r.json();
+      if (d.ok) { setIslemMsg({ ok: true, text: d.mesaj || "Silindi." }); setYenile((n) => n + 1); }
+      else setIslemMsg({ ok: false, text: d.error || "Silinemedi." });
+    } catch { setIslemMsg({ ok: false, text: "Sunucuya bağlanılamadı." }); }
+    finally { setBusy(false); }
+  };
+
+  if (yukleniyor) return (
+    <div style={{ background: THEME.panelBg, border: `1px solid ${THEME.border}`, borderRadius: 8, padding: 18, marginBottom: 22, color: THEME.textMuted, fontSize: 13 }}>
+      Kayıtlar yükleniyor...
+    </div>
+  );
+
+  const kayitlar = veri?.kayitlar || [];
+  const ozet = veri?.ozet || { indirimliAdet: 0, hediyeAdet: 0 };
+  const gosterilen = filtre === "hepsi" ? kayitlar : kayitlar.filter((k) => k.tur === filtre);
+
+  const durumEtiket = (s) => s === "onaylandi" ? "Onaylandı" : s === "bekliyor" ? "Bekliyor" : s === "reddedildi" ? "Reddedildi" : s === "iptal" ? "İPTAL EDİLDİ" : s;
+  const durumRenk = (s) => s === "onaylandi" ? THEME.success : s === "bekliyor" ? THEME.warn : s === "iptal" ? THEME.textFaint : THEME.danger;
+
+  return (
+    <div style={{ background: THEME.panelBg, border: `1px solid ${THEME.border}`, borderRadius: 8, padding: 18, marginBottom: 22 }}>
+      <div style={{ fontSize: 12, letterSpacing: "0.05em", color: THEME.textMuted, marginBottom: 12 }}>İNDİRİMLİ ALIM & HEDİYE KAYITLARI</div>
+
+      {/* Özet — ikisi de telif hesabından düşülür (gerçek satış değil) */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10 }}>
+        <div style={{ background: THEME.panelBgAlt, border: `1px solid ${THEME.border}`, borderRadius: 8, padding: "10px 12px" }}>
+          <div style={{ fontSize: 10.5, color: THEME.textMuted, marginBottom: 3 }}>🏷️ İNDİRİMLİ</div>
+          <div style={{ fontSize: 17, fontWeight: 700, color: THEME.textLight, fontFamily: FONT_MONO }}>{ozet.indirimliAdet} adet</div>
+        </div>
+        <div style={{ background: THEME.warnBg, border: `1px solid ${THEME.warn}`, borderRadius: 8, padding: "10px 12px" }}>
+          <div style={{ fontSize: 10.5, color: THEME.warn, marginBottom: 3 }}>
+            🎁 HEDİYE {ozet.hediyeKota != null && <span style={{ opacity: 0.85 }}>· kota {ozet.hediyeKota}</span>}
+          </div>
+          <div style={{ fontSize: 17, fontWeight: 700, color: THEME.warn, fontFamily: FONT_MONO }}>
+            {ozet.hediyeAdet} adet
+            {ozet.hediyeKota > 0 && (
+              <span style={{ fontSize: 11.5, fontWeight: 600, marginLeft: 8, color: ozet.hediyeAsim > 0 ? THEME.danger : THEME.textMuted }}>
+                {ozet.hediyeAsim > 0 ? `⚠ ${ozet.hediyeAsim} aşım` : `${ozet.hediyeKalan} hak kaldı`}
+              </span>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Telif etkisi + elle stok düşme hatırlatması */}
+      <div style={{ background: THEME.panelBgAlt, border: `1px solid ${THEME.border}`, borderRadius: 8, padding: "9px 12px", marginBottom: 14, fontSize: 11.5, color: THEME.textMuted, lineHeight: 1.6 }}>
+        <b style={{ color: THEME.textLight }}>Telif:</b> Her iki tür de telif hesabından düşülür — gerçek satış olmadıkları için yazar bu kitaplardan telif kazanmaz.<br />
+        <b style={{ color: THEME.warn }}>Stok:</b> Bu kayıtlar stoğu <b>otomatik düşürmez</b>. MST Yayıncılık sitesinden stoğu <b>elle düşmeniz</b> gerekir.
+      </div>
+
+      {/* Filtre */}
+      <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
+        {[["hepsi", "Hepsi"], ["indirimli", "🏷️ İndirimli"], ["hediye", "🎁 Hediye"]].map(([k, l]) => (
+          <div key={k} onClick={() => setFiltre(k)} style={{
+            padding: "5px 12px", borderRadius: 6, fontSize: 12, cursor: "pointer",
+            background: filtre === k ? THEME.cyan : "transparent",
+            color: filtre === k ? THEME.onAccent : THEME.textMuted,
+            border: `1px solid ${filtre === k ? THEME.cyan : THEME.border}`,
+            fontWeight: filtre === k ? 700 : 500,
+          }}>{l}</div>
+        ))}
+      </div>
+
+      {islemMsg && (
+        <div style={{ marginBottom: 10, fontSize: 12.5, padding: "7px 11px", borderRadius: 6,
+          color: islemMsg.ok ? THEME.success : THEME.danger,
+          background: islemMsg.ok ? THEME.successBg : THEME.dangerBg }}>
+          {islemMsg.text}
+        </div>
+      )}
+
+      {gosterilen.length === 0 ? (
+        <div style={{ fontSize: 12.5, color: THEME.textFaint, padding: "10px 0" }}>
+          {filtre === "hepsi" ? "Bu yazara ait kayıt yok." : `Bu türde kayıt yok.`}
+        </div>
+      ) : (
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
+          <thead>
+            <tr style={{ background: THEME.panelBgAlt, textAlign: "left" }}>
+              {["Tür", "Kitap", "Adet", "Sebep", "Durum", "Tarih", "İşlem"].map((h) => (
+                <th key={h} style={{ padding: "8px 10px", fontSize: 10.5, color: THEME.textMuted, fontWeight: 600 }}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {gosterilen.map((k) => {
+              const iptalli = k.status === "iptal";
+              return (
+              <React.Fragment key={k.id}>
+              <tr style={{ borderTop: `1px solid ${THEME.divider}`, opacity: iptalli ? 0.55 : 1 }}>
+                <td style={{ padding: "9px 10px" }}>
+                  <span style={{
+                    padding: "2px 7px", borderRadius: 4, fontSize: 10.5, fontWeight: 700,
+                    background: k.tur === "hediye" ? THEME.warnBg : THEME.successBg,
+                    color: k.tur === "hediye" ? THEME.warn : THEME.success,
+                    textDecoration: iptalli ? "line-through" : "none",
+                  }}>{k.tur === "hediye" ? "🎁 HEDİYE" : "🏷️ İNDİRİMLİ"}</span>
+                </td>
+                <td style={{ padding: "9px 10px", color: THEME.textLight, textDecoration: iptalli ? "line-through" : "none" }}>
+                  {k.kitap || <span style={{ color: THEME.danger }}>⚠ Kitap seçilmemiş</span>}
+                </td>
+                <td style={{ padding: "9px 10px", color: THEME.textLight, fontFamily: FONT_MONO, fontWeight: 700, textDecoration: iptalli ? "line-through" : "none" }}>{k.quantity}</td>
+                <td style={{ padding: "9px 10px", color: THEME.textMuted }}>{k.sebep || k.note || "—"}</td>
+                <td style={{ padding: "9px 10px", color: durumRenk(k.status), fontWeight: 600 }}>{durumEtiket(k.status)}</td>
+                <td style={{ padding: "9px 10px", color: THEME.textFaint, fontSize: 11.5 }}>
+                  {k.created_at ? new Date(k.created_at).toLocaleDateString("tr-TR") : "—"}
+                </td>
+                <td style={{ padding: "9px 10px", whiteSpace: "nowrap" }}>
+                  {!iptalli && (
+                    <span
+                      onClick={() => { setIptalEdilen(iptalEdilen === k.id ? null : k.id); setIptalSebep(""); setIslemMsg(null); }}
+                      style={{ color: THEME.warn, cursor: "pointer", fontSize: 11.5, fontWeight: 600, marginRight: 10 }}
+                      title="Kaydı iptal et — kayıt kalır, telife girmez"
+                    >İptal</span>
+                  )}
+                  <span
+                    onClick={() => !busy && kaydiSil(k.id, k.quantity, k.tur)}
+                    style={{ color: THEME.danger, cursor: busy ? "default" : "pointer", fontSize: 11.5, fontWeight: 600 }}
+                    title="Kaydı kalıcı olarak sil — geri alınamaz"
+                  >Sil</span>
+                </td>
+              </tr>
+              {/* İptal sebebi formu */}
+              {iptalEdilen === k.id && (
+                <tr style={{ background: THEME.warnBg }}>
+                  <td colSpan={7} style={{ padding: "10px 12px" }}>
+                    <div style={{ fontSize: 12, color: THEME.warn, marginBottom: 6, fontWeight: 600 }}>
+                      Bu kayıt neden iptal ediliyor? (kayıt geçmişinde saklanır)
+                    </div>
+                    <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                      <input
+                        value={iptalSebep}
+                        onChange={(e) => setIptalSebep(e.target.value)}
+                        placeholder="Örn: yanlış kitap seçildi / adet hatalı girildi"
+                        style={{ flex: 1, padding: "8px 10px", borderRadius: 6, border: `1px solid ${THEME.warn}`, background: THEME.panelBg, color: THEME.textLight, fontSize: 12.5, fontFamily: FONT }}
+                      />
+                      <Btn small variant="success" disabled={busy} onClick={() => kaydiIptalEt(k.id)}>{busy ? "..." : "İptal Et"}</Btn>
+                      <Btn small variant="ghost" onClick={() => { setIptalEdilen(null); setIptalSebep(""); }}>Vazgeç</Btn>
+                    </div>
+                  </td>
+                </tr>
+              )}
+              </React.Fragment>
+            );})}
+          </tbody>
+        </table>
+      )}
     </div>
   );
 }
@@ -1831,7 +2125,7 @@ function TelifPanel({ author, onPayout, onUpdateRoyalty, onUpdateWallet, flash }
   return (
     <div style={{ background: THEME.panelBg, border: `1px solid ${THEME.cyan}`, borderRadius: 8, padding: 18, marginBottom: 22 }}>
       <div style={{ fontSize: 12, letterSpacing: "0.05em", color: THEME.textMuted, marginBottom: 4 }}>KAZANÇ & TELİF</div>
-      <div style={{ fontSize: 13, color: THEME.textLight, marginBottom: 14 }}>Cüzdan bakiyesi: <span style={{ fontFamily: "'Space Mono',monospace", color: THEME.cyan }}>{bakiye.toLocaleString("tr-TR")}₺</span></div>
+      <div style={{ fontSize: 13, color: THEME.textLight, marginBottom: 14 }}>Cüzdan bakiyesi: <span style={{ fontFamily: FONT_MONO, color: THEME.cyan }}>{bakiye.toLocaleString("tr-TR")}₺</span></div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18 }}>
         {/* Telif ödemesi */}
@@ -1942,6 +2236,29 @@ function CuzdanGecmisi({ authorId, authFetch }) {
 function AuthorDetail({ author, onBack, onAdvanceStage, onApproveCover, onEditStock, onApprovePayment, onRejectPayment, onEditIsbn, onEditCover, onSyncStock, onAddBook, onDeleteAuthor, onUpdateCredentials, onPayout, onUpdateRoyalty, onUpdateWallet, onUpdateContract, onUpdateMatching, onUpdateMaliyet, authFetch }) {
   const [editingStock, setEditingStock] = useState(null); // {bookId, key}
   const [stockDraft, setStockDraft] = useState("");
+  // Dekont geri alma (yanlış onaylanan ödemeler için)
+  const [dekontGeriAl, setDekontGeriAl] = useState(null); // receipt id
+  const [dekontSebep, setDekontSebep] = useState("");
+  const [dekontBusy, setDekontBusy] = useState(false);
+  const [dekontMsg, setDekontMsg] = useState(null);
+
+  const dekontuGeriAl = async (receiptId) => {
+    if (!dekontSebep.trim()) { setDekontMsg({ ok: false, text: "Geri alma sebebi yazın." }); return; }
+    setDekontBusy(true); setDekontMsg(null);
+    try {
+      const r = await authFetch(`/api/admin/receipts/${receiptId}/geri-al`, {
+        method: "PATCH", body: JSON.stringify({ sebep: dekontSebep.trim() }),
+      });
+      const d = await r.json();
+      if (d.ok) {
+        setDekontMsg({ ok: true, text: d.mesaj || "Geri alındı." });
+        setDekontGeriAl(null); setDekontSebep("");
+        if (onSyncStock) setTimeout(() => window.location.reload(), 1200);
+      } else setDekontMsg({ ok: false, text: d.error || "Geri alınamadı." });
+    } catch { setDekontMsg({ ok: false, text: "Sunucuya bağlanılamadı." }); }
+    finally { setDekontBusy(false); }
+  };
+
   const [editingIsbn, setEditingIsbn] = useState(null); // bookId
   const [isbnDraft, setIsbnDraft] = useState("");
   const [editingCover, setEditingCover] = useState(null); // bookId
@@ -1997,12 +2314,13 @@ function AuthorDetail({ author, onBack, onAdvanceStage, onApproveCover, onEditSt
       <Btn variant="ghost" small onClick={onBack}>← Yazarlara dön</Btn>
       <div style={{ marginTop: 14, marginBottom: 22, display: "flex", alignItems: "flex-start", justifyContent: "space-between" }}>
         <div>
-          <h2 style={{ color: THEME.textLight, fontFamily: "'Space Grotesk',sans-serif", fontSize: 22, margin: "0 0 4px" }}>{author.name}</h2>
+          <h2 style={{ color: THEME.textLight, fontFamily: FONT, fontSize: 22, margin: "0 0 4px" }}>{author.name}</h2>
           <div style={{ color: THEME.textMuted, fontSize: 13 }}>{author.email} · <Badge fg={THEME.cyan} bg="rgba(124,231,255,.1)">{PLAN_LABELS[author.plan]}</Badge>{author.status === "pasif" && <span style={{ marginLeft: 8, fontSize: 10, color: THEME.textFaint }}>PASİF</span>}</div>
         </div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
-          <Btn small variant="ghost" onClick={() => { setMgmtTab(mgmtTab === "cred" ? null : "cred"); setMsg(null); }}>Giriş Bilgileri</Btn>
+          <Btn small variant="ghost" onClick={() => { setMgmtTab(mgmtTab === "cred" ? null : "cred"); setMsg(null); }}>Yazar Bilgileri</Btn>
           <Btn small variant="ghost" onClick={() => { setMgmtTab(mgmtTab === "telif" ? null : "telif"); setMsg(null); }}>Kazanç & Telif</Btn>
+          <Btn small variant="ghost" onClick={() => { setMgmtTab(mgmtTab === "indirimli" ? null : "indirimli"); setMsg(null); }}>İndirimli & Hediye</Btn>
           <Btn small variant="ghost" onClick={() => { setMgmtTab(mgmtTab === "sozlesme" ? null : "sozlesme"); setMsg(null); }}>Sözleşme</Btn>
           <Btn onClick={() => { setShowBookForm((v) => !v); setNbMsg(null); }}>{showBookForm ? "Vazgeç" : "+ Kitap Ekle"}</Btn>
           {author.status === "pasif" && onDeleteAuthor && (
@@ -2017,6 +2335,7 @@ function AuthorDetail({ author, onBack, onAdvanceStage, onApproveCover, onEditSt
       {mgmtTab === "cred" && <CredentialsPanel author={author} onSave={onUpdateCredentials} flash={flash} onClose={() => setMgmtTab(null)} />}
       {/* Kazanç & Telif yönetimi */}
       {mgmtTab === "telif" && <TelifPanel author={author} onPayout={onPayout} onUpdateRoyalty={onUpdateRoyalty} onUpdateWallet={onUpdateWallet} flash={flash} />}
+      {mgmtTab === "indirimli" && <IndirimliHediyePanel author={author} authFetch={authFetch} />}
       {/* Sözleşme yönetimi */}
       {mgmtTab === "sozlesme" && <SozlesmePanel author={author} onSave={onUpdateContract} flash={flash} />}
 
@@ -2027,7 +2346,7 @@ function AuthorDetail({ author, onBack, onAdvanceStage, onApproveCover, onEditSt
           <div style={{ fontSize: 12, letterSpacing: "0.05em", color: THEME.textMuted, marginBottom: 12 }}>YENİ KİTAP — {author.name}</div>
           <div style={{ display: "grid", gridTemplateColumns: "2fr 1.4fr 1fr", gap: 12 }}>
             <Field label="KİTAP ADI"><input style={inputStyle} value={nbTitle} onChange={(e) => setNbTitle(e.target.value)} placeholder="Kitap adı" /></Field>
-            <Field label="ISBN (13 HANE)"><input style={{ ...inputStyle, fontFamily: "'Space Mono',monospace", borderColor: nbIsbnOk ? undefined : THEME.danger }} value={nbIsbn} onChange={(e) => setNbIsbn(e.target.value)} placeholder="9786250000000" /></Field>
+            <Field label="ISBN (13 HANE)"><input style={{ ...inputStyle, fontFamily: FONT_MONO, borderColor: nbIsbnOk ? undefined : THEME.danger }} value={nbIsbn} onChange={(e) => setNbIsbn(e.target.value)} placeholder="9786250000000" /></Field>
             <Field label="FİYAT (₺)"><input style={inputStyle} value={nbPrice} onChange={(e) => setNbPrice(e.target.value.replace(/[^0-9.]/g, ""))} placeholder="180" /></Field>
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr 2fr", gap: 12, marginTop: 10 }}>
@@ -2039,7 +2358,7 @@ function AuthorDetail({ author, onBack, onAdvanceStage, onApproveCover, onEditSt
             </Field>
             <Field label="SAYFA SAYISI"><input style={inputStyle} value={nbSayfa} onChange={(e) => setNbSayfa(e.target.value.replace(/[^0-9]/g, ""))} placeholder="200" /></Field>
             <Field label="TAHMİNİ BASKI MALİYETİ">
-              <div style={{ ...inputStyle, display: "flex", alignItems: "center", color: THEME.cyan, fontFamily: "'Space Mono',monospace" }}>
+              <div style={{ ...inputStyle, display: "flex", alignItems: "center", color: THEME.cyan, fontFamily: FONT_MONO }}>
                 {nbSayfa ? `${(Number(nbSayfa) * (nbTuru === "cocuk" ? 1.25 : 0.21) + 15).toFixed(2)}₺` : "— sayfa girin"}
                 <span style={{ fontSize: 10, color: THEME.textFaint, marginLeft: 8 }}>
                   ({nbTuru === "cocuk" ? "sf×1,25" : "sf×0,21"}+15)
@@ -2081,8 +2400,56 @@ function AuthorDetail({ author, onBack, onAdvanceStage, onApproveCover, onEditSt
         </div>
       )}
 
+      {/* Onaylanmış dekontlar — yanlış onay durumunda geri alınabilir */}
+      {(author.wallet.onayliReceipts || []).length > 0 && (
+        <div style={{ marginBottom: 24 }}>
+          <div style={{ fontSize: 12, letterSpacing: "0.05em", color: THEME.textMuted, marginBottom: 10 }}>ONAYLANMIŞ DEKONTLAR</div>
+          {(author.wallet.onayliReceipts || []).map((r) => (
+            <div key={r.id}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: THEME.panelBgAlt, border: `1px solid ${THEME.border}`, borderRadius: 8, padding: "10px 14px", marginBottom: 6 }}>
+                <div>
+                  <div style={{ color: THEME.textLight, fontWeight: 600, fontSize: 13 }}>
+                    {Number(r.amount).toLocaleString("tr-TR")}₺
+                    <span style={{ color: THEME.success, fontWeight: 600, fontSize: 11, marginLeft: 8 }}>✓ Onaylandı</span>
+                    <span style={{ color: THEME.textMuted, fontWeight: 400, fontSize: 11.5 }}> · {new Date(r.created_at).toLocaleDateString("tr-TR")}</span>
+                  </div>
+                  {r.note && <div style={{ fontSize: 11.5, color: THEME.textMuted, marginTop: 2 }}>{r.note}</div>}
+                </div>
+                <span
+                  onClick={() => { setDekontGeriAl(dekontGeriAl === r.id ? null : r.id); setDekontSebep(""); }}
+                  style={{ color: THEME.danger, cursor: "pointer", fontSize: 11.5, fontWeight: 600 }}
+                  title="Onayı geri al — yüklenen bakiye düşülür"
+                >Geri Al</span>
+              </div>
+              {dekontGeriAl === r.id && (
+                <div style={{ background: THEME.dangerBg, border: `1px solid ${THEME.danger}`, borderRadius: 8, padding: "11px 14px", marginBottom: 8 }}>
+                  <div style={{ fontSize: 12, color: THEME.danger, marginBottom: 6, fontWeight: 600 }}>
+                    ⚠ {Number(r.amount).toLocaleString("tr-TR")}₺ yazarın bakiyesinden düşülecek. Sebep yazın:
+                  </div>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <input
+                      value={dekontSebep}
+                      onChange={(e) => setDekontSebep(e.target.value)}
+                      placeholder="Örn: dekont sahte çıktı / tutar hatalı"
+                      style={{ flex: 1, padding: "8px 10px", borderRadius: 6, border: `1px solid ${THEME.danger}`, background: THEME.panelBg, color: THEME.textLight, fontSize: 12.5, fontFamily: FONT }}
+                    />
+                    <Btn small variant="danger" disabled={dekontBusy} onClick={() => dekontuGeriAl(r.id)}>{dekontBusy ? "..." : "Geri Al"}</Btn>
+                    <Btn small variant="ghost" onClick={() => { setDekontGeriAl(null); setDekontSebep(""); }}>Vazgeç</Btn>
+                  </div>
+                </div>
+              )}
+            </div>
+          ))}
+          {dekontMsg && (
+            <div style={{ fontSize: 12.5, padding: "7px 11px", borderRadius: 6, marginTop: 4,
+              color: dekontMsg.ok ? THEME.success : THEME.danger,
+              background: dekontMsg.ok ? THEME.successBg : THEME.dangerBg }}>{dekontMsg.text}</div>
+          )}
+        </div>
+      )}
+
       <div style={{ fontSize: 12, letterSpacing: "0.05em", color: THEME.textMuted, marginBottom: 10 }}>CÜZDAN BAKİYESİ</div>
-      <div style={{ fontFamily: "'Space Mono',monospace", fontSize: 20, color: THEME.cyan, marginBottom: 12 }}>{author.wallet.balance.toLocaleString("tr-TR")}₺</div>
+      <div style={{ fontFamily: FONT_MONO, fontSize: 20, color: THEME.cyan, marginBottom: 12 }}>{author.wallet.balance.toLocaleString("tr-TR")}₺</div>
       <CuzdanGecmisi authorId={author.id} authFetch={authFetch} />
 
       {/* Kitaplar */}
@@ -2141,10 +2508,10 @@ function AuthorDetail({ author, onBack, onAdvanceStage, onApproveCover, onEditSt
                   autoFocus value={isbnDraft} onChange={(e) => setIsbnDraft(e.target.value)}
                   onBlur={() => { onEditIsbn(book.id, isbnDraft.trim()); setEditingIsbn(null); }}
                   onKeyDown={(e) => { if (e.key === "Enter") e.target.blur(); }}
-                  placeholder="978..." style={{ background: THEME.bg, color: THEME.textLight, border: `1px solid ${THEME.cyan}`, borderRadius: 4, padding: "4px 8px", fontSize: 12.5, fontFamily: "'Space Mono',monospace", width: 160 }}
+                  placeholder="978..." style={{ background: THEME.bg, color: THEME.textLight, border: `1px solid ${THEME.cyan}`, borderRadius: 4, padding: "4px 8px", fontSize: 12.5, fontFamily: FONT_MONO, width: 160 }}
                 />
               ) : (
-                <span onClick={() => { setEditingIsbn(book.id); setIsbnDraft(book.isbn || ""); }} style={{ fontFamily: "'Space Mono',monospace", fontSize: 12.5, color: book.isbn ? THEME.textLight : THEME.textFaint, cursor: "pointer", borderBottom: `1px dashed ${THEME.border}` }}>
+                <span onClick={() => { setEditingIsbn(book.id); setIsbnDraft(book.isbn || ""); }} style={{ fontFamily: FONT_MONO, fontSize: 12.5, color: book.isbn ? THEME.textLight : THEME.textFaint, cursor: "pointer", borderBottom: `1px dashed ${THEME.border}` }}>
                   {book.isbn || "girilmemiş — tıkla ve ekle"}
                 </span>
               )}
@@ -2207,11 +2574,11 @@ function AuthorDetail({ author, onBack, onAdvanceStage, onApproveCover, onEditSt
                         onChange={(e) => setStockDraft(e.target.value)}
                         onBlur={() => { onEditStock(author.id, book.id, p.key, Number(stockDraft) || 0); setEditingStock(null); }}
                         onKeyDown={(e) => { if (e.key === "Enter") e.target.blur(); }}
-                        style={{ width: "100%", background: THEME.bg, color: THEME.textLight, border: `1px solid ${THEME.cyan}`, borderRadius: 4, textAlign: "center", fontSize: 13, fontFamily: "'Space Mono',monospace" }}
+                        style={{ width: "100%", background: THEME.bg, color: THEME.textLight, border: `1px solid ${THEME.cyan}`, borderRadius: 4, textAlign: "center", fontSize: 13, fontFamily: FONT_MONO }}
                       />
                     ) : (
                       <div onClick={() => { setEditingStock({ bookId: book.id, key: p.key }); setStockDraft(String(book.stock[p.key] ?? 0)); }}
-                        style={{ fontFamily: "'Space Mono',monospace", fontSize: 15, fontWeight: 700, color: THEME.textLight, cursor: "pointer" }}>
+                        style={{ fontFamily: FONT_MONO, fontSize: 15, fontWeight: 700, color: THEME.textLight, cursor: "pointer" }}>
                         {book.stock[p.key] ?? 0}
                       </div>
                     )}
@@ -2477,11 +2844,11 @@ export default function AdminPanel() {
     await authFetch(`/api/admin/discount-requests/${id}/reject`, { method: "POST" });
     loadDiscountRequests();
   };
-  const manualDiscountAdd = async ({ authorId, bookId, quantity, note }) => {
+  const manualDiscountAdd = async ({ authorId, bookId, quantity, note, tur, sebep }) => {
     try {
       const res = await authFetch("/api/admin/discount-manual", {
         method: "POST",
-        body: JSON.stringify({ authorId: parseInt(authorId, 10), bookId: bookId ? parseInt(bookId, 10) : null, quantity, note }),
+        body: JSON.stringify({ authorId: parseInt(authorId, 10), bookId: bookId ? parseInt(bookId, 10) : null, quantity, note, tur, sebep }),
       });
       const data = await res.json();
       loadDiscountRequests();
@@ -2533,9 +2900,9 @@ export default function AdminPanel() {
   ];
 
   return (
-    <div style={{ minHeight: "100vh", background: THEME.bg, display: "flex", fontFamily: "'Manrope',sans-serif" }}>
+    <div style={{ minHeight: "100vh", background: THEME.bg, display: "flex", fontFamily: FONT }}>
       <div style={{ width: 220, background: THEME.sidebarBg, borderRight: `1px solid ${THEME.border}`, padding: "20px 14px", flexShrink: 0 }}>
-        <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontWeight: 800, color: THEME.textLight, fontSize: 15, marginBottom: 2 }}>MST Yayıncılık</div>
+        <div style={{ fontFamily: FONT, fontWeight: 800, color: THEME.textLight, fontSize: 15, marginBottom: 2 }}>MST Yayıncılık</div>
         <div style={{ fontSize: 10.5, color: THEME.textMuted, letterSpacing: "0.05em", marginBottom: 4 }}>YÖNETİM PANELİ</div>
         <div style={{ fontSize: 10, color: THEME.cyan, marginBottom: 24 }}>{session.admin?.name || session.admin?.email}</div>
         {nav.map(([key, label]) => (
