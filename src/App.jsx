@@ -480,8 +480,23 @@ function Overview({ authors, onSyncAll, authFetch }) {
       const res = await onSyncAll();
       const data = await res.json().catch(() => ({}));
       if (res.ok) {
-        const adet = data.updated ?? data.count ?? data.synced;
-        setSyncMsg({ ok: true, text: adet != null ? `Senkronizasyon tamamlandı — ${adet} kayıt güncellendi.` : "Senkronizasyon tamamlandı." });
+        const adet = data.updated ?? data.count ?? data.synced ?? data.guncellenen;
+        let metin = adet != null ? `Senkronizasyon tamamlandı — ${adet} kayıt güncellendi.` : "Senkronizasyon tamamlandı.";
+        // Platform bazında eşleşme raporu
+        if (data.eslesme) {
+          const e = data.eslesme, c = data.cekilenUrun || {};
+          const isim = { mst: "MST", pazarama: "Pazarama", trendyol: "Trendyol", hepsiburada: "Hepsiburada", n11: "N11", idefix: "İdefix" };
+          const satirlar = Object.keys(isim).map((k) => {
+            const eslesen = e[k] || 0, cekilen = c[k] || 0;
+            const uyari = cekilen > 0 && eslesen === 0 ? "  ⚠ hiç eşleşmedi" : "";
+            return `${isim[k].padEnd(13)} ${String(eslesen).padStart(3)}/${e.toplamKitap} kitap eşleşti (${cekilen} ürün çekildi)${uyari}`;
+          });
+          if (e.hicEslesmeyenOrnekler?.length) {
+            satirlar.push("", "Hiçbir platformda eşleşmeyen kitaplar:", ...e.hicEslesmeyenOrnekler.map((o) => `  • ${o}`));
+          }
+          metin += "\n\n" + satirlar.join("\n");
+        }
+        setSyncMsg({ ok: true, text: metin });
       } else {
         setSyncMsg({ ok: false, text: data.error || "Senkronizasyon başarısız oldu." });
       }
@@ -498,7 +513,13 @@ function Overview({ authors, onSyncAll, authFetch }) {
         <h2 style={{ color: THEME.textLight, fontFamily: FONT, fontSize: 20, margin: 0 }}>Genel Bakış</h2>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           {syncMsg && (
-            <span style={{ fontSize: 12, color: syncMsg.ok ? THEME.gold : THEME.warn, maxWidth: 320 }}>{syncMsg.text}</span>
+            <pre style={{
+              fontSize: 11.5, color: syncMsg.ok ? THEME.textLight : THEME.danger,
+              background: syncMsg.ok ? THEME.panelBgAlt : THEME.dangerBg,
+              border: `1px solid ${syncMsg.ok ? THEME.border : THEME.danger}`,
+              borderRadius: 6, padding: "9px 12px", margin: 0, maxWidth: 460,
+              fontFamily: FONT_MONO, whiteSpace: "pre-wrap", lineHeight: 1.55,
+            }}>{syncMsg.text}</pre>
           )}
           <Btn onClick={runSync} disabled={syncing}>
             {syncing ? "Senkronize ediliyor…" : "↻ Tüm Sistemi Şimdi Senkronize Et"}
