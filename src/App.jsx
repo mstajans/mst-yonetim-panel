@@ -835,7 +835,7 @@ function DestekTalepleriView({ requests, loading, onUpdateStatus }) {
           <div style={{ flex: 1 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <div style={{ color: THEME.textLight, fontWeight: 700, fontSize: 14 }}>{r.author_name}</div>
-              <Badge fg={r.kategori === "sikayet" ? THEME.warn : THEME.cyan} bg={r.kategori === "sikayet" ? THEME.warnBg : "rgba(124,231,255,.08)"}>{KAT[r.kategori] || r.kategori}</Badge>
+              <Badge fg={r.kategori === "sikayet" ? THEME.warn : THEME.cyan} bg={r.kategori === "sikayet" ? THEME.warnBg : "rgba(27,95,168,0.08)"}>{KAT[r.kategori] || r.kategori}</Badge>
             </div>
             {r.konu && <div style={{ color: THEME.textLight, fontSize: 13, marginTop: 4, fontWeight: 600 }}>{r.konu}</div>}
             <div style={{ color: THEME.textMuted, fontSize: 12.5, marginTop: 4, lineHeight: 1.5 }}>{r.mesaj}</div>
@@ -1321,7 +1321,7 @@ function DuyurularView({ authFetch, authors }) {
           <div style={{ flex: 1 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <div style={{ color: THEME.textLight, fontWeight: 700, fontSize: 14 }}>{a.baslik}</div>
-              <Badge fg={a.hedef === "all" ? THEME.cyan : THEME.warn} bg={a.hedef === "all" ? "rgba(124,231,255,.08)" : THEME.warnBg}>{a.hedef === "all" ? "Herkes" : (a.author_name || "Yazar")}</Badge>
+              <Badge fg={a.hedef === "all" ? THEME.cyan : THEME.warn} bg={a.hedef === "all" ? "rgba(27,95,168,0.08)" : THEME.warnBg}>{a.hedef === "all" ? "Herkes" : (a.author_name || "Yazar")}</Badge>
             </div>
             <div style={{ color: THEME.textMuted, fontSize: 12.5, marginTop: 4, lineHeight: 1.5 }}>{a.icerik}</div>
             <div style={{ color: THEME.textFaint, fontSize: 10.5, marginTop: 4 }}>{new Date(a.created_at).toLocaleDateString("tr-TR")}</div>
@@ -1584,7 +1584,7 @@ function AuthorList({ authors, onSelect, onAddClick, onSetStatus, showPassive, o
                     {a.name}{pasif && <span style={{ marginLeft: 8, fontSize: 10, color: THEME.textFaint, letterSpacing: "0.05em" }}>PASİF</span>}
                   </td>
                   <td style={{ padding: "12px 14px", color: THEME.textMuted }}>{a.email}</td>
-                  <td style={{ padding: "12px 14px" }}><Badge fg={THEME.cyan} bg="rgba(124,231,255,.1)">{PLAN_LABELS[a.plan]}</Badge></td>
+                  <td style={{ padding: "12px 14px" }}><Badge fg={THEME.cyan} bg="rgba(27,95,168,0.10)">{PLAN_LABELS[a.plan]}</Badge></td>
                   <td style={{ padding: "12px 14px", color: THEME.textLight }}>{a.books.length}</td>
                   <td style={{ padding: "12px 14px", color: THEME.textLight, fontFamily: FONT_MONO }}>{sold}</td>
                   <td style={{ padding: "12px 14px" }}>
@@ -1919,6 +1919,7 @@ function GorevTakip({ authFetch, onSelectAuthor }) {
   const [islemde, setIslemde] = useState(null);    // bookId
   const [msg, setMsg] = useState(null);            // {bookId, ok, text}
   const [acikKitap, setAcikKitap] = useState(null); // adım listesi açık olan kitap
+  const [sirala, setSirala] = useState("oncelik");  // oncelik | gecikme | ilerleme | kitap | yazar | yeni
   const [yenile, setYenile] = useState(0);
 
   useEffect(() => {
@@ -1931,16 +1932,17 @@ function GorevTakip({ authFetch, onSelectAuthor }) {
     return () => { iptal = true; };
   }, [yenile]);
 
-  // Adımı tamamla / belirli adıma taşı
-  const asamayaTasi = async (bookId, stageIndex, adimLabel) => {
+  // Tek adımı bağımsız işaretle — süreç sıralı değildir
+  const adimIsaretle = async (bookId, stageKey, status, adimLabel) => {
     setIslemde(bookId); setMsg(null);
     try {
       const r = await authFetch(`/api/admin/books/${bookId}/stage`, {
-        method: "PATCH", body: JSON.stringify({ stageIndex }),
+        method: "PATCH", body: JSON.stringify({ stageKey, status }),
       });
       const d = await r.json();
       if (d.ok) {
-        setMsg({ bookId, ok: true, text: d.hediye ? `"${adimLabel}" tamamlandı. ${d.hediye}` : `"${adimLabel}" tamamlandı.` });
+        const durumMetin = status === "tamamlandi" ? "tamamlandı" : status === "devam" ? "devam ediyor" : status === "atlandi" ? "atlandı" : "beklemede";
+        setMsg({ bookId, ok: true, text: d.hediye ? `"${adimLabel}" ${durumMetin}. ${d.hediye}` : `"${adimLabel}" ${durumMetin}.` });
         setYenile((n) => n + 1);
       } else {
         setMsg({ bookId, ok: false, text: d.error || "İşlem yapılamadı." });
@@ -1961,6 +1963,27 @@ function GorevTakip({ authFetch, onSelectAuthor }) {
     if (filtre === "onay") return k.onayBekliyor;
     if (filtre === "yayinda") return k.yayinda;
     return true;
+  }).sort((x, y) => {
+    const tr = (a, b) => String(a || "").localeCompare(String(b || ""), "tr");
+    switch (sirala) {
+      case "gecikme":  // en çok geciken önce
+        return (x.kalanGun ?? 999) - (y.kalanGun ?? 999);
+      case "ilerleme": // en az ilerleyen önce
+        return (x.yuzde || 0) - (y.yuzde || 0);
+      case "kitap":
+        return tr(x.title, y.title);
+      case "yazar":
+        return tr(x.yazar, y.yazar);
+      case "yeni":     // en uzun süredir devam eden önce
+        return (y.gecenGun || 0) - (x.gecenGun || 0);
+      case "oncelik":
+      default:         // gecikmiş → takılan → onay bekleyen → diğerleri
+        if (x.yayinda !== y.yayinda) return x.yayinda ? 1 : -1;
+        if (x.gecikmis !== y.gecikmis) return x.gecikmis ? -1 : 1;
+        if (x.takildi !== y.takildi) return x.takildi ? -1 : 1;
+        if (x.onayBekliyor !== y.onayBekliyor) return x.onayBekliyor ? -1 : 1;
+        return (y.adimGun || 0) - (x.adimGun || 0);
+    }
   });
 
   const kart = (etiket, deger, renk, key) => (
@@ -1988,6 +2011,30 @@ function GorevTakip({ authFetch, onSelectAuthor }) {
         {kart("ONAY BEKLİYOR", ozet.onayBekleyen || 0, THEME.secondary, "onay")}
         {kart("YAYINDA", ozet.yayinda || 0, THEME.success, "yayinda")}
         {kart("TÜMÜ", ozet.toplam || 0, THEME.textMuted, "hepsi")}
+      </div>
+
+      {/* SIRALAMA */}
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
+        <span style={{ fontSize: 11.5, color: THEME.textMuted }}>Sırala:</span>
+        {[
+          ["oncelik", "Öncelik"],
+          ["gecikme", "En çok geciken"],
+          ["ilerleme", "En az ilerleyen"],
+          ["yeni", "En uzun süredir"],
+          ["kitap", "Kitap adı"],
+          ["yazar", "Yazar adı"],
+        ].map(([k, l]) => (
+          <span key={k} onClick={() => setSirala(k)} style={{
+            padding: "4px 10px", borderRadius: 5, fontSize: 11.5, cursor: "pointer",
+            background: sirala === k ? THEME.cyan : "transparent",
+            color: sirala === k ? THEME.onAccent : THEME.textMuted,
+            border: `1px solid ${sirala === k ? THEME.cyan : THEME.border}`,
+            fontWeight: sirala === k ? 700 : 500,
+          }}>{l}</span>
+        ))}
+        <span style={{ fontSize: 11, color: THEME.textFaint, marginLeft: "auto" }}>
+          {filtreli.length} kitap
+        </span>
       </div>
 
       {filtreli.length === 0 ? (
@@ -2037,56 +2084,74 @@ function GorevTakip({ authFetch, onSelectAuthor }) {
             {k.redaksiyonIstendi && <span style={{ color: THEME.textMuted }}>📝 Redaksiyon dahil</span>}
           </div>
 
-          {/* İŞLEM BUTONLARI — buradan doğrudan müdahale */}
-          {!k.yayinda && (
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", borderTop: `1px solid ${THEME.divider}`, paddingTop: 9 }}>
-              {k.onayBekliyor ? (
-                <span style={{ fontSize: 11.5, color: THEME.secondary }}>
-                  Bu adımı yazar onaylamalı — panelden tamamlanamaz.
-                </span>
-              ) : (
-                <Btn small variant="success" disabled={islemde === k.bookId}
-                  onClick={() => asamayaTasi(k.bookId, k.aktifAdimIndex, k.aktifAdimLabel)}>
-                  {islemde === k.bookId ? "..." : `✓ "${k.aktifAdimLabel}" Tamamlandı`}
-                </Btn>
-              )}
-              <Btn small variant="ghost" onClick={() => setAcikKitap(acikKitap === k.bookId ? null : k.bookId)}>
-                {acikKitap === k.bookId ? "Adımları gizle" : "Tüm adımlar"}
-              </Btn>
-              <Btn small variant="ghost" onClick={() => onSelectAuthor && onSelectAuthor(k.authorId)}>
-                Yazar detayı
-              </Btn>
-            </div>
-          )}
+          {/* İŞLEM ALANI — adımlar bağımsız işaretlenir, sıra zorunlu değildir */}
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", borderTop: `1px solid ${THEME.divider}`, paddingTop: 9 }}>
+            <Btn small variant={acikKitap === k.bookId ? "success" : "ghost"}
+              onClick={() => setAcikKitap(acikKitap === k.bookId ? null : k.bookId)}>
+              {acikKitap === k.bookId ? "Adımları gizle" : "⚙ Adımları yönet"}
+            </Btn>
+            <Btn small variant="ghost" onClick={() => onSelectAuthor && onSelectAuthor(k.authorId)}>
+              Yazar detayı
+            </Btn>
+            {!k.yayinda && (
+              <span style={{ fontSize: 11, color: THEME.textFaint }}>
+                Yazar uygulaması "Yayında" işaretlenince açılır
+              </span>
+            )}
+          </div>
 
-          {/* TÜM ADIMLAR — istenen adıma doğrudan atlama */}
+          {/* ADIM YÖNETİMİ — her adım bağımsız */}
           {acikKitap === k.bookId && (
-            <div style={{ marginTop: 10, background: THEME.panelBgAlt, borderRadius: 6, padding: "8px 10px" }}>
-              <div style={{ fontSize: 10.5, color: THEME.textMuted, marginBottom: 6 }}>
-                Bir adıma tıklayarak süreci oraya taşıyabilirsiniz (o adım ve öncesi tamamlanmış sayılır)
+            <div style={{ marginTop: 10, background: THEME.panelBgAlt, borderRadius: 6, padding: "10px 12px" }}>
+              <div style={{ fontSize: 10.5, color: THEME.textMuted, marginBottom: 8, lineHeight: 1.5 }}>
+                Süreç <b style={{ color: THEME.textLight }}>sıralı değildir</b> — her adımı bağımsız işaretleyebilirsiniz.
+                Adımın yanındaki butonlara tıklayın.
               </div>
               {(veri.asamalar || []).map((a, i) => {
                 const durum = k.adimlar?.[a.key]?.status || "beklemede";
+                const onayli = ONAY_ADIMLARI.includes(a.key);
                 const renk = durum === "tamamlandi" ? THEME.success
                   : durum === "devam" ? THEME.cyan
                   : durum === "atlandi" ? THEME.textFaint : THEME.textMuted;
-                const onayli = ONAY_ADIMLARI.includes(a.key);
+                const simge = durum === "tamamlandi" ? "✓" : durum === "devam" ? "▶" : durum === "atlandi" ? "–" : "○";
+                const yayinAdimi = a.key === "yayin";
                 return (
-                  <div key={a.key}
-                    onClick={() => !onayli && islemde !== k.bookId && asamayaTasi(k.bookId, i, a.label)}
-                    style={{
-                      display: "flex", justifyContent: "space-between", alignItems: "center",
-                      padding: "5px 7px", borderRadius: 4, fontSize: 12,
-                      cursor: onayli ? "default" : "pointer",
-                      background: durum === "devam" ? THEME.successBg : "transparent",
-                      opacity: onayli ? 0.65 : 1,
-                    }}>
-                    <span style={{ color: renk }}>
-                      {durum === "tamamlandi" ? "✓" : durum === "devam" ? "▶" : durum === "atlandi" ? "–" : "○"} {i + 1}. {a.label}
+                  <div key={a.key} style={{
+                    display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8,
+                    padding: "6px 8px", borderRadius: 4, marginBottom: 2,
+                    background: durum === "devam" ? THEME.successBg : yayinAdimi ? THEME.warnBg : "transparent",
+                    border: yayinAdimi ? `1px solid ${THEME.warn}` : "1px solid transparent",
+                  }}>
+                    <span style={{ color: renk, fontSize: 12, flex: 1 }}>
+                      {simge} {i + 1}. {a.label}
+                      {yayinAdimi && <b style={{ color: THEME.warn, fontSize: 10, marginLeft: 6 }}>← yazar erişimi</b>}
                     </span>
-                    <span style={{ fontSize: 10, color: THEME.textFaint }}>
-                      {onayli ? "yazar onayı" : durum === "atlandi" ? "atlandı" : ""}
-                    </span>
+                    {onayli ? (
+                      <span style={{ fontSize: 10, color: THEME.secondary, whiteSpace: "nowrap" }}>yazar onaylar</span>
+                    ) : (
+                      <span style={{ display: "flex", gap: 4 }}>
+                        {durum !== "tamamlandi" && (
+                          <span onClick={() => islemde !== k.bookId && adimIsaretle(k.bookId, a.key, "tamamlandi", a.label)}
+                            style={{ fontSize: 10, padding: "3px 7px", borderRadius: 4, cursor: "pointer",
+                              background: THEME.successBg, color: THEME.success, fontWeight: 600 }}>✓ Bitti</span>
+                        )}
+                        {durum !== "devam" && durum !== "tamamlandi" && (
+                          <span onClick={() => islemde !== k.bookId && adimIsaretle(k.bookId, a.key, "devam", a.label)}
+                            style={{ fontSize: 10, padding: "3px 7px", borderRadius: 4, cursor: "pointer",
+                              background: THEME.panelBg, color: THEME.cyan, border: `1px solid ${THEME.border}` }}>▶ Başlat</span>
+                        )}
+                        {durum !== "beklemede" && (
+                          <span onClick={() => islemde !== k.bookId && adimIsaretle(k.bookId, a.key, "beklemede", a.label)}
+                            style={{ fontSize: 10, padding: "3px 7px", borderRadius: 4, cursor: "pointer",
+                              background: THEME.panelBg, color: THEME.textMuted, border: `1px solid ${THEME.border}` }}>↺ Geri al</span>
+                        )}
+                        {durum !== "atlandi" && durum !== "tamamlandi" && (
+                          <span onClick={() => islemde !== k.bookId && adimIsaretle(k.bookId, a.key, "atlandi", a.label)}
+                            style={{ fontSize: 10, padding: "3px 7px", borderRadius: 4, cursor: "pointer",
+                              background: THEME.panelBg, color: THEME.textFaint, border: `1px solid ${THEME.border}` }}>– Atla</span>
+                        )}
+                      </span>
+                    )}
                   </div>
                 );
               })}
@@ -2552,7 +2617,7 @@ function AuthorDetail({ author, onBack, onAdvanceStage, onApproveCover, onEditSt
       <div style={{ marginTop: 14, marginBottom: 22, display: "flex", alignItems: "flex-start", justifyContent: "space-between" }}>
         <div>
           <h2 style={{ color: THEME.textLight, fontFamily: FONT, fontSize: 22, margin: "0 0 4px" }}>{author.name}</h2>
-          <div style={{ color: THEME.textMuted, fontSize: 13 }}>{author.email} · <Badge fg={THEME.cyan} bg="rgba(124,231,255,.1)">{PLAN_LABELS[author.plan]}</Badge>{author.status === "pasif" && <span style={{ marginLeft: 8, fontSize: 10, color: THEME.textFaint }}>PASİF</span>}</div>
+          <div style={{ color: THEME.textMuted, fontSize: 13 }}>{author.email} · <Badge fg={THEME.cyan} bg="rgba(27,95,168,0.10)">{PLAN_LABELS[author.plan]}</Badge>{author.status === "pasif" && <span style={{ marginLeft: 8, fontSize: 10, color: THEME.textFaint }}>PASİF</span>}</div>
         </div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
           <Btn small variant="ghost" onClick={() => { setMgmtTab(mgmtTab === "cred" ? null : "cred"); setMsg(null); }}>Yazar Bilgileri</Btn>
@@ -2872,6 +2937,7 @@ function AuthorDetail({ author, onBack, onAdvanceStage, onApproveCover, onEditSt
 // ============ Ana panel ============
 export default function AdminPanel() {
   const [session, setSession] = useState(null); // { token, admin }
+  const [hoverMenu, setHoverMenu] = useState(null); // sol menüde fareyle üzerinde olunan öğe
   const [authors, setAuthors] = useState([]);
   const [loadingAuthors, setLoadingAuthors] = useState(false);
   const [loadError, setLoadError] = useState("");
@@ -3182,12 +3248,21 @@ export default function AdminPanel() {
         <div style={{ fontSize: 10.5, color: THEME.textMuted, letterSpacing: "0.05em", marginBottom: 4 }}>YÖNETİM PANELİ</div>
         <div style={{ fontSize: 10, color: THEME.cyan, marginBottom: 24 }}>{session.admin?.name || session.admin?.email}</div>
         {nav.map(([key, label]) => (
-          <div key={key} onClick={() => { setView(key); setSelectedId(null); }} style={{
-            padding: "9px 12px", borderRadius: 6, marginBottom: 4, cursor: "pointer", fontSize: 13,
-            background: view === key ? "rgba(124,231,255,.08)" : "transparent",
-            color: view === key ? THEME.cyan : THEME.textMuted, fontWeight: view === key ? 700 : 500,
-            display: "flex", alignItems: "center", justifyContent: "space-between",
-          }}>
+          <div key={key}
+            onClick={() => { setView(key); setSelectedId(null); }}
+            onMouseEnter={() => setHoverMenu(key)}
+            onMouseLeave={() => setHoverMenu(null)}
+            style={{
+              padding: "9px 12px", borderRadius: 6, marginBottom: 4, cursor: "pointer", fontSize: 13,
+              background: view === key ? THEME.cyan
+                : hoverMenu === key ? "rgba(27,95,168,0.09)" : "transparent",
+              color: view === key ? THEME.onAccent
+                : hoverMenu === key ? THEME.cyan : THEME.textMuted,
+              fontWeight: view === key ? 700 : hoverMenu === key ? 600 : 500,
+              display: "flex", alignItems: "center", justifyContent: "space-between",
+              borderLeft: `3px solid ${view === key ? THEME.cyan : hoverMenu === key ? "rgba(27,95,168,0.35)" : "transparent"}`,
+              transition: "background 120ms, color 120ms, border-color 120ms",
+            }}>
             <span>{label}</span>
             {key === "discounts" && discountRequests.length > 0 && (
               <span style={{ background: THEME.warnBg, color: THEME.warn, borderRadius: 20, padding: "1px 7px", fontSize: 10.5, fontWeight: 700 }}>{discountRequests.length}</span>
@@ -3211,7 +3286,7 @@ export default function AdminPanel() {
         <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 16, position: "relative" }}>
           <div
             onClick={() => setBildirimAcik((v) => !v)}
-            style={{ position: "relative", cursor: "pointer", padding: "8px 10px", borderRadius: 8, background: bildirimAcik ? "rgba(124,231,255,.08)" : "transparent", display: "flex", alignItems: "center", gap: 6 }}
+            style={{ position: "relative", cursor: "pointer", padding: "8px 10px", borderRadius: 8, background: bildirimAcik ? "rgba(27,95,168,0.08)" : "transparent", display: "flex", alignItems: "center", gap: 6 }}
           >
             <span style={{ fontSize: 19 }}>🔔</span>
             {bildirimler.length > 0 && (
@@ -3234,7 +3309,7 @@ export default function AdminPanel() {
                   <div key={i}
                     onClick={() => { setView(b.view); setSelectedId(null); setBildirimAcik(false); }}
                     style={{ padding: "11px 16px", borderBottom: `1px solid ${THEME.divider}`, cursor: "pointer", display: "flex", gap: 10, alignItems: "flex-start" }}
-                    onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(124,231,255,.05)")}
+                    onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(27,95,168,0.05)")}
                     onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
                   >
                     <span style={{ fontSize: 15, marginTop: 1 }}>{BILDIRIM_IKON[b.tur] || "•"}</span>
