@@ -268,6 +268,7 @@ const PLATFORMS = [
   { key: "n11", label: "N11", badgeBg: "#5B21B6", badgeFg: "#FFFFFF" },
   { key: "hepsiburada", label: "Hepsiburada", badgeBg: "#FFFFFF", badgeFg: "#FF6000" },
   { key: "pazarama", label: "Pazarama", badgeBg: "#0F2A5C", badgeFg: "#FF2D87" },
+  { key: "idefix", label: "İdefix", badgeBg: "#FFFFFF", badgeFg: "#111111" },
 ];
 
 // Yazarın onayını gerektiren adımlar — admin panelden tamamlayamaz
@@ -415,7 +416,34 @@ function AdminLogin({ onLogin }) {
 }
 
 // ============ Genel Bakış ============
-function Overview({ authors, onSyncAll }) {
+function Overview({ authors, onSyncAll, authFetch }) {
+  const [idefixTest, setIdefixTest] = useState(null);   // { ok, text, detay }
+  const [idefixBusy, setIdefixBusy] = useState(false);
+
+  const idefixKontrol = async () => {
+    if (idefixBusy) return;
+    setIdefixBusy(true); setIdefixTest(null);
+    try {
+      const r = await authFetch("/api/admin/idefix-test");
+      const d = await r.json();
+      if (d.ok) {
+        setIdefixTest({
+          ok: true,
+          text: d.mesaj,
+          detay: (d.ornek || []).map((o) => `${o.ad || "(adsız)"} — ISBN: ${o.isbn || "yok"} — stok: ${o.stok}`).join("\n"),
+        });
+      } else {
+        setIdefixTest({
+          ok: false,
+          text: d.error || "Bağlantı kurulamadı.",
+          detay: [d.httpDurum ? `HTTP ${d.httpDurum}` : null, d.detay].filter(Boolean).join("\n"),
+        });
+      }
+    } catch {
+      setIdefixTest({ ok: false, text: "Sunucuya ulaşılamadı." });
+    } finally { setIdefixBusy(false); }
+  };
+
   const totalBooks = authors.reduce((s, a) => s + a.books.length, 0);
   const pendingCovers = authors.reduce((s, a) => s + a.books.filter((b) => !b.coverApproved).length, 0);
   const pendingPayments = authors.reduce((s, a) => s + a.wallet.pendingReceipts.length, 0);
@@ -472,6 +500,36 @@ function Overview({ authors, onSyncAll }) {
             <div style={{ fontSize: 10.5, color: THEME.textMuted, marginTop: 4, letterSpacing: "0.04em" }}>{c.label}</div>
           </div>
         ))}
+      </div>
+
+      {/* İDEFİX BAĞLANTI TESTİ */}
+      <div style={{ marginTop: 18, background: THEME.panelBg, border: `1px solid ${THEME.border}`, borderRadius: 8, padding: "14px 16px" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: THEME.textLight }}>İdefix Bağlantısı</div>
+            <div style={{ fontSize: 11.5, color: THEME.textMuted, marginTop: 2 }}>
+              API bilgilerinin doğru çalıştığını kontrol eder
+            </div>
+          </div>
+          <Btn small variant="ghost" disabled={idefixBusy} onClick={idefixKontrol}>
+            {idefixBusy ? "Kontrol ediliyor..." : "Bağlantıyı Test Et"}
+          </Btn>
+        </div>
+        {idefixTest && (
+          <div style={{
+            marginTop: 12, padding: "10px 12px", borderRadius: 6, fontSize: 12.5, lineHeight: 1.6,
+            background: idefixTest.ok ? THEME.successBg : THEME.dangerBg,
+            border: `1px solid ${idefixTest.ok ? THEME.success : THEME.danger}`,
+            color: idefixTest.ok ? THEME.success : THEME.danger,
+          }}>
+            <div style={{ fontWeight: 600 }}>{idefixTest.ok ? "✓ " : "✗ "}{idefixTest.text}</div>
+            {idefixTest.detay && (
+              <pre style={{ margin: "8px 0 0", fontSize: 11, fontFamily: FONT_MONO, color: THEME.textMuted, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+                {idefixTest.detay}
+              </pre>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -1797,6 +1855,7 @@ function MatchingEditor({ book, onSave, flash }) {
     { key: "n11", label: "N11" },
     { key: "hepsiburada", label: "Hepsiburada" },
     { key: "pazarama", label: "Pazarama" },
+    { key: "idefix", label: "İdefix" },
   ];
   const bas = book.baslangicStok || {};
   const kod = book.platformCodes || {};
@@ -3325,7 +3384,7 @@ export default function AdminPanel() {
         </div>
         {loadingAuthors && authors.length === 0 && <div style={{ color: THEME.textMuted, fontSize: 13 }}>Yükleniyor...</div>}
         {loadError && <div style={{ color: THEME.danger, fontSize: 13, marginBottom: 16 }}>{loadError}</div>}
-        {view === "overview" && <Overview authors={authors} onSyncAll={syncAll} />}
+        {view === "overview" && <Overview authors={authors} onSyncAll={syncAll} authFetch={authFetch} />}
         {view === "authors" && !selected && <AuthorList authors={authors} onSelect={(id) => setSelectedId(id)} onAddClick={() => setShowAddModal(true)} onSetStatus={setAuthorStatus} showPassive={showPassive} onTogglePassive={togglePassive} />}
         {view === "authors" && selected && (
           <AuthorDetail
