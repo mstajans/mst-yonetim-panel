@@ -427,11 +427,26 @@ function Overview({ authors, onSyncAll, authFetch }) {
       const r = await authFetch("/api/admin/idefix-test");
       const d = await r.json();
       if (d.ok) {
-        setIdefixTest({
-          ok: true,
-          text: d.mesaj,
-          detay: (d.ornek || []).map((o) => `${o.ad || "(adsız)"} — ISBN: ${o.isbn || "yok"} — stok: ${o.stok}`).join("\n"),
-        });
+        const satirlar = [];
+        if (d.ornek?.length) {
+          satirlar.push(...d.ornek.map((o) => `${o.ad || "(adsız)"} — ISBN: ${o.isbn || "yok"} — stok: ${o.stok}`));
+        }
+        // Ürün gelmediyse ham yanıtı göster — sebebini anlamak için
+        if (!d.toplamUrun) {
+          if (d.hamYanit) {
+            satirlar.push("── İdefix'in döndüğü yanıt ──");
+            satirlar.push(`Yapı: ${d.hamYanit.yapi}`);
+            if (d.hamYanit.anahtarlar?.length) satirlar.push(`Alanlar: ${d.hamYanit.anahtarlar.join(", ")}`);
+            if (d.hamYanit.ornekVeri) satirlar.push(`Ham veri: ${d.hamYanit.ornekVeri}`);
+          }
+          if (d.hamHata) {
+            satirlar.push("── İstek hatası ──");
+            satirlar.push(`HTTP ${d.hamHata.durum || "?"} — ${d.hamHata.mesaj || ""}`);
+            if (d.hamHata.govde) satirlar.push(d.hamHata.govde);
+          }
+          if (!d.hamYanit && !d.hamHata) satirlar.push("(İdefix boş yanıt döndü — envanterde satışa açık ürün görünmüyor)");
+        }
+        setIdefixTest({ ok: true, text: d.mesaj, detay: satirlar.join("\n") });
       } else {
         setIdefixTest({
           ok: false,
