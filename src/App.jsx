@@ -2262,6 +2262,183 @@ function YazarTelifToplami({ books, wallet }) {
   );
 }
 
+// ============ Yazara özel bilgilendirme ============
+// Yazarın gerçek durumuna bakıp mesaj taslağı önerir; onaylayıp gönderirsin.
+// Gönderilen mesaj yazarın uygulamasında "Duyuru & Destek" sekmesinde görünür.
+const ONCELIK_RENK = { yuksek: "#C0392B", orta: "#C9A227", dusuk: "#7A7A7A" };
+
+function BilgilendirmeKutusu({ author, authFetch }) {
+  const [oneriler, setOneriler] = useState(null);
+  const [yukleniyor, setYukleniyor] = useState(false);
+  const [hata, setHata] = useState("");
+  const [baslik, setBaslik] = useState("");
+  const [icerik, setIcerik] = useState("");
+  const [gonderiliyor, setGonderiliyor] = useState(false);
+  const [sonuc, setSonuc] = useState("");
+
+  const oneriGetir = async () => {
+    setYukleniyor(true); setHata(""); setOneriler(null);
+    try {
+      const r = await authFetch(`/api/admin/authors/${author.id}/mesaj-onerileri`);
+      const d = await r.json();
+      if (d.ok) setOneriler(d.oneriler || []);
+      else setHata(d.error || "Öneri alınamadı.");
+    } catch { setHata("Sunucuya ulaşılamadı."); }
+    finally { setYukleniyor(false); }
+  };
+
+  const gonder = async () => {
+    if (!baslik.trim() || !icerik.trim() || gonderiliyor) return;
+    setGonderiliyor(true); setSonuc("");
+    try {
+      const r = await authFetch("/api/admin/announcements", {
+        method: "POST",
+        body: JSON.stringify({ baslik: baslik.trim(), icerik: icerik.trim(), hedef: "author", authorId: author.id }),
+      });
+      const d = await r.json();
+      if (r.ok && d.ok) { setSonuc(`Gönderildi — ${author.name} uygulamasında görecek.`); setBaslik(""); setIcerik(""); }
+      else setSonuc(d.error || "Gönderilemedi.");
+    } catch { setSonuc("Sunucuya ulaşılamadı."); }
+    finally { setGonderiliyor(false); }
+  };
+
+  const inputStyle = { background: THEME.bg, color: THEME.textLight, border: `1px solid ${THEME.border}`, borderRadius: 4, padding: "8px 11px", fontSize: 13, fontFamily: "inherit", width: "100%", boxSizing: "border-box" };
+
+  return (
+    <div style={{ background: THEME.panelBg, border: `1px solid ${THEME.border}`, borderRadius: 8, padding: 16, marginBottom: 18 }}>
+      <div style={{ fontSize: 12, letterSpacing: "0.05em", color: THEME.textMuted, marginBottom: 4 }}>
+        {String(author.name).toLocaleUpperCase("tr-TR")} — ÖZEL BİLGİLENDİRME
+      </div>
+      <div style={{ fontSize: 11.5, color: THEME.textFaint, marginBottom: 12, lineHeight: 1.5 }}>
+        Gönderdiğin mesaj yalnızca bu yazara gider, uygulamasındaki Duyuru &amp; Destek sekmesinde görünür.
+      </div>
+
+      <Btn small variant="ghost" disabled={yukleniyor} onClick={oneriGetir}>
+        {yukleniyor ? "Durumu inceleniyor..." : "💡 Ne yazmalıyım? — öneri getir"}
+      </Btn>
+      {hata && <div style={{ fontSize: 12, color: THEME.warn, marginTop: 8 }}>{hata}</div>}
+
+      {oneriler && oneriler.length === 0 && (
+        <div style={{ fontSize: 12.5, color: THEME.textMuted, marginTop: 10 }}>
+          Şu an bu yazara gönderilmesi gereken özel bir şey görünmüyor — her şey yolunda.
+        </div>
+      )}
+
+      {oneriler && oneriler.length > 0 && (
+        <div style={{ display: "grid", gap: 8, marginTop: 12 }}>
+          {oneriler.map((o, i) => (
+            <div key={i} style={{ background: THEME.panelBgAlt, border: `1px solid ${THEME.border}`, borderRadius: 6, padding: "10px 12px" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "flex-start" }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: THEME.textLight }}>{o.baslik}</div>
+                <span style={{ fontSize: 9.5, color: ONCELIK_RENK[o.oncelik] || THEME.textFaint, border: `1px solid ${ONCELIK_RENK[o.oncelik] || THEME.border}`, borderRadius: 10, padding: "2px 7px", whiteSpace: "nowrap" }}>
+                  {o.oncelik === "yuksek" ? "öncelikli" : o.oncelik === "orta" ? "orta" : "düşük"}
+                </span>
+              </div>
+              <div style={{ fontSize: 12.5, color: THEME.textMuted, marginTop: 5, lineHeight: 1.6, whiteSpace: "pre-wrap" }}>{o.icerik}</div>
+              {o.neden && <div style={{ fontSize: 11, color: THEME.cyan, marginTop: 6 }}>Neden: {o.neden}</div>}
+              <div style={{ marginTop: 8 }}>
+                <Btn small variant="ghost" onClick={() => { setBaslik(o.baslik); setIcerik(o.icerik); setSonuc(""); }}>Bu taslağı kullan</Btn>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div style={{ marginTop: 14, borderTop: `1px solid ${THEME.border}`, paddingTop: 12, display: "grid", gap: 8 }}>
+        <div style={{ fontSize: 10.5, color: THEME.textMuted }}>MESAJ GÖNDER</div>
+        <input value={baslik} onChange={(e) => setBaslik(e.target.value)} placeholder="Başlık" style={inputStyle} />
+        <textarea value={icerik} onChange={(e) => setIcerik(e.target.value)} rows={5} placeholder="Mesaj — taslağı seçip düzenleyebilir ya da sıfırdan yazabilirsin"
+          style={{ ...inputStyle, resize: "vertical", lineHeight: 1.6 }} />
+        <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+          <Btn small disabled={gonderiliyor || !baslik.trim() || !icerik.trim()} onClick={gonder}>
+            {gonderiliyor ? "Gönderiliyor..." : "Gönder"}
+          </Btn>
+          {sonuc && <span style={{ fontSize: 12, color: sonuc.indexOf("Gönderildi") === 0 ? THEME.success : THEME.danger }}>{sonuc}</span>}
+        </div>
+      </div>
+
+      <OzelGorevKutusu author={author} authFetch={authFetch} />
+    </div>
+  );
+}
+
+// Yazara özel görev atama — sadece bu yazarın uygulamasında görünür
+function OzelGorevKutusu({ author, authFetch }) {
+  const [gorevler, setGorevler] = useState(null);
+  const [baslik, setBaslik] = useState("");
+  const [aciklama, setAciklama] = useState("");
+  const [xp, setXp] = useState("50");
+  const [kredi, setKredi] = useState("0");
+  const [calisiyor, setCalisiyor] = useState(false);
+  const [sonuc, setSonuc] = useState("");
+
+  const yukle = async () => {
+    try {
+      const r = await authFetch(`/api/admin/authors/${author.id}/ozel-gorevler`);
+      const d = await r.json();
+      setGorevler(d.gorevler || []);
+    } catch { setGorevler([]); }
+  };
+  useEffect(() => { yukle(); }, [author.id]);
+
+  const ata = async () => {
+    if (!baslik.trim() || calisiyor) return;
+    setCalisiyor(true); setSonuc("");
+    try {
+      const r = await authFetch(`/api/admin/authors/${author.id}/ozel-gorev`, {
+        method: "POST",
+        body: JSON.stringify({ baslik: baslik.trim(), aciklama: aciklama.trim() || null, xpOdul: Number(xp) || 0, krediOdul: Number(kredi) || 0 }),
+      });
+      const d = await r.json();
+      if (r.ok && d.ok) { setSonuc(d.mesaj); setBaslik(""); setAciklama(""); yukle(); }
+      else setSonuc(d.error || "Görev atanamadı.");
+    } catch { setSonuc("Sunucuya ulaşılamadı."); }
+    finally { setCalisiyor(false); }
+  };
+
+  const inputStyle = { background: THEME.bg, color: THEME.textLight, border: `1px solid ${THEME.border}`, borderRadius: 4, padding: "8px 11px", fontSize: 13, fontFamily: "inherit", width: "100%", boxSizing: "border-box" };
+
+  return (
+    <div style={{ marginTop: 16, borderTop: `1px solid ${THEME.border}`, paddingTop: 14 }}>
+      <div style={{ fontSize: 10.5, color: THEME.textMuted, marginBottom: 3 }}>ÖZEL GÖREV ATA</div>
+      <div style={{ fontSize: 11, color: THEME.textFaint, marginBottom: 10, lineHeight: 1.5 }}>
+        Sadece {author.name} görecek. Uygulamasında Kariyer & Görevler bölümünde, genel görevlerin üstünde çıkar.
+      </div>
+
+      {gorevler && gorevler.length > 0 && (
+        <div style={{ display: "grid", gap: 5, marginBottom: 12 }}>
+          {gorevler.map((g) => (
+            <div key={g.id} style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 12.5, background: THEME.panelBgAlt, borderRadius: 5, padding: "7px 10px" }}>
+              <span style={{ color: THEME.textLight }}>{g.baslik}</span>
+              <span style={{ fontSize: 11, fontFamily: FONT_MONO, color: g.durum === "tamamlandi" ? THEME.success : THEME.textMuted }}>
+                {g.durum === "tamamlandi" ? "✓ tamamlandı" : "devam ediyor"}
+                {g.xp_odul > 0 && <span style={{ color: THEME.textFaint }}>{" · "}{g.xp_odul} XP</span>}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div style={{ display: "grid", gap: 8 }}>
+        <input value={baslik} onChange={(e) => setBaslik(e.target.value)} placeholder="Görev başlığı — örn: Kapak taslağını onayla" style={inputStyle} />
+        <textarea value={aciklama} onChange={(e) => setAciklama(e.target.value)} rows={2} placeholder="Açıklama (opsiyonel)" style={{ ...inputStyle, resize: "vertical" }} />
+        <div style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
+          <div style={{ width: 90 }}>
+            <div style={{ fontSize: 10, color: THEME.textMuted, marginBottom: 3 }}>XP ÖDÜLÜ</div>
+            <input value={xp} onChange={(e) => setXp(e.target.value.replace(/[^0-9]/g, ""))} style={{ ...inputStyle, fontFamily: FONT_MONO }} />
+          </div>
+          <div style={{ width: 90 }}>
+            <div style={{ fontSize: 10, color: THEME.textMuted, marginBottom: 3 }}>KREDİ</div>
+            <input value={kredi} onChange={(e) => setKredi(e.target.value.replace(/[^0-9]/g, ""))} style={{ ...inputStyle, fontFamily: FONT_MONO }} />
+          </div>
+          <Btn small disabled={calisiyor || !baslik.trim()} onClick={ata}>{calisiyor ? "Atanıyor..." : "Görevi Ata"}</Btn>
+        </div>
+        {sonuc && <div style={{ fontSize: 12, color: sonuc.indexOf("atandı") > -1 ? THEME.success : THEME.danger, lineHeight: 1.5 }}>{sonuc}</div>}
+      </div>
+    </div>
+  );
+}
+
 // ============ MST sitesi stok düşümü ============
 // Havale / telefon / elden satışta tek tek ürüne girmeden stok düşürmek için.
 // İstek MST sitesine (WooCommerce) gider; site kabul ederse kayıtlar güncellenir.
@@ -3202,6 +3379,7 @@ function AuthorDetail({ author, onBack, onAdvanceStage, onApproveCover, onEditSt
           <Btn small variant="ghost" onClick={() => { setMgmtTab(mgmtTab === "cred" ? null : "cred"); setMsg(null); }}>Yazar Bilgileri</Btn>
           <Btn small variant="ghost" onClick={() => { setMgmtTab(mgmtTab === "telif" ? null : "telif"); setMsg(null); }}>Kazanç & Telif</Btn>
           <Btn small variant="ghost" onClick={() => { setMgmtTab(mgmtTab === "indirimli" ? null : "indirimli"); setMsg(null); }}>İndirimli & Hediye</Btn>
+          <Btn small variant="ghost" onClick={() => { setMgmtTab(mgmtTab === "mesaj" ? null : "mesaj"); setMsg(null); }}>✉️ Bilgilendirme & Görev</Btn>
           <Btn small variant="ghost" onClick={() => { setMgmtTab(mgmtTab === "sozlesme" ? null : "sozlesme"); setMsg(null); }}>Sözleşme</Btn>
           <Btn onClick={() => { setShowBookForm((v) => !v); setNbMsg(null); }}>{showBookForm ? "Vazgeç" : "+ Kitap Ekle"}</Btn>
           {author.status === "pasif" && onDeleteAuthor && (
@@ -3218,6 +3396,8 @@ function AuthorDetail({ author, onBack, onAdvanceStage, onApproveCover, onEditSt
       {mgmtTab === "telif" && <TelifPanel author={author} onPayout={onPayout} onUpdateRoyalty={onUpdateRoyalty} onUpdateWallet={onUpdateWallet} flash={flash} />}
       {mgmtTab === "indirimli" && <IndirimliHediyePanel author={author} authFetch={authFetch} />}
       {/* Sözleşme yönetimi */}
+      {mgmtTab === "mesaj" && <BilgilendirmeKutusu author={author} authFetch={authFetch} />}
+
       {mgmtTab === "sozlesme" && <SozlesmePanel author={author} onSave={onUpdateContract} flash={flash} />}
 
 
