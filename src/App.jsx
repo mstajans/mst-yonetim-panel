@@ -420,6 +420,20 @@ function Overview({ authors, onSyncAll, authFetch }) {
   const [idefixTest, setIdefixTest] = useState(null);   // { ok, text, detay }
   const [idefixBusy, setIdefixBusy] = useState(false);
 
+  const [saglik, setSaglik] = useState(null);
+  const [saglikBusy, setSaglikBusy] = useState(false);
+
+  const saglikKontrol = async () => {
+    if (saglikBusy) return;
+    setSaglikBusy(true); setSaglik(null);
+    try {
+      const r = await authFetch("/api/admin/saglik-kontrol");
+      const d = await r.json();
+      setSaglik(d.ok ? d : { durum: "sorunlu", ozet: d.error || "Kontrol yapılamadı.", bulgular: [] });
+    } catch { setSaglik({ durum: "sorunlu", ozet: "Sunucuya ulaşılamadı.", bulgular: [] }); }
+    finally { setSaglikBusy(false); }
+  };
+
   const idefixKontrol = async () => {
     if (idefixBusy) return;
     setIdefixBusy(true); setIdefixTest(null);
@@ -491,6 +505,9 @@ function Overview({ authors, onSyncAll, authFetch }) {
             const uyari = cekilen > 0 && eslesen === 0 ? "  ⚠ hiç eşleşmedi" : "";
             return `${isim[k].padEnd(13)} ${String(eslesen).padStart(3)}/${e.toplamKitap} kitap eşleşti (${cekilen} ürün çekildi)${uyari}`;
           });
+          if (e.temizlenenBayatKayit) {
+            satirlar.push("", `⚠ ${e.temizlenenBayatKayit} bayat stok kaydı temizlendi (artık eşleşmeyen platformlar)`);
+          }
           if (e.hicEslesmeyenOrnekler?.length) {
             satirlar.push("", "Hiçbir platformda eşleşmeyen kitaplar:", ...e.hicEslesmeyenOrnekler.map((o) => `  • ${o}`));
           }
@@ -536,6 +553,49 @@ function Overview({ authors, onSyncAll, authFetch }) {
             <div style={{ fontSize: 10.5, color: THEME.textMuted, marginTop: 4, letterSpacing: "0.04em" }}>{c.label}</div>
           </div>
         ))}
+      </div>
+
+      {/* SİSTEM SAĞLIK KONTROLÜ */}
+      <div style={{ marginTop: 18, background: THEME.panelBg, border: `1px solid ${THEME.border}`, borderRadius: 8, padding: "14px 16px" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: THEME.textLight }}>Sistem Sağlık Kontrolü</div>
+            <div style={{ fontSize: 11.5, color: THEME.textMuted, marginTop: 2 }}>
+              Telif tutarsızlığı, bayat stok, eksik veri gibi sessiz hataları tarar
+            </div>
+          </div>
+          <Btn small disabled={saglikBusy} onClick={saglikKontrol}>
+            {saglikBusy ? "Taranıyor..." : "Kontrol Et"}
+          </Btn>
+        </div>
+        {saglik && (
+          <div style={{ marginTop: 12 }}>
+            <div style={{
+              padding: "9px 12px", borderRadius: 6, fontSize: 12.5, fontWeight: 600,
+              background: saglik.durum === "saglikli" ? THEME.successBg : saglik.durum === "uyarili" ? THEME.warnBg : THEME.dangerBg,
+              color: saglik.durum === "saglikli" ? THEME.success : saglik.durum === "uyarili" ? THEME.warn : THEME.danger,
+              border: `1px solid ${saglik.durum === "saglikli" ? THEME.success : saglik.durum === "uyarili" ? THEME.warn : THEME.danger}`,
+            }}>
+              {saglik.durum === "saglikli" ? "✓ " : saglik.durum === "uyarili" ? "⚠ " : "✗ "}{saglik.ozet}
+              {saglik.incelenenKitap != null && (
+                <span style={{ fontWeight: 400, opacity: 0.85 }}> ({saglik.incelenenKitap} kitap incelendi)</span>
+              )}
+            </div>
+            {(saglik.bulgular || []).map((b, i) => (
+              <div key={i} style={{
+                marginTop: 8, padding: "9px 12px", borderRadius: 6, fontSize: 12,
+                background: THEME.panelBgAlt,
+                borderLeft: `3px solid ${b.seviye === "hata" ? THEME.danger : THEME.warn}`,
+              }}>
+                <div style={{ fontWeight: 600, color: b.seviye === "hata" ? THEME.danger : THEME.warn }}>
+                  {b.seviye === "hata" ? "✗" : "⚠"} {b.baslik}
+                  {b.sayi > 0 && <span style={{ marginLeft: 6, fontWeight: 400 }}>({b.sayi} kayıt)</span>}
+                </div>
+                <div style={{ color: THEME.textMuted, marginTop: 3, lineHeight: 1.55 }}>{b.detay}</div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* İDEFİX BAĞLANTI TESTİ */}
@@ -2611,7 +2671,7 @@ function CuzdanGecmisi({ authorId, authFetch }) {
   );
 }
 
-function AuthorDetail({ author, onBack, onAdvanceStage, onApproveCover, onEditStock, onApprovePayment, onRejectPayment, onEditIsbn, onEditCover, onSyncStock, onAddBook, onDeleteAuthor, onUpdateCredentials, onPayout, onUpdateRoyalty, onUpdateWallet, onUpdateContract, onUpdateMatching, onUpdateMaliyet, authFetch }) {
+function AuthorDetail({ author, onBack, onAdvanceStage, onApproveCover, onEditStock, onApprovePayment, onRejectPayment, onEditIsbn, onEditCover, onSyncStock, onAddBook, onDeleteBook, onDeleteAuthor, onUpdateCredentials, onPayout, onUpdateRoyalty, onUpdateWallet, onUpdateContract, onUpdateMatching, onUpdateMaliyet, authFetch }) {
   const [editingStock, setEditingStock] = useState(null); // {bookId, key}
   const [stockDraft, setStockDraft] = useState("");
   // Manuel satış girişi (D&R / Kitapyurdu)
@@ -2864,9 +2924,14 @@ function AuthorDetail({ author, onBack, onAdvanceStage, onApproveCover, onEditSt
                 <div style={{ color: THEME.textLight, fontWeight: 700, fontSize: 15 }}>{book.title}</div>
                 <div style={{ fontSize: 12, color: THEME.textMuted, marginTop: 2 }}>{book.totalSold} toplam satış</div>
               </div>
-              {published
-                ? <Badge fg={THEME.success} bg={THEME.successBg}>✓ Yayınlandı</Badge>
-                : <Badge fg={THEME.warn} bg={THEME.warnBg}>{book.pipeline[activeStageIdx].label}</Badge>}
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                {published
+                  ? <Badge fg={THEME.success} bg={THEME.successBg}>✓ Yayınlandı</Badge>
+                  : <Badge fg={THEME.warn} bg={THEME.warnBg}>{book.pipeline[activeStageIdx].label}</Badge>}
+                {onDeleteBook && (
+                  <Btn small variant="danger" onClick={() => onDeleteBook(book.id, book.title)}>🗑 Kitabı Sil</Btn>
+                )}
+              </div>
             </div>
 
             {!published && (
@@ -3109,6 +3174,42 @@ export default function AdminPanel() {
     const data = await res.json().catch(() => ({}));
     if (res.ok) loadAuthors();
     return data;
+  };
+
+  // Kitabı sil (yanlış eklenen kitap) — geçmiş kayıt varsa ikinci onay ister
+  const deleteBook = async (bookId, title) => {
+    if (!window.confirm(
+      `"${title}" kitabı silinsin mi?\n\nKitap, stok kayıtları ve yayın süreci kalıcı olarak silinir. Bu işlem geri alınamaz.`
+    )) return;
+
+    let res = await authFetch(`/api/admin/books/${bookId}`, { method: "DELETE", body: JSON.stringify({}) });
+    let data = await res.json().catch(() => ({}));
+
+    // Kitapta geçmiş kayıt varsa backend silmez, raporlar → ikinci onay
+    if (res.status === 409 && data.onayGerekli) {
+      const g = data.gecmis || {};
+      const satirlar = [];
+      if (g.satis) satirlar.push(`• ${g.satis} adet satış kaydı`);
+      if (g.indirimHediye) satirlar.push(`• ${g.indirimHediye} indirimli/hediye kaydı`);
+      if (g.reklam) satirlar.push(`• ${g.reklam} reklam kaydı`);
+      if (g.hizmet) satirlar.push(`• ${g.hizmet} hizmet siparişi`);
+      if (g.ceviri) satirlar.push(`• ${g.ceviri} çeviri talebi`);
+      const onayli = window.confirm(
+        `DİKKAT — "${title}" kitabının geçmiş kaydı var:\n\n${satirlar.join("\n")}\n\n` +
+        `Silersen:\n` +
+        `– Satış/stok verisi ve indirimli/hediye kayıtları tamamen silinir (telif hesabından da çıkar).\n` +
+        `– Reklam, hizmet ve çeviri kayıtları kitap adıyla geçmişte kalır.\n\n` +
+        `Yine de kalıcı olarak silinsin mi?`
+      );
+      if (!onayli) return;
+      res = await authFetch(`/api/admin/books/${bookId}?onay=SIL`, {
+        method: "DELETE", body: JSON.stringify({ onay: "SIL" }),
+      });
+      data = await res.json().catch(() => ({}));
+    }
+
+    if (res.ok) { loadAuthors(); alert(data.mesaj || "Kitap silindi."); }
+    else alert(data.error || "Kitap silinemedi.");
   };
 
   // Yazarı kalıcı sil (sadece pasif) — çift onay
@@ -3436,6 +3537,7 @@ export default function AdminPanel() {
             onEditCover={editCover}
             onSyncStock={syncStock}
             onAddBook={addBookToAuthor}
+            onDeleteBook={deleteBook}
             onDeleteAuthor={deleteAuthor}
             onUpdateCredentials={updateCredentials}
             onPayout={doPayout}
