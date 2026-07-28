@@ -2262,6 +2262,70 @@ function YazarTelifToplami({ books, wallet }) {
   );
 }
 
+// ============ MST sitesi stok düşümü ============
+// Havale / telefon / elden satışta tek tek ürüne girmeden stok düşürmek için.
+// İstek MST sitesine (WooCommerce) gider; site kabul ederse kayıtlar güncellenir.
+const STOK_DUSUM_TURLERI = [
+  { key: "okuyucu",   ad: "Okuyucu satışı",       aciklama: "Havale/telefon/elden satış. Stok düşer, yazarın telifi İŞLER." },
+  { key: "indirimli", ad: "Yazarın indirimli alımı", aciklama: "Yazar kendi kitabını indirimli aldı. Stok düşer, telif DÜŞÜLÜR." },
+  { key: "hediye",    ad: "Hediye / tanıtım",     aciklama: "Basına, jüriye, tanıtıma gönderildi. Stok düşer, telif DÜŞÜLÜR." },
+];
+
+function StokDusumEditor({ book, onSubmit }) {
+  const [adet, setAdet] = useState("1");
+  const [tur, setTur] = useState("okuyucu");
+  const [not, setNot] = useState("");
+  const [calisiyor, setCalisiyor] = useState(false);
+  const [sonuc, setSonuc] = useState(null);
+
+  const secili = STOK_DUSUM_TURLERI.find((t) => t.key === tur);
+  const gonder = async () => {
+    const n = Number(adet);
+    if (!n || n < 1 || calisiyor) return;
+    setCalisiyor(true); setSonuc(null);
+    const cevap = await onSubmit(book.id, { adet: n, tur, not });
+    setSonuc(cevap);
+    if (cevap?.ok) { setAdet("1"); setNot(""); }
+    setCalisiyor(false);
+  };
+
+  const inputStyle = { background: THEME.bg, color: THEME.textLight, border: `1px solid ${THEME.border}`, borderRadius: 4, padding: "7px 10px", fontSize: 12.5, fontFamily: "inherit" };
+
+  return (
+    <div style={{ marginTop: 12, background: THEME.panelBgAlt, border: `1px solid ${THEME.border}`, borderRadius: 8, padding: 14 }}>
+      <div style={{ fontSize: 11.5, color: THEME.textMuted, marginBottom: 10, lineHeight: 1.5 }}>
+        MST SİTESİ STOK DÜŞÜMÜ — istek doğrudan siteye gider, ürüne tek tek girmeye gerek yok.
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "90px 1fr", gap: 10, marginBottom: 10 }}>
+        <div>
+          <div style={{ fontSize: 10, color: THEME.textMuted, marginBottom: 3 }}>ADET</div>
+          <input value={adet} onChange={(e) => setAdet(e.target.value.replace(/[^0-9]/g, ""))}
+            style={{ ...inputStyle, width: "100%", fontFamily: FONT_MONO, boxSizing: "border-box" }} />
+        </div>
+        <div>
+          <div style={{ fontSize: 10, color: THEME.textMuted, marginBottom: 3 }}>İŞLEM TÜRÜ</div>
+          <select value={tur} onChange={(e) => setTur(e.target.value)} style={{ ...inputStyle, width: "100%", boxSizing: "border-box" }}>
+            {STOK_DUSUM_TURLERI.map((t) => <option key={t.key} value={t.key}>{t.ad}</option>)}
+          </select>
+        </div>
+      </div>
+      <div style={{ fontSize: 11, color: tur === "okuyucu" ? THEME.success : THEME.warn, marginBottom: 10, lineHeight: 1.5 }}>
+        {secili.aciklama}
+      </div>
+      <input value={not} onChange={(e) => setNot(e.target.value)} placeholder="Not (örn: havale — Ahmet Y., 28.07)"
+        style={{ ...inputStyle, width: "100%", boxSizing: "border-box", marginBottom: 10 }} />
+      <Btn small disabled={calisiyor || !adet} onClick={gonder}>
+        {calisiyor ? "Siteye yazılıyor..." : "Stoğu Düş"}
+      </Btn>
+      {sonuc && (
+        <div style={{ marginTop: 10, fontSize: 12, lineHeight: 1.55, color: sonuc.ok ? THEME.success : THEME.danger }}>
+          {sonuc.ok ? sonuc.mesaj : sonuc.error}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function TelifOzetiKutu({ book }) {
   const t = book.telif;
   if (!t || !t.toplamAdet) return (
@@ -3018,7 +3082,7 @@ function CuzdanGecmisi({ authorId, authFetch }) {
   );
 }
 
-function AuthorDetail({ author, onBack, onAdvanceStage, onApproveCover, onEditStock, onApprovePayment, onRejectPayment, onEditIsbn, onEditCover, onSyncStock, onAddBook, onDeleteBook, onDeleteAuthor, onUpdateCredentials, onPayout, onUpdateRoyalty, onUpdateWallet, onUpdateContract, onUpdateMatching, onUpdateMaliyet, onRefresh, authFetch }) {
+function AuthorDetail({ author, onBack, onAdvanceStage, onApproveCover, onEditStock, onApprovePayment, onRejectPayment, onEditIsbn, onEditCover, onSyncStock, onAddBook, onDeleteBook, onDeleteAuthor, onUpdateCredentials, onPayout, onUpdateRoyalty, onUpdateWallet, onUpdateContract, onUpdateMatching, onUpdateMaliyet, onStokDus, onRefresh, authFetch }) {
   const [editingStock, setEditingStock] = useState(null); // {bookId, key}
   const [stockDraft, setStockDraft] = useState("");
   // Manuel satış girişi (D&R / Kitapyurdu)
@@ -3095,6 +3159,7 @@ function AuthorDetail({ author, onBack, onAdvanceStage, onApproveCover, onEditSt
   // Kitap eşleştirme (başlangıç stok + platform kodları) düzenleme
   const [matchingBook, setMatchingBook] = useState(null); // bookId
   const [maliyetBook, setMaliyetBook] = useState(null); // bookId (baskı maliyeti editörü)
+  const [stokBook, setStokBook] = useState(null); // bookId (MST sitesi stok düşümü)
   const [silAcik, setSilAcik] = useState(null);   // bookId — silme onay kutusu açık olan kitap
   const [silMetin, setSilMetin] = useState("");   // kitap adı doğrulama metni
 
@@ -3368,10 +3433,19 @@ function AuthorDetail({ author, onBack, onAdvanceStage, onApproveCover, onEditSt
               <Btn small variant="ghost" onClick={() => setMatchingBook(matchingBook === book.id ? null : book.id)}>
                 {matchingBook === book.id ? "Eşleştirmeyi Kapat" : "⚙ Eşleştirme & Satış"}
               </Btn>
+              {onStokDus && (
+                <Btn small variant="ghost" onClick={() => setStokBook(stokBook === book.id ? null : book.id)}>
+                  {stokBook === book.id ? "Stok Düşümünü Kapat" : "📦 Stok Düş"}
+                </Btn>
+              )}
             </div>
 
             {/* Telif özeti — her kitapta görünür */}
             <TelifOzetiKutu book={book} />
+
+            {stokBook === book.id && onStokDus && (
+              <StokDusumEditor book={book} onSubmit={onStokDus} />
+            )}
 
             {maliyetBook === book.id && onUpdateMaliyet && (
               <MaliyetEditor book={book} onSave={onUpdateMaliyet} flash={(ok, t) => setMsg({ ok, text: t })} />
@@ -3587,6 +3661,20 @@ export default function AdminPanel() {
     const data = await res.json().catch(() => ({}));
     if (res.ok) loadAuthors();
     return data;
+  };
+
+  // MST sitesinde stok düşümü — istek siteye gider, sonuç kullanıcıya döner
+  const stokDus = async (bookId, { adet, tur, not }) => {
+    try {
+      const r = await authFetch(`/api/admin/books/${bookId}/stok-dus`, {
+        method: "POST", body: JSON.stringify({ adet, tur, not }),
+      });
+      const d = await r.json();
+      if (r.ok && d.ok) { loadAuthors(); return d; }
+      return { ok: false, error: d.error || "Stok düşülemedi." };
+    } catch {
+      return { ok: false, error: "Sunucuya ulaşılamadı." };
+    }
   };
 
   // Kitabı sil (yanlış eklenen kitap) — geçmiş kayıt varsa ikinci onay ister
@@ -3952,6 +4040,7 @@ export default function AdminPanel() {
             onSyncStock={syncStock}
             onAddBook={addBookToAuthor}
             onDeleteBook={deleteBook}
+            onStokDus={stokDus}
             onRefresh={loadAuthors}
             onDeleteAuthor={deleteAuthor}
             onUpdateCredentials={updateCredentials}
