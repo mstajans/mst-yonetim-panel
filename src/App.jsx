@@ -1064,6 +1064,167 @@ const TEKLIF_DURUM = {
   iptal:       { ad: "İptal",         renk: "#7A7A7A" },
 };
 
+// ============ Yazar Kampanyaları — onay ekranı ============
+// Yazar kampanya açtığında bütçesi BLOKE edilir, harcanmaz. Burada onaylarsan
+// sistem Meta'da gerçek kampanya kurar. Reddedersen bütçe otomatik iade edilir.
+const KAMP_DURUM = {
+  onay_bekliyor: { ad: "Onay bekliyor", renk: "#C0392B" },
+  onaylandi:     { ad: "Onaylandı",     renk: "#C9A227" },
+  yayinda:       { ad: "Yayında",       renk: "#2E7D32" },
+  bitti:         { ad: "Tamamlandı",    renk: "#7A7A7A" },
+  reddedildi:    { ad: "Reddedildi",    renk: "#7A7A7A" },
+  iptal:         { ad: "İptal",         renk: "#7A7A7A" },
+};
+
+function YazarKampanyalari({ authFetch }) {
+  const [liste, setListe] = useState(null);
+  const [sonuc, setSonuc] = useState("");
+  const [calisan, setCalisan] = useState(null);
+
+  const yukle = async () => {
+    try {
+      const r = await authFetch("/api/admin/reklam/kampanyalar");
+      const d = await r.json();
+      if (d.ok) setListe(d.kampanyalar); else setSonuc(d.error || "Okunamadı.");
+    } catch { setSonuc("Sunucuya ulaşılamadı."); }
+  };
+  useEffect(() => { yukle(); }, []);
+
+  const islem = async (id, tur) => {
+    let sebep = "";
+    if (tur === "reddet") {
+      sebep = window.prompt("Red sebebi (yazara iletilecek):", "Kitap görseli veya bilgileri eksik");
+      if (sebep === null) return;
+    } else {
+      if (!window.confirm("Kampanya Meta'da gerçekten oluşturulacak ve yayına alınacak. Onaylıyor musun?")) return;
+    }
+    setCalisan(id); setSonuc("");
+    try {
+      const r = await authFetch(`/api/admin/reklam/kampanya/${id}/${tur === "reddet" ? "reddet" : "onayla"}`, {
+        method: "POST", body: JSON.stringify(tur === "reddet" ? { sebep } : {}),
+      });
+      const d = await r.json();
+      setSonuc(d.ok ? d.mesaj : (d.error || "İşlem yapılamadı."));
+      yukle();
+    } catch { setSonuc("Sunucuya ulaşılamadı."); }
+    finally { setCalisan(null); }
+  };
+
+  if (!liste) return <div style={{ color: THEME.textMuted, fontSize: 13 }}>{sonuc || "Yükleniyor..."}</div>;
+
+  return (
+    <div>
+      <h2 style={{ color: THEME.textLight, fontFamily: FONT, fontSize: 20, marginBottom: 6 }}>Yazar Kampanyaları</h2>
+      <div style={{ color: THEME.textMuted, fontSize: 13, marginBottom: 16, lineHeight: 1.55, maxWidth: 700 }}>
+        Yazarın açtığı kampanyalar. Bütçe ayrılmış durumda — <b>henüz harcanmadı</b>.
+        Onayladığında sistem Meta'da gerçek kampanya kurar ve yayına alır.
+        Reddedersen bütçe yazara otomatik iade edilir ve sebep kendisine bildirilir.
+      </div>
+      {sonuc && <div style={{ fontSize: 12.5, color: THEME.textLight, marginBottom: 14, background: THEME.panelBgAlt, padding: "10px 12px", borderRadius: 6 }}>{sonuc}</div>}
+      {liste.length === 0 && <div style={{ color: THEME.textFaint, fontSize: 13 }}>Henüz kampanya yok.</div>}
+
+      <div style={{ display: "grid", gap: 10 }}>
+        {liste.map((k) => {
+          const d = KAMP_DURUM[k.durum] || KAMP_DURUM.onay_bekliyor;
+          const bekliyor = k.durum === "onay_bekliyor";
+          return (
+            <div key={k.id} style={{ background: THEME.panelBg, border: `1px solid ${bekliyor ? d.renk : THEME.border}`, borderRadius: 8, padding: "14px 16px" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+                <div>
+                  <div style={{ fontSize: 14, color: THEME.textLight, fontWeight: 600 }}>
+                    {k.yazar} <span style={{ color: THEME.textFaint, fontSize: 11.5 }}>{PLAN_LABELS[k.plan] || k.plan}</span>
+                  </div>
+                  <div style={{ fontSize: 12.5, color: THEME.cyan, marginTop: 2 }}>{k.kitap}</div>
+                  <div style={{ fontSize: 11.5, color: THEME.textMuted, marginTop: 6 }}>
+                    {Number(k.butce).toLocaleString("tr-TR")} ₺ · {k.gun_sayisi} gün ·
+                    {" "}{k.amac === "bilinirlik" ? "bilinirlik" : "satış"} · {k.hedef_kitle}
+                    {" "}({k.yas_min}-{k.yas_max}, {k.cinsiyet})
+                  </div>
+                  {k.isbn ? null : <div style={{ fontSize: 11.5, color: THEME.warn, marginTop: 5 }}>⚠ Kitapta ISBN yok</div>}
+                  {k.red_sebebi && <div style={{ fontSize: 11.5, color: THEME.danger, marginTop: 5 }}>{k.red_sebebi}</div>}
+                  {k.meta_campaign_id && <div style={{ fontSize: 11, color: THEME.textFaint, marginTop: 5, fontFamily: FONT_MONO }}>Meta: {k.meta_campaign_id}</div>}
+                </div>
+                <div style={{ textAlign: "right" }}>
+                  <span style={{ fontSize: 10.5, color: d.renk, border: `1px solid ${d.renk}`, borderRadius: 12, padding: "3px 9px", whiteSpace: "nowrap" }}>{d.ad}</span>
+                  {bekliyor && (
+                    <div style={{ marginTop: 10, display: "flex", gap: 6, justifyContent: "flex-end" }}>
+                      <Btn small disabled={calisan === k.id} onClick={() => islem(k.id, "onayla")}>Onayla ve Yayınla</Btn>
+                      <Btn small variant="ghost" disabled={calisan === k.id} onClick={() => islem(k.id, "reddet")}>Reddet</Btn>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ============ Meta dönüşüm beslemesi ============
+// Satış telefonda kapandığı için Meta müşteriye dönüşen konuşmaları göremiyor.
+// Bu kart, sözleşme imzalayan yazarları Meta'ya bildirir; algoritma böylece
+// "ucuz konuşma" yerine "gerçek müşteri" arayan hale gelir.
+function DonusumBeslemesi({ authFetch }) {
+  const [veri, setVeri] = useState(null);
+  const [calisiyor, setCalisiyor] = useState(false);
+  const [sonuc, setSonuc] = useState("");
+
+  const yukle = async () => {
+    try {
+      const r = await authFetch("/api/admin/meta/donusum-bekleyenler");
+      const d = await r.json();
+      if (d.ok) setVeri(d); else setSonuc(d.error || "Okunamadı.");
+    } catch { setSonuc("Sunucuya ulaşılamadı."); }
+  };
+  useEffect(() => { yukle(); }, []);
+
+  const gonder = async () => {
+    if (calisiyor) return;
+    setCalisiyor(true); setSonuc("");
+    try {
+      const r = await authFetch("/api/admin/meta/donusum-gonder", { method: "POST", body: "{}" });
+      const d = await r.json();
+      setSonuc(d.ok ? d.mesaj + (d.hataliSayi ? ` (${d.hataliSayi} hata)` : "") : (d.error || "Gönderilemedi."));
+      yukle();
+    } catch { setSonuc("Sunucuya ulaşılamadı."); }
+    finally { setCalisiyor(false); }
+  };
+
+  return (
+    <div style={{ background: THEME.panelBg, border: `1px solid ${THEME.cyan}`, borderRadius: 8, padding: "14px 16px", marginBottom: 18 }}>
+      <div style={{ fontSize: 13, fontWeight: 700, color: THEME.textLight, marginBottom: 3 }}>Meta Dönüşüm Beslemesi</div>
+      <div style={{ fontSize: 11.5, color: THEME.textMuted, marginBottom: 12, lineHeight: 1.55, maxWidth: 660 }}>
+        Satışlar telefonda kapandığı için Meta hangi konuşmanın müşteriye dönüştüğünü göremiyor —
+        her gün sıfırdan tahmin ediyor. Sözleşme imzalayan yazarları bildirdiğimizde
+        "bunlara benzeyenleri bul" diyebilir hale geliyor. Kişisel bilgi gönderilmez,
+        yalnızca geri döndürülemez şifreli özet.
+      </div>
+
+      {veri && (
+        <div style={{ display: "flex", gap: 22, marginBottom: 12, flexWrap: "wrap" }}>
+          <div>
+            <div style={{ fontSize: 22, fontFamily: FONT_MONO, fontWeight: 700, color: veri.bekleyen ? THEME.cyan : THEME.textFaint }}>{veri.bekleyen}</div>
+            <div style={{ fontSize: 10.5, color: THEME.textMuted }}>bildirilmeyi bekleyen</div>
+          </div>
+          {veri.epostasiz > 0 && (
+            <div>
+              <div style={{ fontSize: 22, fontFamily: FONT_MONO, fontWeight: 700, color: THEME.warn }}>{veri.epostasiz}</div>
+              <div style={{ fontSize: 10.5, color: THEME.textMuted }}>e-postası yok — bildirilemez</div>
+            </div>
+          )}
+        </div>
+      )}
+
+      <Btn small disabled={calisiyor || !veri || !veri.bekleyen} onClick={gonder}>
+        {calisiyor ? "Gönderiliyor..." : "Sözleşmeleri Meta'ya bildir"}
+      </Btn>
+      {sonuc && <div style={{ fontSize: 12, color: THEME.textLight, marginTop: 10, lineHeight: 1.5 }}>{sonuc}</div>}
+    </div>
+  );
+}
+
 function ReklamBasvurulari({ authFetch }) {
   const [liste, setListe] = useState(null);
   const [hata, setHata] = useState("");
@@ -1083,6 +1244,8 @@ function ReklamBasvurulari({ authFetch }) {
 
   return (
     <div>
+      <DonusumBeslemesi authFetch={authFetch} />
+
       <h2 style={{ color: THEME.textLight, fontFamily: FONT, fontSize: 20, marginBottom: 6 }}>Reklam Başvuruları</h2>
       <div style={{ color: THEME.textMuted, fontSize: 13, marginBottom: 16, lineHeight: 1.55 }}>
         Yazarların kapsamlı reklam talepleri. Teklifi kalem kalem hazırlarsın, yazar uygulamasından onaylar.
@@ -4274,6 +4437,7 @@ export default function AdminPanel() {
     ["orders", "Mağaza Siparişleri"], ["ads", "Reklam Talepleri"], ["translations", "Çeviri Talepleri"],
     ["destek", "Destek & Şikayet"], ["duyurular", "Duyurular"], ["meta", "Meta Reklam"],
     ["oyun", "Görev & Ödül"],
+    ["yazarKampanya", "Yazar Kampanyaları"],
     ["reklamTeklif", "Reklam Başvuruları"],
     ["eslesme", "Eşleşme Teşhisi"],
     ["isbn", "Toplu ISBN"],
@@ -4405,6 +4569,7 @@ export default function AdminPanel() {
         {view === "duyurular" && <DuyurularView authFetch={authFetch} authors={authors} />}
         {view === "meta" && <MetaReklamView authFetch={authFetch} />}
         {view === "oyun" && <OyunView authFetch={authFetch} authors={authors} />}
+        {view === "yazarKampanya" && <YazarKampanyalari authFetch={authFetch} />}
         {view === "reklamTeklif" && <ReklamBasvurulari authFetch={authFetch} />}
         {view === "eslesme" && <EslesmeTeshisi authFetch={authFetch} onSelectAuthor={(id) => { setView("authors"); setSelectedId(id); }} />}
         {view === "isbn" && <BulkIsbnUpload onSubmit={bulkIsbn} />}
