@@ -416,6 +416,188 @@ function AdminLogin({ onLogin }) {
 }
 
 // ============ Genel Bakış ============
+// ============ Yönetim Paneli AI Asistanı ============
+// Panelin kendi yapay zekası: sistemdeki veriyi okur, analiz ve geliştirme notu üretir.
+const ASISTAN_HAZIR_SORULAR = [
+  { etiket: "Bugün neye bakmalıyım?", soru: "Sistemdeki verilere bakarak bugün önceliklendirmem gereken en kritik 3 şeyi söyle. Her biri için ne yapmam gerektiğini de yaz." },
+  { etiket: "Uygulama geliştirme notları", soru: "Yazarların uygulamayı nasıl kullandığına ve AI menajere hangi konuları sorduğuna bakarak uygulamada eksik olan özellikleri, bozuk görünen akışları ve fırsatları başlıklar halinde listele. Her madde için neden böyle düşündüğünü kısaca açıkla." },
+  { etiket: "Satışı nasıl artırırım?", soru: "Satış verisine, platform dağılımına ve yazar davranışına bakarak satışı artırmak için somut öneriler ver. Hangi kitaplara ve hangi yazarlara odaklanmam gerektiğini söyle." },
+  { etiket: "Riskli yazarlar", soru: "Uzaklaşan, ilgisi azalan veya memnuniyetsizlik sinyali veren yazarlar konusunda ne yapmalıyım? Geri kazanma planı öner." },
+  { etiket: "Veri sağlığı", soru: "Verilerde tutarsızlık, eksiklik veya şüpheli görünen bir şey var mı? ISBN'siz kitaplar, hiç satmayan kitaplar ve platform eşleşmeleri açısından değerlendir." },
+];
+
+function PanelAsistani({ authFetch }) {
+  const [cevap, setCevap] = useState(null);
+  const [calisiyor, setCalisiyor] = useState(false);
+  const [hata, setHata] = useState("");
+  const [soru, setSoru] = useState("");
+  const [sonSoru, setSonSoru] = useState("");
+
+  const sor = async (metin) => {
+    const s = String(metin || "").trim();
+    if (!s || calisiyor) return;
+    setCalisiyor(true); setHata(""); setCevap(null); setSonSoru(s);
+    try {
+      const r = await authFetch("/api/admin/asistan", { method: "POST", body: JSON.stringify({ soru: s }) });
+      const d = await r.json();
+      if (d.ok) setCevap(d.cevap);
+      else setHata(d.error || "Asistan yanıt veremedi.");
+    } catch { setHata("Sunucuya ulaşılamadı."); }
+    finally { setCalisiyor(false); }
+  };
+
+  return (
+    <div style={{ marginTop: 18, background: THEME.panelBg, border: `1px solid ${THEME.cyan}`, borderRadius: 8, padding: "16px 18px" }}>
+      <div style={{ fontSize: 14, fontWeight: 700, color: THEME.textLight, marginBottom: 3 }}>MST Asistanı</div>
+      <div style={{ fontSize: 11.5, color: THEME.textMuted, marginBottom: 12, lineHeight: 1.5, maxWidth: 700 }}>
+        Sistemdeki tüm veriyi (yazarlar, kitaplar, satışlar, talepler, uygulama kullanımı) okur ve yorumlar.
+        Grafik okuyup yorumu sen yapma — sor, o söylesin.
+      </div>
+
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 7, marginBottom: 12 }}>
+        {ASISTAN_HAZIR_SORULAR.map((h) => (
+          <Btn key={h.etiket} small variant="ghost" disabled={calisiyor} onClick={() => sor(h.soru)}>{h.etiket}</Btn>
+        ))}
+      </div>
+
+      <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+        <input
+          value={soru} onChange={(e) => setSoru(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") { sor(soru); setSoru(""); } }}
+          placeholder="Ya da kendi sorunu yaz: 'Hangi yazarım en çok kazandırıyor?'"
+          style={{ flex: 1, background: THEME.bg, color: THEME.textLight, border: `1px solid ${THEME.border}`, borderRadius: 6, padding: "9px 12px", fontSize: 13, fontFamily: "inherit" }}
+        />
+        <Btn disabled={calisiyor || !soru.trim()} onClick={() => { sor(soru); setSoru(""); }}>Sor</Btn>
+      </div>
+
+      {calisiyor && (
+        <div style={{ fontSize: 12.5, color: THEME.textMuted, padding: "10px 0" }}>
+          Veriler okunuyor ve analiz ediliyor... (10-20 saniye)
+        </div>
+      )}
+      {hata && (
+        <div style={{ fontSize: 12.5, color: THEME.danger, background: THEME.dangerBg, borderRadius: 6, padding: "10px 12px" }}>{hata}</div>
+      )}
+      {cevap && !calisiyor && (
+        <div style={{ background: THEME.bg, border: `1px solid ${THEME.border}`, borderRadius: 6, padding: "14px 16px" }}>
+          <div style={{ fontSize: 10.5, color: THEME.textFaint, marginBottom: 8 }}>SORU: {sonSoru}</div>
+          <div style={{ fontSize: 13.5, color: THEME.textLight, lineHeight: 1.7, whiteSpace: "pre-wrap" }}>{cevap}</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ============ Yazar Aktifliği — Genel Bakış paneli ============
+// Amaç: kim aktif, kim uzaklaşıyor, kim kayıp. Geri dönüşüm kampanyasının hedef listesi buradan çıkar.
+const SEGMENT_GORUNUM = {
+  aktif:         { ad: "Aktif",          alt: "son 7 gün",     renk: "#2E7D32" },
+  ilgisiAzalan:  { ad: "İlgisi azalan",  alt: "8-30 gün",      renk: "#C9A227" },
+  uyuyan:        { ad: "Uyuyan",         alt: "31-90 gün",     renk: "#E07B39" },
+  kayip:         { ad: "Kayıp",          alt: "90+ gün",       renk: "#C0392B" },
+  hicGirmemis:   { ad: "Hiç girmemiş",   alt: "kayıt yok",     renk: "#7A7A7A" },
+};
+
+function AktiflikPaneli({ authFetch }) {
+  const [veri, setVeri] = useState(null);
+  const [yukleniyor, setYukleniyor] = useState(true);
+  const [hata, setHata] = useState("");
+  const [acikSegment, setAcikSegment] = useState(null);
+
+  useEffect(() => {
+    let iptal = false;
+    authFetch("/api/admin/aktiflik-ozet")
+      .then((r) => r.json())
+      .then((d) => { if (!iptal) { if (d.ok) setVeri(d); else setHata(d.error || "Aktiflik verisi okunamadı."); } })
+      .catch(() => { if (!iptal) setHata("Sunucuya ulaşılamadı."); })
+      .finally(() => { if (!iptal) setYukleniyor(false); });
+    return () => { iptal = true; };
+  }, []);
+
+  if (yukleniyor) return <div style={{ marginTop: 18, fontSize: 12.5, color: THEME.textMuted }}>Yazar aktifliği yükleniyor...</div>;
+  if (hata) return (
+    <div style={{ marginTop: 18, background: THEME.panelBg, border: `1px solid ${THEME.border}`, borderRadius: 8, padding: "14px 16px", fontSize: 12.5, color: THEME.textMuted }}>
+      <b style={{ color: THEME.textLight }}>Yazar Aktifliği</b> — {hata}
+    </div>
+  );
+  if (!veri) return null;
+
+  const segmentler = Object.entries(SEGMENT_GORUNUM);
+  const toplamKayit = Object.values(veri.segmentler).reduce((t, n) => t + n, 0);
+  const listelenen = acikSegment ? veri.yazarlar.filter((y) => {
+    const harita = { aktif: "aktif", ilgisiAzalan: "ilgisi_azalan", uyuyan: "uyuyan", kayip: "kayip", hicGirmemis: "hic_girmemis" };
+    return y.segment === harita[acikSegment];
+  }) : [];
+
+  return (
+    <div style={{ marginTop: 18, background: THEME.panelBg, border: `1px solid ${THEME.border}`, borderRadius: 8, padding: "14px 16px" }}>
+      <div style={{ fontSize: 13, fontWeight: 700, color: THEME.textLight, marginBottom: 3 }}>Yazar Aktifliği</div>
+      <div style={{ fontSize: 11.5, color: THEME.textMuted, marginBottom: 12, lineHeight: 1.5 }}>
+        Uygulamayı kim kullanıyor, kim uzaklaşıyor. Bir kutuya tıklayınca o gruptaki yazarlar listelenir —
+        geri dönüşüm kampanyasının hedef listesi budur.
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: 10 }}>
+        {segmentler.map(([anahtar, g]) => {
+          const sayi = veri.segmentler[anahtar] || 0;
+          const secili = acikSegment === anahtar;
+          return (
+            <div key={anahtar} onClick={() => setAcikSegment(secili ? null : anahtar)}
+              style={{ background: secili ? THEME.panelBgAlt : THEME.bg, border: `1px solid ${secili ? g.renk : THEME.border}`,
+                borderRadius: 8, padding: "10px 12px", cursor: "pointer" }}>
+              <div style={{ fontSize: 20, fontWeight: 800, fontFamily: FONT_MONO, color: g.renk }}>{sayi}</div>
+              <div style={{ fontSize: 10.5, color: THEME.textLight, marginTop: 2 }}>{g.ad}</div>
+              <div style={{ fontSize: 9.5, color: THEME.textFaint }}>{g.alt}</div>
+            </div>
+          );
+        })}
+      </div>
+
+      {toplamKayit > 0 && veri.ilgiAlanlari.length > 0 && (
+        <div style={{ marginTop: 12 }}>
+          <div style={{ fontSize: 10.5, color: THEME.textMuted, marginBottom: 6 }}>SON 30 GÜN — EN ÇOK KULLANILAN ALANLAR</div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+            {veri.ilgiAlanlari.map((a) => (
+              <span key={a.alan} style={{ fontSize: 11, padding: "4px 9px", borderRadius: 20, background: THEME.panelBgAlt, border: `1px solid ${THEME.border}`, color: THEME.textLight }}>
+                {a.alan} <span style={{ color: THEME.textFaint }}>· {a.yazar} yazar</span>
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {acikSegment && (
+        <div style={{ marginTop: 12, borderTop: `1px solid ${THEME.border}`, paddingTop: 10 }}>
+          <div style={{ fontSize: 11.5, color: THEME.textMuted, marginBottom: 8 }}>
+            {SEGMENT_GORUNUM[acikSegment].ad} — {listelenen.length} yazar
+          </div>
+          {listelenen.length === 0 ? (
+            <div style={{ fontSize: 12, color: THEME.textFaint }}>Bu grupta yazar yok.</div>
+          ) : (
+            <div style={{ display: "grid", gap: 6 }}>
+              {listelenen.map((y) => (
+                <div key={y.id} style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 12.5, padding: "6px 10px", background: THEME.bg, borderRadius: 6, border: `1px solid ${THEME.border}` }}>
+                  <span style={{ color: THEME.textLight }}>{y.name} <span style={{ color: THEME.textFaint, fontSize: 11 }}>{PLAN_LABELS[y.plan] || y.plan}</span></span>
+                  <span style={{ color: THEME.textMuted, fontFamily: FONT_MONO, fontSize: 11.5 }}>
+                    {y.gecenGun === null ? "hiç giriş yok" : `${y.gecenGun} gün önce`}
+                    {y.aiSoru30 > 0 && <span style={{ color: THEME.cyan }}>{" · "}{y.aiSoru30} AI sorusu</span>}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {toplamKayit === 0 && (
+        <div style={{ marginTop: 10, fontSize: 11.5, color: THEME.warn }}>
+          Henüz aktivite kaydı yok. SQL-yazar-aktivite.sql çalıştırıldıysa, yazarlar uygulamaya girdikçe veri birikmeye başlar.
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Overview({ authors, onSyncAll, authFetch }) {
   const [idefixTest, setIdefixTest] = useState(null);   // { ok, text, detay }
   const [idefixBusy, setIdefixBusy] = useState(false);
@@ -554,6 +736,10 @@ function Overview({ authors, onSyncAll, authFetch }) {
           </div>
         ))}
       </div>
+
+      <PanelAsistani authFetch={authFetch} />
+
+      <AktiflikPaneli authFetch={authFetch} />
 
       {/* SİSTEM SAĞLIK KONTROLÜ */}
       <div style={{ marginTop: 18, background: THEME.panelBg, border: `1px solid ${THEME.border}`, borderRadius: 8, padding: "14px 16px" }}>
@@ -861,6 +1047,286 @@ function DiscountRequests({ requests, loading, onApprove, onReject, authors, onM
           </div>
         </div>
       ))}
+    </div>
+  );
+}
+
+// ============ Kapsamlı Reklam Başvuruları (Hat 2) ============
+// Yazar başvurur → burada kalem kalem teklif hazırlanır → yazar onaylar → yürütülür → rapor.
+// Komisyon yok; kalemler yazara olduğu gibi gösterilir.
+const TEKLIF_DURUM = {
+  basvuru:     { ad: "Yeni başvuru",  renk: "#C0392B" },
+  teklif_hazir:{ ad: "Teklif iletildi", renk: "#C9A24B" },
+  onaylandi:   { ad: "Yazar onayladı", renk: "#2E7D32" },
+  reddedildi:  { ad: "Reddedildi",    renk: "#7A7A7A" },
+  yurutuluyor: { ad: "Yürütülüyor",   renk: "#2D6A4F" },
+  tamamlandi:  { ad: "Tamamlandı",    renk: "#7A7A7A" },
+  iptal:       { ad: "İptal",         renk: "#7A7A7A" },
+};
+
+function ReklamBasvurulari({ authFetch }) {
+  const [liste, setListe] = useState(null);
+  const [hata, setHata] = useState("");
+  const [acik, setAcik] = useState(null);
+
+  const yukle = async () => {
+    try {
+      const r = await authFetch("/api/admin/reklam-teklifleri");
+      const d = await r.json();
+      if (d.ok) setListe(d.teklifler); else setHata(d.error || "Okunamadı.");
+    } catch { setHata("Sunucuya ulaşılamadı."); }
+  };
+  useEffect(() => { yukle(); }, []);
+
+  if (hata) return <div style={{ color: THEME.warn, fontSize: 13 }}>{hata}</div>;
+  if (!liste) return <div style={{ color: THEME.textMuted, fontSize: 13 }}>Yükleniyor...</div>;
+
+  return (
+    <div>
+      <h2 style={{ color: THEME.textLight, fontFamily: FONT, fontSize: 20, marginBottom: 6 }}>Reklam Başvuruları</h2>
+      <div style={{ color: THEME.textMuted, fontSize: 13, marginBottom: 16, lineHeight: 1.55 }}>
+        Yazarların kapsamlı reklam talepleri. Teklifi kalem kalem hazırlarsın, yazar uygulamasından onaylar.
+        Yeni başvurular en üstte.
+      </div>
+      {liste.length === 0 && <div style={{ color: THEME.textFaint, fontSize: 13 }}>Henüz başvuru yok.</div>}
+      <div style={{ display: "grid", gap: 10 }}>
+        {liste.map((t) => {
+          const d = TEKLIF_DURUM[t.durum] || TEKLIF_DURUM.basvuru;
+          return (
+            <div key={t.id} style={{ background: THEME.panelBg, border: `1px solid ${t.durum === "basvuru" ? d.renk : THEME.border}`, borderRadius: 8, padding: "14px 16px" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start" }}>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: 14, color: THEME.textLight, fontWeight: 600 }}>
+                    {t.yazar} <span style={{ color: THEME.textFaint, fontSize: 11.5 }}>{PLAN_LABELS[t.plan] || t.plan}</span>
+                  </div>
+                  {t.kitap && <div style={{ fontSize: 12.5, color: THEME.cyan, marginTop: 2 }}>{t.kitap}</div>}
+                  <div style={{ fontSize: 13, color: THEME.textMuted, marginTop: 6, lineHeight: 1.6 }}>{t.hedef}</div>
+                  <div style={{ fontSize: 11.5, color: THEME.textFaint, marginTop: 5 }}>
+                    {t.butce_araligi && `Bütçe: ${t.butce_araligi}`}
+                    {t.sure_tercihi && ` · Süre: ${t.sure_tercihi}`}
+                    {t.toplam && ` · Teklif: ${Number(t.toplam).toLocaleString("tr-TR")} ₺`}
+                  </div>
+                  {t.yazar_notu && <div style={{ fontSize: 12, color: THEME.textFaint, marginTop: 5, fontStyle: "italic" }}>"{t.yazar_notu}"</div>}
+                </div>
+                <div style={{ textAlign: "right", flexShrink: 0 }}>
+                  <span style={{ fontSize: 10.5, color: d.renk, border: `1px solid ${d.renk}`, borderRadius: 12, padding: "3px 9px", whiteSpace: "nowrap" }}>{d.ad}</span>
+                  <div style={{ marginTop: 8 }}>
+                    <Btn small variant="ghost" onClick={() => setAcik(acik === t.id ? null : t.id)}>
+                      {acik === t.id ? "Kapat" : "İşlem"}
+                    </Btn>
+                  </div>
+                </div>
+              </div>
+              {acik === t.id && <TeklifEditor teklif={t} authFetch={authFetch} onDone={() => { setAcik(null); yukle(); }} />}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function TeklifEditor({ teklif, authFetch, onDone }) {
+  const mevcut = Array.isArray(teklif.kalemler) ? teklif.kalemler : [];
+  const [kalemler, setKalemler] = useState(mevcut.length ? mevcut : [
+    { ad: "Reklam bütçesi", aciklama: "Doğrudan platforma harcanır", tutar: "" },
+    { ad: "Tanıtım videosu", aciklama: "Fragman tarzı, dikey format", tutar: "" },
+    { ad: "Kampanya yönetimi", aciklama: "Kurulum, takip, optimizasyon", tutar: "" },
+  ]);
+  const [not, setNot] = useState(teklif.teklif_notu || "");
+  const [rapor, setRapor] = useState(teklif.rapor_metni || "");
+  const [calisiyor, setCalisiyor] = useState(false);
+  const [sonuc, setSonuc] = useState("");
+
+  const toplam = kalemler.reduce((t, k) => t + (Number(k.tutar) || 0), 0);
+  const inputStyle = { background: THEME.bg, color: THEME.textLight, border: `1px solid ${THEME.border}`, borderRadius: 4, padding: "7px 10px", fontSize: 12.5, fontFamily: "inherit", boxSizing: "border-box" };
+
+  const kalemGuncelle = (i, alan, deger) => {
+    const y = [...kalemler]; y[i] = { ...y[i], [alan]: deger }; setKalemler(y);
+  };
+
+  const gonder = async () => {
+    setCalisiyor(true); setSonuc("");
+    try {
+      const r = await authFetch(`/api/admin/reklam-teklif/${teklif.id}/hazirla`, {
+        method: "POST",
+        body: JSON.stringify({ kalemler: kalemler.filter((k) => Number(k.tutar) > 0), hizmetBedeli: 0, not, gecerlilikGun: 14 }),
+      });
+      const d = await r.json();
+      setSonuc(d.ok ? d.mesaj : (d.error || "Gönderilemedi."));
+      if (d.ok) setTimeout(onDone, 900);
+    } catch { setSonuc("Sunucuya ulaşılamadı."); }
+    finally { setCalisiyor(false); }
+  };
+
+  const durumDegistir = async (durum) => {
+    setCalisiyor(true); setSonuc("");
+    try {
+      const r = await authFetch(`/api/admin/reklam-teklif/${teklif.id}/durum`, {
+        method: "POST", body: JSON.stringify({ durum, rapor: durum === "tamamlandi" ? rapor : "" }),
+      });
+      const d = await r.json();
+      setSonuc(d.ok ? d.mesaj : (d.error || "Güncellenemedi."));
+      if (d.ok) setTimeout(onDone, 900);
+    } catch { setSonuc("Sunucuya ulaşılamadı."); }
+    finally { setCalisiyor(false); }
+  };
+
+  return (
+    <div style={{ marginTop: 14, borderTop: `1px solid ${THEME.border}`, paddingTop: 12 }}>
+      <div style={{ fontSize: 10.5, color: THEME.textMuted, marginBottom: 8 }}>TEKLİF KALEMLERİ — yazar bunları olduğu gibi görecek</div>
+      <div style={{ display: "grid", gap: 6 }}>
+        {kalemler.map((k, i) => (
+          <div key={i} style={{ display: "grid", gridTemplateColumns: "1.1fr 1.6fr 110px", gap: 6 }}>
+            <input value={k.ad} onChange={(e) => kalemGuncelle(i, "ad", e.target.value)} placeholder="Kalem" style={inputStyle} />
+            <input value={k.aciklama} onChange={(e) => kalemGuncelle(i, "aciklama", e.target.value)} placeholder="Açıklama" style={inputStyle} />
+            <input value={k.tutar} onChange={(e) => kalemGuncelle(i, "tutar", e.target.value.replace(/[^0-9]/g, ""))}
+              placeholder="₺" style={{ ...inputStyle, fontFamily: FONT_MONO, textAlign: "right" }} />
+          </div>
+        ))}
+      </div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 8 }}>
+        <Btn small variant="ghost" onClick={() => setKalemler([...kalemler, { ad: "", aciklama: "", tutar: "" }])}>+ Kalem ekle</Btn>
+        <div style={{ fontSize: 14, color: THEME.textLight, fontFamily: FONT_MONO }}>
+          Toplam: <b style={{ color: THEME.cyan }}>{toplam.toLocaleString("tr-TR")} ₺</b>
+        </div>
+      </div>
+      <textarea value={not} onChange={(e) => setNot(e.target.value)} rows={2} placeholder="Yazara not (opsiyonel) — ne bekleyebileceğini dürüstçe yaz"
+        style={{ ...inputStyle, width: "100%", marginTop: 8, resize: "vertical" }} />
+
+      <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
+        <Btn small disabled={calisiyor || toplam <= 0} onClick={gonder}>Teklifi Yazara Gönder</Btn>
+        {teklif.durum === "onaylandi" && <Btn small variant="ghost" onClick={() => durumDegistir("yurutuluyor")}>Yürütmeye Başla</Btn>}
+        {teklif.durum === "yurutuluyor" && <Btn small variant="ghost" onClick={() => durumDegistir("tamamlandi")}>Tamamlandı + Rapor</Btn>}
+        <Btn small variant="ghost" onClick={() => durumDegistir("iptal")}>İptal</Btn>
+      </div>
+
+      {teklif.durum === "yurutuluyor" && (
+        <textarea value={rapor} onChange={(e) => setRapor(e.target.value)} rows={3}
+          placeholder="Sonuç raporu — kaç kişiye ulaştı, kaç tıklama, satışa etkisi. Dürüst yaz."
+          style={{ ...inputStyle, width: "100%", marginTop: 8, resize: "vertical" }} />
+      )}
+      {sonuc && <div style={{ fontSize: 12, color: sonuc.indexOf("iletildi") > -1 || sonuc.indexOf("güncellendi") > -1 ? THEME.success : THEME.danger, marginTop: 8 }}>{sonuc}</div>}
+    </div>
+  );
+}
+
+// ============ Eşleşme Teşhisi — hangi kitap hangi siteden çekilemiyor ============
+const ESLESME_PLATFORMLARI = [
+  { key: "mst", label: "MST" }, { key: "trendyol", label: "Trendyol" }, { key: "n11", label: "N11" },
+  { key: "hepsiburada", label: "Hepsiburada" }, { key: "pazarama", label: "Pazarama" }, { key: "idefix", label: "İdefix" },
+];
+const DURUM_GORUNUM = {
+  eslesti:         { simge: "✓", renk: THEME.success, aciklama: "Platformda bulundu, stok çekiliyor" },
+  eslesmedi:       { simge: "✕", renk: THEME.danger,  aciklama: "Platform veri verdi ama kitap orada yok — ürün listelenmemiş ya da satıcı stok kodu farklı" },
+  isbn_yok:        { simge: "?", renk: THEME.warn,    aciklama: "Kitapta ISBN girilmemiş — hiçbir platformda aranamıyor" },
+  platform_sessiz: { simge: "–", renk: THEME.textFaint, aciklama: "Platform hiç ürün döndürmedi (API arızası/yetki) — kitapla ilgisi yok" },
+};
+
+function EslesmeTeshisi({ authFetch, onSelectAuthor }) {
+  const [veri, setVeri] = useState(null);
+  const [yukleniyor, setYukleniyor] = useState(false);
+  const [hata, setHata] = useState("");
+  const [sadeceSorunlu, setSadeceSorunlu] = useState(true);
+
+  const calistir = async () => {
+    setYukleniyor(true); setHata(""); setVeri(null);
+    try {
+      const r = await authFetch("/api/admin/eslesme-detay");
+      const d = await r.json();
+      if (d.ok) setVeri(d); else setHata(d.error || "Teşhis çalıştırılamadı.");
+    } catch { setHata("Sunucuya bağlanılamadı."); }
+    finally { setYukleniyor(false); }
+  };
+
+  const kitaplar = !veri ? [] : (sadeceSorunlu ? veri.kitaplar.filter((k) => k.eksikSayisi > 0) : veri.kitaplar);
+
+  return (
+    <div>
+      <h2 style={{ color: THEME.textLight, fontFamily: FONT, fontSize: 20, marginBottom: 6 }}>Eşleşme Teşhisi</h2>
+      <div style={{ color: THEME.textMuted, fontSize: 13, marginBottom: 14, lineHeight: 1.55 }}>
+        Hangi kitabın stok bilgisi hangi siteden alınamıyor ve <b>neden</b>. Bu ekran hiçbir kaydı değiştirmez —
+        canlı veriyi çekip karşılaştırır. Çalışması 20-40 saniye sürebilir.
+      </div>
+      <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 16 }}>
+        <Btn onClick={calistir} disabled={yukleniyor}>{yukleniyor ? "Kontrol ediliyor..." : "Teşhisi Çalıştır"}</Btn>
+        {veri && (
+          <label style={{ fontSize: 12.5, color: THEME.textMuted, display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
+            <input type="checkbox" checked={sadeceSorunlu} onChange={(e) => setSadeceSorunlu(e.target.checked)} />
+            Sadece eksiği olanlar
+          </label>
+        )}
+      </div>
+      {hata && <div style={{ color: THEME.danger, fontSize: 13, marginBottom: 14 }}>{hata}</div>}
+
+      {veri && (
+        <>
+          {veri.sessizPlatformlar.length > 0 && (
+            <div style={{ background: THEME.dangerBg, border: `1px solid rgba(255,107,107,.3)`, borderRadius: 8, padding: "10px 14px", marginBottom: 14, fontSize: 12.5, color: THEME.danger, lineHeight: 1.55 }}>
+              ⚠️ Şu platformlar hiç ürün döndürmedi: <b>{veri.sessizPlatformlar.join(", ")}</b>.
+              Bu bir eşleşme sorunu değil, platform/API sorunudur — o sütunlardaki "–" işaretleri kitapla ilgili değil.
+              {Object.entries(veri.platformHatalari).filter(([, h]) => h).map(([p, h]) => (
+                <div key={p} style={{ marginTop: 4, fontSize: 11.5 }}>{p}: {h}</div>
+              ))}
+            </div>
+          )}
+
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(6,1fr)", gap: 8, marginBottom: 16 }}>
+            {ESLESME_PLATFORMLARI.map((p) => {
+              const o = veri.ozet[p.key] || {};
+              return (
+                <div key={p.key} style={{ background: THEME.panelBg, border: `1px solid ${THEME.border}`, borderRadius: 8, padding: "10px 12px" }}>
+                  <div style={{ fontSize: 10.5, color: THEME.textMuted, marginBottom: 4 }}>{p.label}</div>
+                  <div style={{ fontFamily: FONT_MONO, fontSize: 16, fontWeight: 700, color: o.eslesti ? THEME.success : THEME.danger }}>
+                    {o.eslesti || 0}<span style={{ fontSize: 11, color: THEME.textFaint }}>/{veri.toplamKitap}</span>
+                  </div>
+                  <div style={{ fontSize: 10, color: THEME.textFaint, marginTop: 2 }}>{o.cekilenUrun || 0} ürün çekildi</div>
+                </div>
+              );
+            })}
+          </div>
+
+          <div style={{ fontSize: 12, color: THEME.textMuted, marginBottom: 8 }}>
+            {kitaplar.length} kitap gösteriliyor · {veri.isbnsizKitap} kitapta ISBN yok
+          </div>
+
+          <div style={{ overflowX: "auto", background: THEME.panelBg, border: `1px solid ${THEME.border}`, borderRadius: 8 }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
+              <thead>
+                <tr style={{ background: THEME.panelBgAlt }}>
+                  <th style={{ textAlign: "left", padding: "9px 12px", color: THEME.textMuted, fontWeight: 600 }}>Kitap</th>
+                  <th style={{ textAlign: "left", padding: "9px 12px", color: THEME.textMuted, fontWeight: 600 }}>Yazar</th>
+                  <th style={{ textAlign: "left", padding: "9px 12px", color: THEME.textMuted, fontWeight: 600 }}>ISBN</th>
+                  {ESLESME_PLATFORMLARI.map((p) => (
+                    <th key={p.key} style={{ textAlign: "center", padding: "9px 6px", color: THEME.textMuted, fontWeight: 600, fontSize: 11 }}>{p.label}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {kitaplar.map((k) => (
+                  <tr key={k.bookId} style={{ borderTop: `1px solid ${THEME.border}` }}>
+                    <td style={{ padding: "8px 12px", color: THEME.textLight }}>{k.title}</td>
+                    <td style={{ padding: "8px 12px", color: THEME.cyan, cursor: "pointer" }} onClick={() => onSelectAuthor(k.authorId)}>{k.yazar}</td>
+                    <td style={{ padding: "8px 12px", fontFamily: FONT_MONO, color: k.isbn ? THEME.textMuted : THEME.warn }}>{k.isbn || "yok"}</td>
+                    {ESLESME_PLATFORMLARI.map((p) => {
+                      const d = DURUM_GORUNUM[k.durum[p.key]] || DURUM_GORUNUM.platform_sessiz;
+                      return (
+                        <td key={p.key} title={d.aciklama} style={{ textAlign: "center", padding: "8px 6px", color: d.renk, fontWeight: 700, cursor: "help" }}>{d.simge}</td>
+                      );
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <div style={{ marginTop: 12, fontSize: 11.5, color: THEME.textMuted, lineHeight: 1.7 }}>
+            {Object.entries(DURUM_GORUNUM).map(([k, d]) => (
+              <div key={k}><span style={{ color: d.renk, fontWeight: 700 }}>{d.simge}</span> {d.aciklama}</div>
+            ))}
+          </div>
+        </>
+      )}
     </div>
   );
 }
@@ -1915,6 +2381,288 @@ function MaliyetEditor({ book, onSave, flash }) {
 }
 
 // ============ Telif Özeti göstergesi (kilitli/çekilebilir) ============
+// ============ Yazar geneli telif özeti — tüm kitapların toplamı ============
+// Kitap kartlarındaki tek tek telifleri toplar; birden fazla eseri olan yazarda
+// "bu yazar toplam ne hak etti?" sorusunun cevabı tek yerde görünsün.
+function YazarTelifToplami({ books, wallet }) {
+  const telifli = (books || []).filter((b) => b.telif && b.telif.toplamAdet);
+  if (!telifli.length) return null;
+  const topla = (alan) => telifli.reduce((t, b) => t + (Number(b.telif[alan]) || 0), 0);
+  const toplamTelif = topla("toplamTelif");
+  const cekilebilir = topla("cekilebilir");
+  const kilitli = topla("kilitli");
+  const toplamAdet = topla("toplamAdet");
+  const maliyetEksik = telifli.filter((b) => b.telif.maliyetGirilmemis);
+  return (
+    <div style={{ background: THEME.panelBg, border: `1px solid ${THEME.cyan}`, borderRadius: 8, padding: 16, marginBottom: 18 }}>
+      <div style={{ fontSize: 12, letterSpacing: "0.05em", color: THEME.textMuted, marginBottom: 12 }}>
+        YAZAR GENELİ TELİF — {telifli.length} eserin toplamı
+        <span style={{ color: THEME.textFaint, fontSize: 11 }}>{" · "}{toplamAdet} satış</span>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 10 }}>
+        {[
+          { etiket: "Toplam Telif", deger: toplamTelif, renk: THEME.textLight },
+          { etiket: "Çekilebilir", deger: cekilebilir, renk: THEME.success },
+          { etiket: "Kilitli (stok tükenmeden)", deger: kilitli, renk: THEME.warn },
+          { etiket: "Cüzdan Bakiyesi", deger: Number(wallet?.balance || 0), renk: THEME.cyan },
+        ].map((k, i) => (
+          <div key={i} style={{ background: THEME.panelBgAlt, border: `1px solid ${THEME.border}`, borderRadius: 8, padding: "10px 12px" }}>
+            <div style={{ fontSize: 10, color: THEME.textMuted, marginBottom: 4 }}>{k.etiket}</div>
+            <div style={{ fontSize: 17, fontWeight: 700, color: k.renk, fontFamily: FONT_MONO }}>{Number(k.deger).toLocaleString("tr-TR")}₺</div>
+          </div>
+        ))}
+      </div>
+      {maliyetEksik.length > 0 && (
+        <div style={{ marginTop: 10, fontSize: 11.5, color: THEME.warn, lineHeight: 1.5 }}>
+          ⚠️ {maliyetEksik.length} kitapta baskı maliyeti girilmemiş — toplam olduğundan yüksek görünüyor
+          ({maliyetEksik.map((b) => b.title).join(", ")}).
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ============ Yazara özel bilgilendirme ============
+// Yazarın gerçek durumuna bakıp mesaj taslağı önerir; onaylayıp gönderirsin.
+// Gönderilen mesaj yazarın uygulamasında "Duyuru & Destek" sekmesinde görünür.
+const ONCELIK_RENK = { yuksek: "#C0392B", orta: "#C9A227", dusuk: "#7A7A7A" };
+
+function BilgilendirmeKutusu({ author, authFetch }) {
+  const [oneriler, setOneriler] = useState(null);
+  const [yukleniyor, setYukleniyor] = useState(false);
+  const [hata, setHata] = useState("");
+  const [baslik, setBaslik] = useState("");
+  const [icerik, setIcerik] = useState("");
+  const [gonderiliyor, setGonderiliyor] = useState(false);
+  const [sonuc, setSonuc] = useState("");
+
+  const oneriGetir = async () => {
+    setYukleniyor(true); setHata(""); setOneriler(null);
+    try {
+      const r = await authFetch(`/api/admin/authors/${author.id}/mesaj-onerileri`);
+      const d = await r.json();
+      if (d.ok) setOneriler(d.oneriler || []);
+      else setHata(d.error || "Öneri alınamadı.");
+    } catch { setHata("Sunucuya ulaşılamadı."); }
+    finally { setYukleniyor(false); }
+  };
+
+  const gonder = async () => {
+    if (!baslik.trim() || !icerik.trim() || gonderiliyor) return;
+    setGonderiliyor(true); setSonuc("");
+    try {
+      const r = await authFetch("/api/admin/announcements", {
+        method: "POST",
+        body: JSON.stringify({ baslik: baslik.trim(), icerik: icerik.trim(), hedef: "author", authorId: author.id }),
+      });
+      const d = await r.json();
+      if (r.ok && d.ok) { setSonuc(`Gönderildi — ${author.name} uygulamasında görecek.`); setBaslik(""); setIcerik(""); }
+      else setSonuc(d.error || "Gönderilemedi.");
+    } catch { setSonuc("Sunucuya ulaşılamadı."); }
+    finally { setGonderiliyor(false); }
+  };
+
+  const inputStyle = { background: THEME.bg, color: THEME.textLight, border: `1px solid ${THEME.border}`, borderRadius: 4, padding: "8px 11px", fontSize: 13, fontFamily: "inherit", width: "100%", boxSizing: "border-box" };
+
+  return (
+    <div style={{ background: THEME.panelBg, border: `1px solid ${THEME.border}`, borderRadius: 8, padding: 16, marginBottom: 18 }}>
+      <div style={{ fontSize: 12, letterSpacing: "0.05em", color: THEME.textMuted, marginBottom: 4 }}>
+        {String(author.name).toLocaleUpperCase("tr-TR")} — ÖZEL BİLGİLENDİRME
+      </div>
+      <div style={{ fontSize: 11.5, color: THEME.textFaint, marginBottom: 12, lineHeight: 1.5 }}>
+        Gönderdiğin mesaj yalnızca bu yazara gider, uygulamasındaki Duyuru &amp; Destek sekmesinde görünür.
+      </div>
+
+      <Btn small variant="ghost" disabled={yukleniyor} onClick={oneriGetir}>
+        {yukleniyor ? "Durumu inceleniyor..." : "💡 Ne yazmalıyım? — öneri getir"}
+      </Btn>
+      {hata && <div style={{ fontSize: 12, color: THEME.warn, marginTop: 8 }}>{hata}</div>}
+
+      {oneriler && oneriler.length === 0 && (
+        <div style={{ fontSize: 12.5, color: THEME.textMuted, marginTop: 10 }}>
+          Şu an bu yazara gönderilmesi gereken özel bir şey görünmüyor — her şey yolunda.
+        </div>
+      )}
+
+      {oneriler && oneriler.length > 0 && (
+        <div style={{ display: "grid", gap: 8, marginTop: 12 }}>
+          {oneriler.map((o, i) => (
+            <div key={i} style={{ background: THEME.panelBgAlt, border: `1px solid ${THEME.border}`, borderRadius: 6, padding: "10px 12px" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "flex-start" }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: THEME.textLight }}>{o.baslik}</div>
+                <span style={{ fontSize: 9.5, color: ONCELIK_RENK[o.oncelik] || THEME.textFaint, border: `1px solid ${ONCELIK_RENK[o.oncelik] || THEME.border}`, borderRadius: 10, padding: "2px 7px", whiteSpace: "nowrap" }}>
+                  {o.oncelik === "yuksek" ? "öncelikli" : o.oncelik === "orta" ? "orta" : "düşük"}
+                </span>
+              </div>
+              <div style={{ fontSize: 12.5, color: THEME.textMuted, marginTop: 5, lineHeight: 1.6, whiteSpace: "pre-wrap" }}>{o.icerik}</div>
+              {o.neden && <div style={{ fontSize: 11, color: THEME.cyan, marginTop: 6 }}>Neden: {o.neden}</div>}
+              <div style={{ marginTop: 8 }}>
+                <Btn small variant="ghost" onClick={() => { setBaslik(o.baslik); setIcerik(o.icerik); setSonuc(""); }}>Bu taslağı kullan</Btn>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div style={{ marginTop: 14, borderTop: `1px solid ${THEME.border}`, paddingTop: 12, display: "grid", gap: 8 }}>
+        <div style={{ fontSize: 10.5, color: THEME.textMuted }}>MESAJ GÖNDER</div>
+        <input value={baslik} onChange={(e) => setBaslik(e.target.value)} placeholder="Başlık" style={inputStyle} />
+        <textarea value={icerik} onChange={(e) => setIcerik(e.target.value)} rows={5} placeholder="Mesaj — taslağı seçip düzenleyebilir ya da sıfırdan yazabilirsin"
+          style={{ ...inputStyle, resize: "vertical", lineHeight: 1.6 }} />
+        <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+          <Btn small disabled={gonderiliyor || !baslik.trim() || !icerik.trim()} onClick={gonder}>
+            {gonderiliyor ? "Gönderiliyor..." : "Gönder"}
+          </Btn>
+          {sonuc && <span style={{ fontSize: 12, color: sonuc.indexOf("Gönderildi") === 0 ? THEME.success : THEME.danger }}>{sonuc}</span>}
+        </div>
+      </div>
+
+      <OzelGorevKutusu author={author} authFetch={authFetch} />
+    </div>
+  );
+}
+
+// Yazara özel görev atama — sadece bu yazarın uygulamasında görünür
+function OzelGorevKutusu({ author, authFetch }) {
+  const [gorevler, setGorevler] = useState(null);
+  const [baslik, setBaslik] = useState("");
+  const [aciklama, setAciklama] = useState("");
+  const [xp, setXp] = useState("50");
+  const [kredi, setKredi] = useState("0");
+  const [calisiyor, setCalisiyor] = useState(false);
+  const [sonuc, setSonuc] = useState("");
+
+  const yukle = async () => {
+    try {
+      const r = await authFetch(`/api/admin/authors/${author.id}/ozel-gorevler`);
+      const d = await r.json();
+      setGorevler(d.gorevler || []);
+    } catch { setGorevler([]); }
+  };
+  useEffect(() => { yukle(); }, [author.id]);
+
+  const ata = async () => {
+    if (!baslik.trim() || calisiyor) return;
+    setCalisiyor(true); setSonuc("");
+    try {
+      const r = await authFetch(`/api/admin/authors/${author.id}/ozel-gorev`, {
+        method: "POST",
+        body: JSON.stringify({ baslik: baslik.trim(), aciklama: aciklama.trim() || null, xpOdul: Number(xp) || 0, krediOdul: Number(kredi) || 0 }),
+      });
+      const d = await r.json();
+      if (r.ok && d.ok) { setSonuc(d.mesaj); setBaslik(""); setAciklama(""); yukle(); }
+      else setSonuc(d.error || "Görev atanamadı.");
+    } catch { setSonuc("Sunucuya ulaşılamadı."); }
+    finally { setCalisiyor(false); }
+  };
+
+  const inputStyle = { background: THEME.bg, color: THEME.textLight, border: `1px solid ${THEME.border}`, borderRadius: 4, padding: "8px 11px", fontSize: 13, fontFamily: "inherit", width: "100%", boxSizing: "border-box" };
+
+  return (
+    <div style={{ marginTop: 16, borderTop: `1px solid ${THEME.border}`, paddingTop: 14 }}>
+      <div style={{ fontSize: 10.5, color: THEME.textMuted, marginBottom: 3 }}>ÖZEL GÖREV ATA</div>
+      <div style={{ fontSize: 11, color: THEME.textFaint, marginBottom: 10, lineHeight: 1.5 }}>
+        Sadece {author.name} görecek. Uygulamasında Kariyer & Görevler bölümünde, genel görevlerin üstünde çıkar.
+      </div>
+
+      {gorevler && gorevler.length > 0 && (
+        <div style={{ display: "grid", gap: 5, marginBottom: 12 }}>
+          {gorevler.map((g) => (
+            <div key={g.id} style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 12.5, background: THEME.panelBgAlt, borderRadius: 5, padding: "7px 10px" }}>
+              <span style={{ color: THEME.textLight }}>{g.baslik}</span>
+              <span style={{ fontSize: 11, fontFamily: FONT_MONO, color: g.durum === "tamamlandi" ? THEME.success : THEME.textMuted }}>
+                {g.durum === "tamamlandi" ? "✓ tamamlandı" : "devam ediyor"}
+                {g.xp_odul > 0 && <span style={{ color: THEME.textFaint }}>{" · "}{g.xp_odul} XP</span>}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div style={{ display: "grid", gap: 8 }}>
+        <input value={baslik} onChange={(e) => setBaslik(e.target.value)} placeholder="Görev başlığı — örn: Kapak taslağını onayla" style={inputStyle} />
+        <textarea value={aciklama} onChange={(e) => setAciklama(e.target.value)} rows={2} placeholder="Açıklama (opsiyonel)" style={{ ...inputStyle, resize: "vertical" }} />
+        <div style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
+          <div style={{ width: 90 }}>
+            <div style={{ fontSize: 10, color: THEME.textMuted, marginBottom: 3 }}>XP ÖDÜLÜ</div>
+            <input value={xp} onChange={(e) => setXp(e.target.value.replace(/[^0-9]/g, ""))} style={{ ...inputStyle, fontFamily: FONT_MONO }} />
+          </div>
+          <div style={{ width: 90 }}>
+            <div style={{ fontSize: 10, color: THEME.textMuted, marginBottom: 3 }}>KREDİ</div>
+            <input value={kredi} onChange={(e) => setKredi(e.target.value.replace(/[^0-9]/g, ""))} style={{ ...inputStyle, fontFamily: FONT_MONO }} />
+          </div>
+          <Btn small disabled={calisiyor || !baslik.trim()} onClick={ata}>{calisiyor ? "Atanıyor..." : "Görevi Ata"}</Btn>
+        </div>
+        {sonuc && <div style={{ fontSize: 12, color: sonuc.indexOf("atandı") > -1 ? THEME.success : THEME.danger, lineHeight: 1.5 }}>{sonuc}</div>}
+      </div>
+    </div>
+  );
+}
+
+// ============ MST sitesi stok düşümü ============
+// Havale / telefon / elden satışta tek tek ürüne girmeden stok düşürmek için.
+// İstek MST sitesine (WooCommerce) gider; site kabul ederse kayıtlar güncellenir.
+const STOK_DUSUM_TURLERI = [
+  { key: "okuyucu",   ad: "Okuyucu satışı",       aciklama: "Havale/telefon/elden satış. Stok düşer, yazarın telifi İŞLER." },
+  { key: "indirimli", ad: "Yazarın indirimli alımı", aciklama: "Yazar kendi kitabını indirimli aldı. Stok düşer, telif DÜŞÜLÜR." },
+  { key: "hediye",    ad: "Hediye / tanıtım",     aciklama: "Basına, jüriye, tanıtıma gönderildi. Stok düşer, telif DÜŞÜLÜR." },
+];
+
+function StokDusumEditor({ book, onSubmit }) {
+  const [adet, setAdet] = useState("1");
+  const [tur, setTur] = useState("okuyucu");
+  const [not, setNot] = useState("");
+  const [calisiyor, setCalisiyor] = useState(false);
+  const [sonuc, setSonuc] = useState(null);
+
+  const secili = STOK_DUSUM_TURLERI.find((t) => t.key === tur);
+  const gonder = async () => {
+    const n = Number(adet);
+    if (!n || n < 1 || calisiyor) return;
+    setCalisiyor(true); setSonuc(null);
+    const cevap = await onSubmit(book.id, { adet: n, tur, not });
+    setSonuc(cevap);
+    if (cevap?.ok) { setAdet("1"); setNot(""); }
+    setCalisiyor(false);
+  };
+
+  const inputStyle = { background: THEME.bg, color: THEME.textLight, border: `1px solid ${THEME.border}`, borderRadius: 4, padding: "7px 10px", fontSize: 12.5, fontFamily: "inherit" };
+
+  return (
+    <div style={{ marginTop: 12, background: THEME.panelBgAlt, border: `1px solid ${THEME.border}`, borderRadius: 8, padding: 14 }}>
+      <div style={{ fontSize: 11.5, color: THEME.textMuted, marginBottom: 10, lineHeight: 1.5 }}>
+        MST SİTESİ STOK DÜŞÜMÜ — istek doğrudan siteye gider, ürüne tek tek girmeye gerek yok.
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "90px 1fr", gap: 10, marginBottom: 10 }}>
+        <div>
+          <div style={{ fontSize: 10, color: THEME.textMuted, marginBottom: 3 }}>ADET</div>
+          <input value={adet} onChange={(e) => setAdet(e.target.value.replace(/[^0-9]/g, ""))}
+            style={{ ...inputStyle, width: "100%", fontFamily: FONT_MONO, boxSizing: "border-box" }} />
+        </div>
+        <div>
+          <div style={{ fontSize: 10, color: THEME.textMuted, marginBottom: 3 }}>İŞLEM TÜRÜ</div>
+          <select value={tur} onChange={(e) => setTur(e.target.value)} style={{ ...inputStyle, width: "100%", boxSizing: "border-box" }}>
+            {STOK_DUSUM_TURLERI.map((t) => <option key={t.key} value={t.key}>{t.ad}</option>)}
+          </select>
+        </div>
+      </div>
+      <div style={{ fontSize: 11, color: tur === "okuyucu" ? THEME.success : THEME.warn, marginBottom: 10, lineHeight: 1.5 }}>
+        {secili.aciklama}
+      </div>
+      <input value={not} onChange={(e) => setNot(e.target.value)} placeholder="Not (örn: havale — Ahmet Y., 28.07)"
+        style={{ ...inputStyle, width: "100%", boxSizing: "border-box", marginBottom: 10 }} />
+      <Btn small disabled={calisiyor || !adet} onClick={gonder}>
+        {calisiyor ? "Siteye yazılıyor..." : "Stoğu Düş"}
+      </Btn>
+      {sonuc && (
+        <div style={{ marginTop: 10, fontSize: 12, lineHeight: 1.55, color: sonuc.ok ? THEME.success : THEME.danger }}>
+          {sonuc.ok ? sonuc.mesaj : sonuc.error}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function TelifOzetiKutu({ book }) {
   const t = book.telif;
   if (!t || !t.toplamAdet) return (
@@ -2671,7 +3419,7 @@ function CuzdanGecmisi({ authorId, authFetch }) {
   );
 }
 
-function AuthorDetail({ author, onBack, onAdvanceStage, onApproveCover, onEditStock, onApprovePayment, onRejectPayment, onEditIsbn, onEditCover, onSyncStock, onAddBook, onDeleteAuthor, onUpdateCredentials, onPayout, onUpdateRoyalty, onUpdateWallet, onUpdateContract, onUpdateMatching, onUpdateMaliyet, authFetch }) {
+function AuthorDetail({ author, onBack, onAdvanceStage, onApproveCover, onEditStock, onApprovePayment, onRejectPayment, onEditIsbn, onEditCover, onSyncStock, onAddBook, onDeleteBook, onDeleteAuthor, onUpdateCredentials, onPayout, onUpdateRoyalty, onUpdateWallet, onUpdateContract, onUpdateMatching, onUpdateMaliyet, onStokDus, onRefresh, authFetch }) {
   const [editingStock, setEditingStock] = useState(null); // {bookId, key}
   const [stockDraft, setStockDraft] = useState("");
   // Manuel satış girişi (D&R / Kitapyurdu)
@@ -2688,7 +3436,10 @@ function AuthorDetail({ author, onBack, onAdvanceStage, onApproveCover, onEditSt
       const d = await r.json();
       if (d.ok) {
         setManuelMsg({ bookId, ok: true, text: d.mesaj || "Kaydedildi." });
-        setTimeout(() => window.location.reload(), 900);
+        // ÖNEMLİ: window.location.reload() KULLANMA — oturum sadece bellekte tutuluyor,
+        // sayfa yenilenince admin giriş ekranına düşüyor. Sadece veriyi tazele.
+        if (onRefresh) onRefresh();
+        setTimeout(() => setManuelMsg(null), 2500);
       } else setManuelMsg({ bookId, ok: false, text: d.error || "Kaydedilemedi." });
     } catch { setManuelMsg({ bookId, ok: false, text: "Sunucuya bağlanılamadı." }); }
   };
@@ -2710,7 +3461,7 @@ function AuthorDetail({ author, onBack, onAdvanceStage, onApproveCover, onEditSt
       if (d.ok) {
         setDekontMsg({ ok: true, text: d.mesaj || "Geri alındı." });
         setDekontGeriAl(null); setDekontSebep("");
-        if (onSyncStock) setTimeout(() => window.location.reload(), 1200);
+        if (onRefresh) onRefresh(); // sayfa yenileme YOK — oturum düşer
       } else setDekontMsg({ ok: false, text: d.error || "Geri alınamadı." });
     } catch { setDekontMsg({ ok: false, text: "Sunucuya bağlanılamadı." }); }
     finally { setDekontBusy(false); }
@@ -2729,6 +3480,12 @@ function AuthorDetail({ author, onBack, onAdvanceStage, onApproveCover, onEditSt
   const [nbPrice, setNbPrice] = useState("");
   const [nbTuru, setNbTuru] = useState("roman");
   const [nbSayfa, setNbSayfa] = useState("");
+  // Başlangıç stok = baskı adedi. Pakete göre otomatik gelir, elle değiştirilebilir.
+  const PAKET_BASKI = { standart: 500, profesyonel: 1000, vip: 1000 };
+  const paketBaski = author.paketKurali?.minBaski ?? PAKET_BASKI[String(author.plan || "standart").toLowerCase()] ?? 500;
+  const [nbStok, setNbStok] = useState(String(paketBaski));
+  // Yazar değişirse (başka yazara geçince) varsayılanı yenile
+  useEffect(() => { setNbStok(String(paketBaski)); }, [author.id, paketBaski]);
   const [nbSaving, setNbSaving] = useState(false);
   const [nbMsg, setNbMsg] = useState(null);
   const nbIsbnClean = nbIsbn.replace(/[^0-9]/g, "");
@@ -2739,6 +3496,9 @@ function AuthorDetail({ author, onBack, onAdvanceStage, onApproveCover, onEditSt
   // Kitap eşleştirme (başlangıç stok + platform kodları) düzenleme
   const [matchingBook, setMatchingBook] = useState(null); // bookId
   const [maliyetBook, setMaliyetBook] = useState(null); // bookId (baskı maliyeti editörü)
+  const [stokBook, setStokBook] = useState(null); // bookId (MST sitesi stok düşümü)
+  const [silAcik, setSilAcik] = useState(null);   // bookId — silme onay kutusu açık olan kitap
+  const [silMetin, setSilMetin] = useState("");   // kitap adı doğrulama metni
 
   const saveNewBook = async () => {
     setNbSaving(true); setNbMsg(null);
@@ -2749,10 +3509,11 @@ function AuthorDetail({ author, onBack, onAdvanceStage, onApproveCover, onEditSt
         salePrice: nbPrice ? Number(nbPrice) : null,
         kitapTuru: nbTuru,
         sayfaSayisi: nbSayfa ? Number(nbSayfa) : null,
+        baslangicStok: nbStok !== "" ? Number(nbStok) : null,
       });
       if (data && data.ok) {
         setNbMsg({ ok: true, text: data.mesaj || "Kitap eklendi." });
-        setNbTitle(""); setNbIsbn(""); setNbPrice(""); setNbTuru("roman"); setNbSayfa("");
+        setNbTitle(""); setNbIsbn(""); setNbPrice(""); setNbTuru("roman"); setNbSayfa(""); setNbStok(String(paketBaski));
         setShowBookForm(false);
       } else {
         setNbMsg({ ok: false, text: data?.error || "Kitap eklenemedi." });
@@ -2778,6 +3539,7 @@ function AuthorDetail({ author, onBack, onAdvanceStage, onApproveCover, onEditSt
           <Btn small variant="ghost" onClick={() => { setMgmtTab(mgmtTab === "cred" ? null : "cred"); setMsg(null); }}>Yazar Bilgileri</Btn>
           <Btn small variant="ghost" onClick={() => { setMgmtTab(mgmtTab === "telif" ? null : "telif"); setMsg(null); }}>Kazanç & Telif</Btn>
           <Btn small variant="ghost" onClick={() => { setMgmtTab(mgmtTab === "indirimli" ? null : "indirimli"); setMsg(null); }}>İndirimli & Hediye</Btn>
+          <Btn small variant="ghost" onClick={() => { setMgmtTab(mgmtTab === "mesaj" ? null : "mesaj"); setMsg(null); }}>✉️ Bilgilendirme & Görev</Btn>
           <Btn small variant="ghost" onClick={() => { setMgmtTab(mgmtTab === "sozlesme" ? null : "sozlesme"); setMsg(null); }}>Sözleşme</Btn>
           <Btn onClick={() => { setShowBookForm((v) => !v); setNbMsg(null); }}>{showBookForm ? "Vazgeç" : "+ Kitap Ekle"}</Btn>
           {author.status === "pasif" && onDeleteAuthor && (
@@ -2794,6 +3556,8 @@ function AuthorDetail({ author, onBack, onAdvanceStage, onApproveCover, onEditSt
       {mgmtTab === "telif" && <TelifPanel author={author} onPayout={onPayout} onUpdateRoyalty={onUpdateRoyalty} onUpdateWallet={onUpdateWallet} flash={flash} />}
       {mgmtTab === "indirimli" && <IndirimliHediyePanel author={author} authFetch={authFetch} />}
       {/* Sözleşme yönetimi */}
+      {mgmtTab === "mesaj" && <BilgilendirmeKutusu author={author} authFetch={authFetch} />}
+
       {mgmtTab === "sozlesme" && <SozlesmePanel author={author} onSave={onUpdateContract} flash={flash} />}
 
 
@@ -2806,7 +3570,7 @@ function AuthorDetail({ author, onBack, onAdvanceStage, onApproveCover, onEditSt
             <Field label="ISBN (13 HANE)"><input style={{ ...inputStyle, fontFamily: FONT_MONO, borderColor: nbIsbnOk ? undefined : THEME.danger }} value={nbIsbn} onChange={(e) => setNbIsbn(e.target.value)} placeholder="9786250000000" /></Field>
             <Field label="FİYAT (₺)"><input style={inputStyle} value={nbPrice} onChange={(e) => setNbPrice(e.target.value.replace(/[^0-9.]/g, ""))} placeholder="180" /></Field>
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr 2fr", gap: 12, marginTop: 10 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr 1.2fr 1.6fr", gap: 12, marginTop: 10 }}>
             <Field label="KİTAP TÜRÜ">
               <select style={inputStyle} value={nbTuru} onChange={(e) => setNbTuru(e.target.value)}>
                 <option value="roman">Roman (siyah-beyaz)</option>
@@ -2814,6 +3578,15 @@ function AuthorDetail({ author, onBack, onAdvanceStage, onApproveCover, onEditSt
               </select>
             </Field>
             <Field label="SAYFA SAYISI"><input style={inputStyle} value={nbSayfa} onChange={(e) => setNbSayfa(e.target.value.replace(/[^0-9]/g, ""))} placeholder="200" /></Field>
+            <Field label="BAŞLANGIÇ STOK (BASKI ADEDİ)">
+              <input style={{ ...inputStyle, fontFamily: FONT_MONO, borderColor: Number(nbStok) !== paketBaski ? THEME.warn : undefined }}
+                value={nbStok} onChange={(e) => setNbStok(e.target.value.replace(/[^0-9]/g, ""))} placeholder={String(paketBaski)} />
+              <div style={{ fontSize: 10, color: Number(nbStok) !== paketBaski ? THEME.warn : THEME.textFaint, marginTop: 3 }}>
+                {Number(nbStok) === paketBaski
+                  ? `${PLAN_LABELS[author.plan] || author.plan} paketi varsayılanı — 5 platforma da yazılır`
+                  : `Pakette ${paketBaski}. Değiştirdin — bilerek yapıyorsan sorun yok.`}
+              </div>
+            </Field>
             <Field label="TAHMİNİ BASKI MALİYETİ">
               <div style={{ ...inputStyle, display: "flex", alignItems: "center", color: THEME.cyan, fontFamily: FONT_MONO }}>
                 {nbSayfa ? `${(Number(nbSayfa) * (nbTuru === "cocuk" ? 1.25 : 0.21) + 15).toFixed(2)}₺` : "— sayfa girin"}
@@ -2910,7 +3683,17 @@ function AuthorDetail({ author, onBack, onAdvanceStage, onApproveCover, onEditSt
       <CuzdanGecmisi authorId={author.id} authFetch={authFetch} />
 
       {/* Kitaplar */}
-      <div style={{ fontSize: 12, letterSpacing: "0.05em", color: THEME.textMuted, marginBottom: 10 }}>KİTAPLAR</div>
+      <YazarTelifToplami books={author.books} wallet={author.wallet} />
+
+      <div style={{ fontSize: 12, letterSpacing: "0.05em", color: THEME.textMuted, marginBottom: 10 }}>
+        KİTAPLAR — <span style={{ color: THEME.cyan, fontFamily: FONT_MONO }}>{author.books.length} eser</span>
+        {author.books.length > 0 && (
+          <span style={{ color: THEME.textFaint }}>
+            {" · "}{author.books.filter((b) => b.pipeline[b.pipeline.length - 1].status === "tamamlandi").length} yayında
+            {" · "}{author.books.reduce((t, b) => t + (b.totalSold || 0), 0)} toplam satış
+          </span>
+        )}
+      </div>
       {author.books.map((book) => {
         const lastStage = book.pipeline[book.pipeline.length - 1];
         const published = lastStage.status === "tamamlandi";
@@ -2924,9 +3707,11 @@ function AuthorDetail({ author, onBack, onAdvanceStage, onApproveCover, onEditSt
                 <div style={{ color: THEME.textLight, fontWeight: 700, fontSize: 15 }}>{book.title}</div>
                 <div style={{ fontSize: 12, color: THEME.textMuted, marginTop: 2 }}>{book.totalSold} toplam satış</div>
               </div>
-              {published
-                ? <Badge fg={THEME.success} bg={THEME.successBg}>✓ Yayınlandı</Badge>
-                : <Badge fg={THEME.warn} bg={THEME.warnBg}>{book.pipeline[activeStageIdx].label}</Badge>}
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                {published
+                  ? <Badge fg={THEME.success} bg={THEME.successBg}>✓ Yayınlandı</Badge>
+                  : <Badge fg={THEME.warn} bg={THEME.warnBg}>{book.pipeline[activeStageIdx].label}</Badge>}
+              </div>
             </div>
 
             {!published && (
@@ -2988,17 +3773,56 @@ function AuthorDetail({ author, onBack, onAdvanceStage, onApproveCover, onEditSt
               <Btn small variant="ghost" onClick={() => setMatchingBook(matchingBook === book.id ? null : book.id)}>
                 {matchingBook === book.id ? "Eşleştirmeyi Kapat" : "⚙ Eşleştirme & Satış"}
               </Btn>
+              {onStokDus && (
+                <Btn small variant="ghost" onClick={() => setStokBook(stokBook === book.id ? null : book.id)}>
+                  {stokBook === book.id ? "Stok Düşümünü Kapat" : "📦 Stok Düş"}
+                </Btn>
+              )}
             </div>
 
             {/* Telif özeti — her kitapta görünür */}
             <TelifOzetiKutu book={book} />
+
+            {stokBook === book.id && onStokDus && (
+              <StokDusumEditor book={book} onSubmit={onStokDus} />
+            )}
 
             {maliyetBook === book.id && onUpdateMaliyet && (
               <MaliyetEditor book={book} onSave={onUpdateMaliyet} flash={(ok, t) => setMsg({ ok, text: t })} />
             )}
 
             {matchingBook === book.id && (
-              <MatchingEditor book={book} onSave={onUpdateMatching} flash={(ok, t) => setMsg({ ok, text: t })} />
+              <>
+                <MatchingEditor book={book} onSave={onUpdateMatching} flash={(ok, t) => setMsg({ ok, text: t })} />
+                {onDeleteBook && (
+                  <div style={{ marginTop: 14, paddingTop: 12, borderTop: `1px solid ${THEME.border}` }}>
+                    {silAcik === book.id ? (
+                      <div style={{ background: THEME.dangerBg, border: `1px solid rgba(255,107,107,.3)`, borderRadius: 6, padding: 12 }}>
+                        <div style={{ fontSize: 12.5, color: THEME.danger, marginBottom: 8 }}>
+                          "{book.title}" kalıcı olarak silinecek. Onaylamak için kitap adını birebir yaz:
+                        </div>
+                        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                          <input
+                            autoFocus value={silMetin} onChange={(e) => setSilMetin(e.target.value)}
+                            placeholder={book.title}
+                            style={{ background: THEME.bg, color: THEME.textLight, border: `1px solid ${THEME.border}`, borderRadius: 4, padding: "6px 10px", fontSize: 12.5, minWidth: 220 }}
+                          />
+                          <Btn small variant="danger"
+                            disabled={silMetin.trim() !== book.title.trim()}
+                            onClick={() => { onDeleteBook(book.id, book.title); setSilAcik(null); setSilMetin(""); }}>
+                            Kalıcı Sil
+                          </Btn>
+                          <Btn small variant="ghost" onClick={() => { setSilAcik(null); setSilMetin(""); }}>Vazgeç</Btn>
+                        </div>
+                      </div>
+                    ) : (
+                      <Btn small variant="ghost" onClick={() => { setSilAcik(book.id); setSilMetin(""); }}>
+                        🗑 Bu kitabı sil
+                      </Btn>
+                    )}
+                  </div>
+                )}
+              </>
             )}
 
             <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
@@ -3063,7 +3887,15 @@ function AuthorDetail({ author, onBack, onAdvanceStage, onApproveCover, onEditSt
                         <input
                           autoFocus type="number" min="0" value={manuelDraft}
                           onChange={(e) => setManuelDraft(e.target.value)}
-                          onBlur={() => { manuelSatisKaydet(book.id, p.key, Number(manuelDraft) || 0); setEditingManuel(null); }}
+                          onBlur={() => {
+                            const yeni = Number(manuelDraft);
+                            const eski = Number(book.stock?.[p.key] ?? 0);
+                            // Tıklayıp hiçbir şey yapmadan çıkıldıysa kaydetme
+                            if (manuelDraft !== "" && Number.isFinite(yeni) && yeni !== eski) {
+                              manuelSatisKaydet(book.id, p.key, yeni);
+                            }
+                            setEditingManuel(null);
+                          }}
                           onKeyDown={(e) => { if (e.key === "Enter") e.target.blur(); }}
                           style={{ width: "100%", background: THEME.panelBgAlt, color: THEME.textLight, border: `1px solid ${THEME.warn}`, borderRadius: 4, textAlign: "center", fontSize: 14, fontFamily: FONT_MONO }}
                         />
@@ -3169,6 +4001,56 @@ export default function AdminPanel() {
     const data = await res.json().catch(() => ({}));
     if (res.ok) loadAuthors();
     return data;
+  };
+
+  // MST sitesinde stok düşümü — istek siteye gider, sonuç kullanıcıya döner
+  const stokDus = async (bookId, { adet, tur, not }) => {
+    try {
+      const r = await authFetch(`/api/admin/books/${bookId}/stok-dus`, {
+        method: "POST", body: JSON.stringify({ adet, tur, not }),
+      });
+      const d = await r.json();
+      if (r.ok && d.ok) { loadAuthors(); return d; }
+      return { ok: false, error: d.error || "Stok düşülemedi." };
+    } catch {
+      return { ok: false, error: "Sunucuya ulaşılamadı." };
+    }
+  };
+
+  // Kitabı sil (yanlış eklenen kitap) — geçmiş kayıt varsa ikinci onay ister
+  const deleteBook = async (bookId, title) => {
+    if (!window.confirm(
+      `"${title}" kitabı silinsin mi?\n\nKitap, stok kayıtları ve yayın süreci kalıcı olarak silinir. Bu işlem geri alınamaz.`
+    )) return;
+
+    let res = await authFetch(`/api/admin/books/${bookId}`, { method: "DELETE", body: JSON.stringify({}) });
+    let data = await res.json().catch(() => ({}));
+
+    // Kitapta geçmiş kayıt varsa backend silmez, raporlar → ikinci onay
+    if (res.status === 409 && data.onayGerekli) {
+      const g = data.gecmis || {};
+      const satirlar = [];
+      if (g.satis) satirlar.push(`• ${g.satis} adet satış kaydı`);
+      if (g.indirimHediye) satirlar.push(`• ${g.indirimHediye} indirimli/hediye kaydı`);
+      if (g.reklam) satirlar.push(`• ${g.reklam} reklam kaydı`);
+      if (g.hizmet) satirlar.push(`• ${g.hizmet} hizmet siparişi`);
+      if (g.ceviri) satirlar.push(`• ${g.ceviri} çeviri talebi`);
+      const onayli = window.confirm(
+        `DİKKAT — "${title}" kitabının geçmiş kaydı var:\n\n${satirlar.join("\n")}\n\n` +
+        `Silersen:\n` +
+        `– Satış/stok verisi ve indirimli/hediye kayıtları tamamen silinir (telif hesabından da çıkar).\n` +
+        `– Reklam, hizmet ve çeviri kayıtları kitap adıyla geçmişte kalır.\n\n` +
+        `Yine de kalıcı olarak silinsin mi?`
+      );
+      if (!onayli) return;
+      res = await authFetch(`/api/admin/books/${bookId}?onay=SIL`, {
+        method: "DELETE", body: JSON.stringify({ onay: "SIL" }),
+      });
+      data = await res.json().catch(() => ({}));
+    }
+
+    if (res.ok) { loadAuthors(); alert(data.mesaj || "Kitap silindi."); }
+    else alert(data.error || "Kitap silinemedi.");
   };
 
   // Yazarı kalıcı sil (sadece pasif) — çift onay
@@ -3392,6 +4274,8 @@ export default function AdminPanel() {
     ["orders", "Mağaza Siparişleri"], ["ads", "Reklam Talepleri"], ["translations", "Çeviri Talepleri"],
     ["destek", "Destek & Şikayet"], ["duyurular", "Duyurular"], ["meta", "Meta Reklam"],
     ["oyun", "Görev & Ödül"],
+    ["reklamTeklif", "Reklam Başvuruları"],
+    ["eslesme", "Eşleşme Teşhisi"],
     ["isbn", "Toplu ISBN"],
     ["kullanicilar", "Kullanıcı Yönetimi"],
   ];
@@ -3496,6 +4380,9 @@ export default function AdminPanel() {
             onEditCover={editCover}
             onSyncStock={syncStock}
             onAddBook={addBookToAuthor}
+            onDeleteBook={deleteBook}
+            onStokDus={stokDus}
+            onRefresh={loadAuthors}
             onDeleteAuthor={deleteAuthor}
             onUpdateCredentials={updateCredentials}
             onPayout={doPayout}
@@ -3518,6 +4405,8 @@ export default function AdminPanel() {
         {view === "duyurular" && <DuyurularView authFetch={authFetch} authors={authors} />}
         {view === "meta" && <MetaReklamView authFetch={authFetch} />}
         {view === "oyun" && <OyunView authFetch={authFetch} authors={authors} />}
+        {view === "reklamTeklif" && <ReklamBasvurulari authFetch={authFetch} />}
+        {view === "eslesme" && <EslesmeTeshisi authFetch={authFetch} onSelectAuthor={(id) => { setView("authors"); setSelectedId(id); }} />}
         {view === "isbn" && <BulkIsbnUpload onSubmit={bulkIsbn} />}
         {view === "kullanicilar" && <KullaniciYonetimi authFetch={authFetch} />}
       </div>
