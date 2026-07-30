@@ -1064,6 +1064,135 @@ const TEKLIF_DURUM = {
   iptal:       { ad: "İptal",         renk: "#7A7A7A" },
 };
 
+// ============ Reklam Merkezi — danışman + rakip istihbaratı ============
+function ReklamMerkezi({ authFetch }) {
+  const [soru, setSoru] = useState("");
+  const [cevap, setCevap] = useState(null);
+  const [dusunuyor, setDusunuyor] = useState(false);
+  const [rakipler, setRakipler] = useState(null);
+  const [rakipYukleniyor, setRakipYukleniyor] = useState(false);
+  const [hata, setHata] = useState("");
+
+  const sor = async (metin) => {
+    if (dusunuyor) return;
+    setDusunuyor(true); setCevap(null); setHata("");
+    try {
+      const r = await authFetch("/api/admin/reklam/danisman", {
+        method: "POST", body: JSON.stringify({ soru: metin || soru }),
+      });
+      const d = await r.json();
+      if (d.ok) setCevap(d); else setHata(d.error || "Cevap alınamadı.");
+    } catch { setHata("Sunucuya ulaşılamadı."); }
+    finally { setDusunuyor(false); }
+  };
+
+  const rakipCek = async () => {
+    if (rakipYukleniyor) return;
+    setRakipYukleniyor(true); setHata("");
+    try {
+      const r = await authFetch("/api/admin/reklam/rakipler");
+      const d = await r.json();
+      if (d.ok) setRakipler(d); else setHata(d.error || "Rakip verisi alınamadı.");
+    } catch { setHata("Sunucuya ulaşılamadı."); }
+    finally { setRakipYukleniyor(false); }
+  };
+
+  const hazirSorular = [
+    "Reklam tarafında bugün neye odaklanmalıyım?",
+    "Yeni yazar bulma reklamlarımı nasıl iyileştiririm?",
+    "Hangi kampanya para yakıyor, hangisi ölçeklenmeli?",
+    "Kreatiflerimde ne eksik?",
+    "Rakipler ne yapıyor, biz ne yapmalıyız?",
+  ];
+
+  const renk = { yuksek: THEME.danger, orta: THEME.warn, dusuk: THEME.textFaint };
+
+  return (
+    <div>
+      <h2 style={{ color: THEME.textLight, fontFamily: FONT, fontSize: 20, marginBottom: 6 }}>Reklam Merkezi</h2>
+      <div style={{ color: THEME.textMuted, fontSize: 13, marginBottom: 18, lineHeight: 1.55, maxWidth: 720 }}>
+        Reklam danışmanı hem yazar kampanyalarını hem MST'nin kendi yazar bulma reklamlarını görüyor.
+        Veri azken kesin yargı vermez, "henüz yeterli veri yok" der.
+      </div>
+
+      {hata && <div style={{ fontSize: 12.5, color: THEME.danger, marginBottom: 12 }}>{hata}</div>}
+
+      {/* Danışman */}
+      <div style={{ background: THEME.panelBg, border: `1px solid ${THEME.cyan}`, borderRadius: 8, padding: "16px 18px", marginBottom: 16 }}>
+        <div style={{ fontSize: 13, fontWeight: 700, color: THEME.textLight, marginBottom: 10 }}>Reklam Danışmanı</div>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 12 }}>
+          {hazirSorular.map((q) => (
+            <Btn key={q} small variant="ghost" disabled={dusunuyor} onClick={() => { setSoru(q); sor(q); }}>{q}</Btn>
+          ))}
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <input value={soru} onChange={(e) => setSoru(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && sor()}
+            placeholder="Kendi sorunu yaz..."
+            style={{ flex: 1, background: THEME.bg, color: THEME.textLight, border: `1px solid ${THEME.border}`, borderRadius: 4, padding: "9px 12px", fontSize: 13, fontFamily: "inherit" }} />
+          <Btn small disabled={dusunuyor} onClick={() => sor()}>{dusunuyor ? "Düşünüyor..." : "Sor"}</Btn>
+        </div>
+
+        {dusunuyor && <div style={{ fontSize: 12.5, color: THEME.textMuted, marginTop: 12 }}>Reklam verisi ve rakip hareketleri okunuyor... (10-20 sn)</div>}
+
+        {cevap && (
+          <div style={{ marginTop: 14, borderTop: `1px solid ${THEME.border}`, paddingTop: 12 }}>
+            <div style={{ fontSize: 13.5, color: THEME.textLight, lineHeight: 1.7, whiteSpace: "pre-wrap" }}>{cevap.cevap}</div>
+            <div style={{ fontSize: 11, color: THEME.textFaint, marginTop: 10 }}>
+              {cevap.veriDurumu.toplamKampanya} kampanya incelendi, {cevap.veriDurumu.harcamaGorulenKampanya} tanesinde harcama verisi var
+              {cevap.rakipVerisiVar ? " · rakip verisi dahil" : ""}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Rakip istihbaratı */}
+      <div style={{ background: THEME.panelBg, border: `1px solid ${THEME.border}`, borderRadius: 8, padding: "16px 18px" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: THEME.textLight }}>Rakip Reklam İstihbaratı</div>
+            <div style={{ fontSize: 11.5, color: THEME.textMuted, marginTop: 3, maxWidth: 560, lineHeight: 1.5 }}>
+              Meta Reklam Kütüphanesi'nden yayınevi reklamları taranır. Uzun süredir yayında olan reklam,
+              çalışan reklamdır — amaç kopyalamak değil desen okumak.
+            </div>
+          </div>
+          <Btn small disabled={rakipYukleniyor} onClick={rakipCek}>{rakipYukleniyor ? "Taranıyor..." : "Rakipleri tara"}</Btn>
+        </div>
+
+        {rakipler && (
+          <div style={{ marginTop: 14 }}>
+            <div style={{ fontSize: 11.5, color: THEME.textMuted, marginBottom: 10 }}>
+              {rakipler.taranmisTerim} arama terimi · {rakipler.bulunanSayfa} yayınevi · {rakipler.toplamReklam} aktif reklam
+            </div>
+            <div style={{ display: "grid", gap: 8 }}>
+              {rakipler.rakipler.map((r) => (
+                <div key={r.sayfaId} style={{ background: THEME.panelBgAlt, borderRadius: 6, padding: "10px 12px", borderLeft: `3px solid ${renk[r.ciddiyet]}` }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+                    <div style={{ fontSize: 13, color: THEME.textLight, fontWeight: 600 }}>{r.sayfa}</div>
+                    <div style={{ fontSize: 11.5, color: THEME.textMuted, fontFamily: FONT_MONO }}>
+                      {r.aktifReklam} reklam{r.enUzunSurenGun ? ` · ${r.enUzunSurenGun} gündür` : ""}
+                    </div>
+                  </div>
+                  {r.ornekMetinler[0] && (
+                    <div style={{ fontSize: 11.5, color: THEME.textMuted, marginTop: 6, fontStyle: "italic", lineHeight: 1.5 }}>
+                      "{r.ornekMetinler[0].slice(0, 180)}..."
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+            {rakipler.rakipler.length === 0 && (
+              <div style={{ fontSize: 12.5, color: THEME.textFaint }}>
+                Aktif rakip reklamı bulunamadı. Reklam Kütüphanesi Türkiye'de bazı kategorilerde sınırlı veri döndürebiliyor.
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ============ Yazar Kampanyaları — onay ekranı ============
 // Yazar kampanya açtığında bütçesi BLOKE edilir, harcanmaz. Burada onaylarsan
 // sistem Meta'da gerçek kampanya kurar. Reddedersen bütçe otomatik iade edilir.
@@ -4437,6 +4566,7 @@ export default function AdminPanel() {
     ["orders", "Mağaza Siparişleri"], ["ads", "Reklam Talepleri"], ["translations", "Çeviri Talepleri"],
     ["destek", "Destek & Şikayet"], ["duyurular", "Duyurular"], ["meta", "Meta Reklam"],
     ["oyun", "Görev & Ödül"],
+    ["reklamMerkezi", "Reklam Merkezi"],
     ["yazarKampanya", "Yazar Kampanyaları"],
     ["reklamTeklif", "Reklam Başvuruları"],
     ["eslesme", "Eşleşme Teşhisi"],
@@ -4569,6 +4699,7 @@ export default function AdminPanel() {
         {view === "duyurular" && <DuyurularView authFetch={authFetch} authors={authors} />}
         {view === "meta" && <MetaReklamView authFetch={authFetch} />}
         {view === "oyun" && <OyunView authFetch={authFetch} authors={authors} />}
+        {view === "reklamMerkezi" && <ReklamMerkezi authFetch={authFetch} />}
         {view === "yazarKampanya" && <YazarKampanyalari authFetch={authFetch} />}
         {view === "reklamTeklif" && <ReklamBasvurulari authFetch={authFetch} />}
         {view === "eslesme" && <EslesmeTeshisi authFetch={authFetch} onSelectAuthor={(id) => { setView("authors"); setSelectedId(id); }} />}
