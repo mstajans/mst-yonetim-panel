@@ -1203,6 +1203,409 @@ function DemoHesaplar({ authFetch }) {
   );
 }
 
+// ============ 100 Altın Kural Denetimi ============
+// Her kural kayıtlı, kontrol edilebilenler ölçülüyor, ihlaller aksiyona bağlı.
+function YuzKuralDenetimi({ authFetch }) {
+  const [veri, setVeri] = useState(null);
+  const [calisiyor, setCalisiyor] = useState(false);
+  const [uygulanan, setUygulanan] = useState(null);
+  const [hata, setHata] = useState("");
+  const [sonuc, setSonuc] = useState(null);
+  const [gorunum, setGorunum] = useState("ihlal");
+
+  const yukle = async () => {
+    if (calisiyor) return;
+    setCalisiyor(true); setHata(""); setSonuc(null);
+    try {
+      const r = await authFetch("/api/admin/reklam/kural-denetimi?gun=30");
+      const d = await r.json();
+      if (d.ok) setVeri(d); else setHata(d.error || "Denetim yapılamadı.");
+    } catch { setHata("Sunucuya ulaşılamadı."); }
+    finally { setCalisiyor(false); }
+  };
+
+  const uygula = async (i, idx) => {
+    if (uygulanan !== null) return;
+    if (i.tur === "kitle_kur") { setHata("Bu kural için aşağıdaki Yeniden Hedefleme bölümünü kullanın."); return; }
+    if (!window.confirm(`Kural ${i.no} gereği Meta'da değişiklik yapılacak:\n\n${i.aksiyon}\n\nOnaylıyor musun?`)) return;
+    setUygulanan(idx); setHata(""); setSonuc(null);
+    try {
+      const r = await authFetch("/api/admin/reklam/aksiyon-uygula", {
+        method: "POST", body: JSON.stringify({ aksiyon: i }) });
+      const d = await r.json();
+      if (d.ok) { setSonuc(d); yukle(); } else setHata(d.error || "Uygulanamadı.");
+    } catch { setHata("Sunucuya ulaşılamadı."); }
+    finally { setUygulanan(null); }
+  };
+
+  const katRenk = { otomatik: THEME.success, izlenen: THEME.warn, insan: THEME.cyan, ilke: THEME.textFaint };
+  const katAd = { otomatik: "otomatik", izlenen: "izlenen", insan: "insan işi", ilke: "ilke" };
+  const t = (x) => Number(x || 0).toLocaleString("tr-TR", { maximumFractionDigits: 2 });
+
+  return (
+    <div style={{ background: THEME.panelBg, border: `2px solid ${THEME.danger}`, borderRadius: 8, padding: "16px 18px", marginBottom: 16 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, flexWrap: "wrap" }}>
+        <div>
+          <div style={{ fontSize: 14, fontWeight: 700, color: THEME.textLight }}>100 Altın Kural Denetimi</div>
+          <div style={{ fontSize: 11.5, color: THEME.textMuted, marginTop: 4, maxWidth: 660, lineHeight: 1.6 }}>
+            2026 Meta reklamcılığının 100 kuralı sisteme işlendi. Ölçülebilenler canlı veriyle
+            kontrol edilir, ihlaller aksiyona bağlanır. <b style={{ color: THEME.success }}>Otomatik</b> etiketli
+            kurallar tek tıkla düzeltilir; <b style={{ color: THEME.cyan }}>insan işi</b> olanlar sizin yapmanız gerekenler.
+          </div>
+        </div>
+        <Btn small disabled={calisiyor} onClick={yukle}>{calisiyor ? "Denetleniyor..." : "100 kuralı denetle"}</Btn>
+      </div>
+
+      {hata && <div style={{ fontSize: 12.5, color: THEME.danger, marginTop: 12 }}>{hata}</div>}
+      {sonuc && (
+        <div style={{ marginTop: 12, background: "rgba(46,125,50,.12)", border: `1px solid ${THEME.success}`, borderRadius: 6, padding: "11px 13px" }}>
+          {(sonuc.sonuclar || []).map((x, i) => <div key={i} style={{ fontSize: 12.5, color: THEME.success, lineHeight: 1.6 }}>✓ {x}</div>)}
+          <div style={{ fontSize: 11.5, color: THEME.textMuted, marginTop: 6 }}>{sonuc.mesaj}</div>
+        </div>
+      )}
+
+      {veri && (
+        <div style={{ marginTop: 14 }}>
+          {veri.ozet && (
+            <div style={{ display: "flex", gap: 18, flexWrap: "wrap", background: THEME.panelBgAlt, borderRadius: 6, padding: "11px 13px", marginBottom: 12 }}>
+              {[["Harcama", t(veri.ozet.harcama)+" ₺"], ["Erişim", t(veri.ozet.erisim)], ["Tıklama", t(veri.ozet.tiklama)],
+                ["CPM", t(veri.ozet.cpm)+" ₺"], ["CTR", "%"+t(veri.ozet.ctr)], ["Frekans", t(veri.ozet.frekans)]].map(([e,x]) => (
+                <div key={e}><div style={{ fontSize: 15, fontFamily: FONT_MONO, fontWeight: 700, color: THEME.textLight }}>{x}</div>
+                <div style={{ fontSize: 10, color: THEME.textMuted }}>{e}</div></div>
+              ))}
+            </div>
+          )}
+
+          {/* Skor tablosu */}
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
+            {Object.entries(veri.gruplar).map(([g, k]) => (
+              <div key={g} style={{ background: THEME.panelBgAlt, borderRadius: 6, padding: "8px 11px", minWidth: 96 }}>
+                <div style={{ fontSize: 12, color: THEME.textLight, fontWeight: 600 }}>{g}</div>
+                <div style={{ fontSize: 11, color: THEME.textMuted, marginTop: 2 }}>
+                  {k.toplam} kural{k.kontrollu ? ` · ${k.kontrollu} ölçülür` : ""}
+                </div>
+                {k.ihlal > 0 && <div style={{ fontSize: 11.5, color: THEME.danger, marginTop: 2 }}>{k.ihlal} ihlal</div>}
+                {k.ihlal === 0 && k.kontrollu > 0 && <div style={{ fontSize: 11.5, color: THEME.success, marginTop: 2 }}>temiz</div>}
+              </div>
+            ))}
+          </div>
+
+          <div style={{ display: "flex", gap: 6, marginBottom: 12, flexWrap: "wrap" }}>
+            {[["ihlal", `İhlaller (${veri.ihlalSayisi})`], ["temiz", `Temiz (${veri.temizSayisi})`],
+              ["ilke", `İlkeler (${veri.olculemez.length})`]].map(([k, ad]) => (
+              <Btn key={k} small variant={gorunum === k ? undefined : "ghost"} onClick={() => setGorunum(k)}>{ad}</Btn>
+            ))}
+          </div>
+
+          {gorunum === "ihlal" && (
+            <div style={{ display: "grid", gap: 10 }}>
+              {veri.ihlaller.map((i, idx) => (
+                <div key={i.no} style={{ background: THEME.panelBgAlt, borderRadius: 6, padding: "13px 15px", borderLeft: `3px solid ${katRenk[i.kat]}` }}>
+                  <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                    <span style={{ fontSize: 10.5, color: THEME.textFaint, fontFamily: FONT_MONO }}>#{i.no}</span>
+                    <span style={{ fontSize: 9.5, letterSpacing: "0.08em", color: katRenk[i.kat], border: `1px solid ${katRenk[i.kat]}`, borderRadius: 10, padding: "2px 7px" }}>{katAd[i.kat]}</span>
+                    <span style={{ fontSize: 13, color: THEME.textLight, fontWeight: 600 }}>{i.metin}</span>
+                  </div>
+                  <div style={{ fontSize: 12.5, color: THEME.cyan, marginTop: 7, fontFamily: FONT_MONO }}>{i.olcum}</div>
+                  <div style={{ fontSize: 12.5, color: THEME.textMuted, marginTop: 6, lineHeight: 1.6 }}>{i.neden}</div>
+                  {i.gecmisSonuc && (
+                    <div style={{ fontSize: 11.5, marginTop: 7, padding: "6px 9px", borderRadius: 4,
+                      background: i.gecmisSonuc.basariOrani >= 60 ? "rgba(46,125,50,.12)" : "rgba(192,57,43,.12)",
+                      color: i.gecmisSonuc.basariOrani >= 60 ? THEME.success : THEME.danger }}>{i.gecmisSonuc.not}</div>
+                  )}
+                  <div style={{ marginTop: 10, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                    <div style={{ fontSize: 13, color: THEME.textLight, lineHeight: 1.5, flex: 1, minWidth: 200 }}>
+                      <b style={{ color: THEME.success }}>Yapılacak:</b> {i.aksiyon}
+                      {i.etki && <div style={{ fontSize: 11.5, color: THEME.textFaint, marginTop: 3, fontStyle: "italic" }}>{i.etki}</div>}
+                    </div>
+                    {i.uygulanabilir
+                      ? <Btn small disabled={uygulanan !== null} onClick={() => uygula(i, idx)}>{uygulanan === idx ? "Uygulanıyor..." : "Uygula"}</Btn>
+                      : <span style={{ fontSize: 11, color: THEME.textFaint, border: `1px solid ${THEME.border}`, borderRadius: 10, padding: "3px 9px", whiteSpace: "nowrap" }}>elle</span>}
+                  </div>
+                </div>
+              ))}
+              {veri.ihlaller.length === 0 && <div style={{ fontSize: 13, color: THEME.success }}>Ölçülebilen kuralların hepsi temiz.</div>}
+            </div>
+          )}
+
+          {gorunum === "temiz" && (
+            <div style={{ display: "grid", gap: 5 }}>
+              {veri.temizler.map((k) => (
+                <div key={k.no} style={{ fontSize: 12.5, color: THEME.textMuted, display: "flex", gap: 8 }}>
+                  <span style={{ color: THEME.success }}>✓</span>
+                  <span style={{ color: THEME.textFaint, fontFamily: FONT_MONO, minWidth: 26 }}>#{k.no}</span>
+                  <span>{k.metin}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {gorunum === "ilke" && (
+            <div style={{ display: "grid", gap: 5 }}>
+              <div style={{ fontSize: 11.5, color: THEME.textMuted, marginBottom: 5 }}>
+                Bu kurallar doğrudan ölçülmez — motorun kararlarını ve önerilerini şekillendirirler.
+              </div>
+              {veri.olculemez.map((k) => (
+                <div key={k.no} style={{ fontSize: 12.5, color: THEME.textMuted, display: "flex", gap: 8 }}>
+                  <span style={{ color: THEME.textFaint, fontFamily: FONT_MONO, minWidth: 26 }}>#{k.no}</span>
+                  <span style={{ fontSize: 9.5, color: katRenk[k.kat], border: `1px solid ${katRenk[k.kat]}`, borderRadius: 8, padding: "1px 6px", height: "fit-content", whiteSpace: "nowrap" }}>{katAd[k.kat]}</span>
+                  <span>{k.metin}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ============ Yeniden Hedefleme Kitleleri ============
+// Siteye gelip almayan kişiye tekrar ulaşmak, soğuk kitleye ulaşmaktan
+// kat kat ucuz. "Aynı bütçeyle daha çok müşteri"nin en doğrudan yolu.
+function YenidenHedefleme({ authFetch }) {
+  const [veri, setVeri] = useState(null);
+  const [calisiyor, setCalisiyor] = useState(false);
+  const [kuruluyor, setKuruluyor] = useState(null);
+  const [hata, setHata] = useState("");
+  const [mesaj, setMesaj] = useState("");
+
+  const yukle = async () => {
+    if (calisiyor) return;
+    setCalisiyor(true); setHata("");
+    try {
+      const r = await authFetch("/api/admin/reklam/kitleler");
+      const d = await r.json();
+      if (d.ok) setVeri(d); else setHata(d.error || "Kitleler okunamadı.");
+    } catch { setHata("Sunucuya ulaşılamadı."); }
+    finally { setCalisiyor(false); }
+  };
+
+  const olustur = async (kod, ad) => {
+    if (kuruluyor) return;
+    if (!window.confirm(`"${ad}" kitlesi Meta'da oluşturulacak. Onaylıyor musun?`)) return;
+    setKuruluyor(kod); setHata(""); setMesaj("");
+    try {
+      const r = await authFetch("/api/admin/reklam/kitle-olustur", {
+        method: "POST", body: JSON.stringify({ kod }),
+      });
+      const d = await r.json();
+      if (d.ok) { setMesaj(d.mesaj); yukle(); } else setHata(d.error || "Oluşturulamadı.");
+    } catch { setHata("Sunucuya ulaşılamadı."); }
+    finally { setKuruluyor(null); }
+  };
+
+  return (
+    <div style={{ background: THEME.panelBg, border: `1px solid ${THEME.success}`, borderRadius: 8, padding: "16px 18px", marginBottom: 16 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, flexWrap: "wrap" }}>
+        <div>
+          <div style={{ fontSize: 13, fontWeight: 700, color: THEME.textLight }}>Yeniden Hedefleme Kitleleri</div>
+          <div style={{ fontSize: 11.5, color: THEME.textMuted, marginTop: 4, maxWidth: 640, lineHeight: 1.6 }}>
+            Siteye gelip satın almayan kişiye tekrar ulaşmak, hiç tanımayan birine ulaşmaktan
+            belirgin şekilde ucuzdur. <b style={{ color: THEME.success }}>Aynı bütçeyle daha çok müşteri</b>
+            {" "}hedefinin en doğrudan yolu bu havuzlardır.
+          </div>
+        </div>
+        <Btn small disabled={calisiyor} onClick={yukle}>{calisiyor ? "Okunuyor..." : "Kitleleri getir"}</Btn>
+      </div>
+
+      {hata && <div style={{ fontSize: 12.5, color: THEME.danger, marginTop: 12 }}>{hata}</div>}
+      {mesaj && <div style={{ fontSize: 12.5, color: THEME.success, marginTop: 12, lineHeight: 1.5 }}>{mesaj}</div>}
+
+      {veri && (
+        <div style={{ marginTop: 14 }}>
+          {veri.mevcut.length > 0 && (
+            <div style={{ marginBottom: 14 }}>
+              <div style={{ fontSize: 11.5, color: THEME.textMuted, marginBottom: 7 }}>Kurulu kitleler</div>
+              {veri.mevcut.map((k) => (
+                <div key={k.id} style={{ display: "flex", justifyContent: "space-between", gap: 10, background: THEME.panelBgAlt, borderRadius: 5, padding: "8px 11px", marginBottom: 4 }}>
+                  <span style={{ fontSize: 12.5, color: THEME.textLight }}>{k.ad}</span>
+                  <span style={{ fontSize: 11.5, color: THEME.textMuted, fontFamily: FONT_MONO }}>
+                    {k.boyut ? Number(k.boyut).toLocaleString("tr-TR") + " kişi" : (k.durum || "hazırlanıyor")}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {veri.eksikler.length > 0 && (
+            <div>
+              <div style={{ fontSize: 11.5, color: THEME.warn, marginBottom: 7 }}>
+                Kurulmamış havuzlar — {veri.eksikler.length} tane
+              </div>
+              <div style={{ display: "grid", gap: 7 }}>
+                {veri.eksikler.map((o) => {
+                  const otomatik = ["site_180", "urun_bakan", "sepet"].includes(o.kod);
+                  return (
+                    <div key={o.kod} style={{ background: THEME.panelBgAlt, borderRadius: 6, padding: "11px 13px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                      <div style={{ minWidth: 200, flex: 1 }}>
+                        <div style={{ fontSize: 13, color: THEME.textLight, fontWeight: 600 }}>{o.ad}</div>
+                        <div style={{ fontSize: 11.5, color: THEME.textMuted, marginTop: 2, lineHeight: 1.5 }}>{o.aciklama}</div>
+                      </div>
+                      {otomatik ? (
+                        <Btn small disabled={kuruluyor !== null} onClick={() => olustur(o.kod, o.ad)}>
+                          {kuruluyor === o.kod ? "Oluşturuluyor..." : "Oluştur"}
+                        </Btn>
+                      ) : (
+                        <span style={{ fontSize: 11, color: THEME.textFaint, border: `1px solid ${THEME.border}`, borderRadius: 10, padding: "3px 9px", whiteSpace: "nowrap" }}>Meta arayüzünden</span>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ============ Reklam Aksiyon Motoru ============
+// Teşhis "sorun var" der; bu motor sorunu ÇÖZER. Meta'da gerçek değişiklik
+// yapar: kitle genişletir, bütçe kaydırır, zayıf reklamı duraklatır.
+// Her müdahale onay ister ve öğrenme defterine yazılır.
+function ReklamAksiyonMotoru({ authFetch }) {
+  const [veri, setVeri] = useState(null);
+  const [calisiyor, setCalisiyor] = useState(false);
+  const [uygulanan, setUygulanan] = useState(null);
+  const [hata, setHata] = useState("");
+  const [sonuc, setSonuc] = useState(null);
+
+  const yukle = async () => {
+    if (calisiyor) return;
+    setCalisiyor(true); setHata(""); setSonuc(null);
+    try {
+      const r = await authFetch("/api/admin/reklam/aksiyonlar?gun=30");
+      const d = await r.json();
+      if (d.ok) setVeri(d); else setHata(d.error || "Aksiyonlar alınamadı.");
+    } catch { setHata("Sunucuya ulaşılamadı."); }
+    finally { setCalisiyor(false); }
+  };
+
+  const uygula = async (a, i) => {
+    if (uygulanan !== null) return;
+    if (!window.confirm(
+      `Bu değişiklik Meta'da GERÇEKTEN uygulanacak:\n\n${a.aksiyon}\n\nOnaylıyor musun?`)) return;
+    setUygulanan(i); setHata(""); setSonuc(null);
+    try {
+      const r = await authFetch("/api/admin/reklam/aksiyon-uygula", {
+        method: "POST", body: JSON.stringify({ aksiyon: a }),
+      });
+      const d = await r.json();
+      if (d.ok) { setSonuc(d); yukle(); } else setHata(d.error || "Uygulanamadı.");
+    } catch { setHata("Sunucuya ulaşılamadı."); }
+    finally { setUygulanan(null); }
+  };
+
+  // Geçmiş müdahalelerin 7 günlük etkisini ölç — öğrenme döngüsünün kapanması
+  const etkiOlc = async () => {
+    if (calisiyor) return;
+    setCalisiyor(true); setHata(""); setSonuc(null);
+    try {
+      const r = await authFetch("/api/admin/reklam/etki-olc", { method: "POST", body: "{}" });
+      const d = await r.json();
+      if (d.ok) {
+        setSonuc({ sonuclar: (d.olculen || []).map((x) => `${x.baslik}: ${x.sonuc}`), mesaj: d.mesaj });
+        yukle();
+      } else setHata(d.error || "Ölçülemedi.");
+    } catch { setHata("Sunucuya ulaşılamadı."); }
+    finally { setCalisiyor(false); }
+  };
+
+  const onemRenk = { kritik: THEME.danger, uyari: THEME.warn };
+  const onemAd = { kritik: "KRİTİK", uyari: "UYARI" };
+
+  return (
+    <div style={{ background: THEME.panelBg, border: `2px solid ${THEME.cyan}`, borderRadius: 8, padding: "16px 18px", marginBottom: 16 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, flexWrap: "wrap" }}>
+        <div>
+          <div style={{ fontSize: 14, fontWeight: 700, color: THEME.textLight }}>Reklam Aksiyon Motoru</div>
+          <div style={{ fontSize: 11.5, color: THEME.textMuted, marginTop: 4, maxWidth: 660, lineHeight: 1.6 }}>
+            Sorunu bulmakla kalmaz, <b style={{ color: THEME.cyan }}>çözer</b> — Meta'da kitleyi genişletir,
+            bütçeyi kazanan sete kaydırır, bütçe yakan reklamı duraklatır.
+            Bütçe artışları %18 ile sınırlı: %20'yi geçmek öğrenme evresini sıfırlar ve bir hafta kaybettirir.
+            Her müdahale öğrenme defterine yazılır, etkisi 7 gün sonra ölçülür.
+          </div>
+        </div>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+          <Btn small disabled={calisiyor} onClick={yukle}>{calisiyor ? "İnceleniyor..." : "Aksiyonları getir"}</Btn>
+          <Btn small variant="ghost" disabled={calisiyor} onClick={etkiOlc}>Etkileri ölç</Btn>
+        </div>
+      </div>
+
+      {hata && <div style={{ fontSize: 12.5, color: THEME.danger, marginTop: 12 }}>{hata}</div>}
+
+      {sonuc && (
+        <div style={{ marginTop: 12, background: "rgba(46,125,50,.12)", border: `1px solid ${THEME.success}`, borderRadius: 6, padding: "11px 13px" }}>
+          {(sonuc.sonuclar || []).map((x, i) => (
+            <div key={i} style={{ fontSize: 12.5, color: THEME.success, lineHeight: 1.6 }}>✓ {x}</div>
+          ))}
+          <div style={{ fontSize: 11.5, color: THEME.textMuted, marginTop: 6, lineHeight: 1.5 }}>{sonuc.mesaj}</div>
+        </div>
+      )}
+
+      {veri && (
+        <div style={{ marginTop: 14 }}>
+          <div style={{ fontSize: 11.5, color: THEME.textMuted, marginBottom: 10 }}>
+            {veri.aksiyonlar.length} bulgu · {veri.uygulanabilirSayi} tanesi tek tıkla uygulanabilir
+          </div>
+
+          <div style={{ display: "grid", gap: 10 }}>
+            {veri.aksiyonlar.map((a, i) => (
+              <div key={i} style={{ background: THEME.panelBgAlt, borderRadius: 6, padding: "13px 15px", borderLeft: `3px solid ${onemRenk[a.onem]}` }}>
+                <div style={{ display: "flex", gap: 9, alignItems: "center", flexWrap: "wrap" }}>
+                  <span style={{ fontSize: 9.5, letterSpacing: "0.1em", color: onemRenk[a.onem], border: `1px solid ${onemRenk[a.onem]}`, borderRadius: 10, padding: "2px 7px" }}>{onemAd[a.onem]}</span>
+                  <span style={{ fontSize: 13.5, color: THEME.textLight, fontWeight: 600 }}>{a.baslik}</span>
+                </div>
+                <div style={{ fontSize: 12.5, color: THEME.cyan, marginTop: 7, fontFamily: FONT_MONO }}>{a.olcum}</div>
+                <div style={{ fontSize: 12.5, color: THEME.textMuted, marginTop: 6, lineHeight: 1.6 }}>{a.neden}</div>
+                {a.gecmisSonuc && (
+                  <div style={{ fontSize: 11.5, marginTop: 7, padding: "6px 9px", borderRadius: 4,
+                    background: a.gecmisSonuc.basariOrani >= 60 ? "rgba(46,125,50,.12)" : "rgba(192,57,43,.12)",
+                    color: a.gecmisSonuc.basariOrani >= 60 ? THEME.success : THEME.danger }}>
+                    {a.gecmisSonuc.not}{a.gecmisSonuc.guven === "erken" ? " (az veri)" : ""}
+                  </div>
+                )}
+
+                <div style={{ marginTop: 10, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                  <div style={{ fontSize: 13, color: THEME.textLight, lineHeight: 1.5, flex: 1, minWidth: 200 }}>
+                    <b style={{ color: THEME.success }}>Yapılacak:</b> {a.aksiyon}
+                    {a.etki && <div style={{ fontSize: 11.5, color: THEME.textFaint, marginTop: 3, fontStyle: "italic" }}>{a.etki}</div>}
+                  </div>
+                  {a.uygulanabilir ? (
+                    <Btn small disabled={uygulanan !== null} onClick={() => uygula(a, i)}>
+                      {uygulanan === i ? "Uygulanıyor..." : "Uygula"}
+                    </Btn>
+                  ) : (
+                    <span style={{ fontSize: 11, color: THEME.textFaint, border: `1px solid ${THEME.border}`, borderRadius: 10, padding: "3px 9px", whiteSpace: "nowrap" }}>elle yapılır</span>
+                  )}
+                </div>
+              </div>
+            ))}
+            {veri.aksiyonlar.length === 0 && (
+              <div style={{ fontSize: 13, color: THEME.textMuted }}>İncelenen kurallarda müdahale gerektiren bir durum yok.</div>
+            )}
+          </div>
+
+          {veri.gecmis && veri.gecmis.length > 0 && (
+            <div style={{ marginTop: 16, borderTop: `1px solid ${THEME.border}`, paddingTop: 12 }}>
+              <div style={{ fontSize: 11.5, color: THEME.textMuted, marginBottom: 8 }}>Öğrenme defteri — yapılan müdahaleler</div>
+              {veri.gecmis.map((g, i) => (
+                <div key={i} style={{ fontSize: 12, color: THEME.textMuted, marginBottom: 4 }}>
+                  <span style={{ color: THEME.textFaint }}>{new Date(g.uygulanma_tarihi).toLocaleDateString("tr-TR")}</span>
+                  {" · "}{g.baslik}
+                  {g.sonuc_notu && <span style={{ color: THEME.success }}> → {g.sonuc_notu}</span>}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ============ Reklam Teşhisi — kural tabanlı ============
 // AI'a bağlı DEĞİL. Meta'dan canlı veri çeker, uzman eşiklerine göre
 // somut bulgular üretir: ne oluyor · neden · ne yap.
@@ -1345,6 +1748,15 @@ function ReklamMerkezi({ authFetch }) {
       </div>
 
       {hata && <div style={{ fontSize: 12.5, color: THEME.danger, marginBottom: 12 }}>{hata}</div>}
+
+      {/* 100 kural denetimi — tam tablo */}
+      <YuzKuralDenetimi authFetch={authFetch} />
+
+      {/* Aksiyon motoru — sadece teşhis değil, müdahale */}
+      <ReklamAksiyonMotoru authFetch={authFetch} />
+
+      {/* Yeniden hedefleme — aynı bütçeyle daha çok müşteri */}
+      <YenidenHedefleme authFetch={authFetch} />
 
       {/* Teşhis — kural tabanlı, AI gerektirmez */}
       <ReklamTeshisi authFetch={authFetch} />
