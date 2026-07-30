@@ -1203,6 +1203,96 @@ function DemoHesaplar({ authFetch }) {
   );
 }
 
+// ============ Reklam Teşhisi — kural tabanlı ============
+// AI'a bağlı DEĞİL. Meta'dan canlı veri çeker, uzman eşiklerine göre
+// somut bulgular üretir: ne oluyor · neden · ne yap.
+function ReklamTeshisi({ authFetch }) {
+  const [veri, setVeri] = useState(null);
+  const [calisiyor, setCalisiyor] = useState(false);
+  const [hata, setHata] = useState("");
+  const [gun, setGun] = useState(30);
+
+  const calistir = async (g) => {
+    if (calisiyor) return;
+    setCalisiyor(true); setHata(""); setVeri(null);
+    try {
+      const r = await authFetch(`/api/admin/reklam/teshis?gun=${g || gun}`);
+      const d = await r.json();
+      if (d.ok) setVeri(d); else setHata(d.error || "Teşhis alınamadı.");
+    } catch { setHata("Sunucuya ulaşılamadı."); }
+    finally { setCalisiyor(false); }
+  };
+
+  const onemRenk = { kritik: THEME.danger, uyari: THEME.warn, bilgi: THEME.cyan };
+  const onemAd = { kritik: "KRİTİK", uyari: "UYARI", bilgi: "BİLGİ" };
+  const t = (x) => Number(x || 0).toLocaleString("tr-TR", { maximumFractionDigits: 2 });
+
+  return (
+    <div style={{ background: THEME.panelBg, border: `1px solid ${THEME.danger}`, borderRadius: 8, padding: "16px 18px", marginBottom: 16 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, flexWrap: "wrap" }}>
+        <div>
+          <div style={{ fontSize: 13, fontWeight: 700, color: THEME.textLight }}>Reklam Teşhisi</div>
+          <div style={{ fontSize: 11.5, color: THEME.textMuted, marginTop: 3, maxWidth: 620, lineHeight: 1.55 }}>
+            Meta'dan canlı veri çekilir, uzman eşiklerine göre incelenir. Yapay zekâ gerektirmez —
+            aynı veri her zaman aynı teşhisi verir. Her bulgu: ne oluyor, neden, ne yapmalı.
+          </div>
+        </div>
+        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+          <select value={gun} onChange={(e) => { setGun(Number(e.target.value)); calistir(Number(e.target.value)); }}
+            style={{ background: THEME.bg, color: THEME.textLight, border: `1px solid ${THEME.border}`, borderRadius: 4, padding: "7px 9px", fontSize: 12.5, fontFamily: "inherit" }}>
+            <option value={7}>Son 7 gün</option>
+            <option value={14}>Son 14 gün</option>
+            <option value={30}>Son 30 gün</option>
+          </select>
+          <Btn small disabled={calisiyor} onClick={() => calistir()}>{calisiyor ? "İnceleniyor..." : "Teşhis çalıştır"}</Btn>
+        </div>
+      </div>
+
+      {hata && <div style={{ fontSize: 12.5, color: THEME.danger, marginTop: 12 }}>{hata}</div>}
+
+      {veri && (
+        <div style={{ marginTop: 14 }}>
+          {veri.ozet && (
+            <div style={{ display: "flex", gap: 20, flexWrap: "wrap", background: THEME.panelBgAlt, borderRadius: 6, padding: "11px 13px", marginBottom: 14 }}>
+              {[["Harcama", t(veri.ozet.harcama) + " ₺"], ["Erişim", t(veri.ozet.erisim)],
+                ["Tıklama", t(veri.ozet.tiklama)], ["CPM", t(veri.ozet.cpm) + " ₺"],
+                ["CTR", "%" + t(veri.ozet.ctr)], ["Frekans", t(veri.ozet.frekans)]].map(([e, v]) => (
+                <div key={e}>
+                  <div style={{ fontSize: 15, fontFamily: FONT_MONO, fontWeight: 700, color: THEME.textLight }}>{v}</div>
+                  <div style={{ fontSize: 10, color: THEME.textMuted }}>{e}</div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div style={{ fontSize: 11.5, color: THEME.textMuted, marginBottom: 10 }}>
+            {veri.donem} · {veri.reklamSetiSayisi} reklam seti · {veri.reklamSayisi} reklam incelendi
+          </div>
+
+          {veri.mesaj && <div style={{ fontSize: 13, color: THEME.textMuted }}>{veri.mesaj}</div>}
+
+          <div style={{ display: "grid", gap: 9 }}>
+            {(veri.bulgular || []).map((b, i) => (
+              <div key={i} style={{ background: THEME.panelBgAlt, borderRadius: 6, padding: "13px 15px", borderLeft: `3px solid ${onemRenk[b.onem]}` }}>
+                <div style={{ display: "flex", gap: 9, alignItems: "center", flexWrap: "wrap" }}>
+                  <span style={{ fontSize: 9.5, letterSpacing: "0.1em", color: onemRenk[b.onem], border: `1px solid ${onemRenk[b.onem]}`, borderRadius: 10, padding: "2px 7px" }}>{onemAd[b.onem]}</span>
+                  <span style={{ fontSize: 13.5, color: THEME.textLight, fontWeight: 600 }}>{b.baslik}</span>
+                </div>
+                <div style={{ fontSize: 12.5, color: THEME.cyan, marginTop: 7, fontFamily: FONT_MONO }}>{b.olcum}</div>
+                <div style={{ fontSize: 12.5, color: THEME.textMuted, marginTop: 6, lineHeight: 1.6 }}>{b.neden}</div>
+                <div style={{ fontSize: 13, color: THEME.textLight, marginTop: 8, lineHeight: 1.6, paddingLeft: 11, borderLeft: `2px solid ${THEME.border}` }}>
+                  <b style={{ color: THEME.success }}>Ne yapmalı:</b> {b.eylem}
+                </div>
+                {b.kazanc && <div style={{ fontSize: 11.5, color: THEME.textFaint, marginTop: 5, fontStyle: "italic" }}>{b.kazanc}</div>}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ============ Reklam Merkezi — danışman + rakip istihbaratı ============
 function ReklamMerkezi({ authFetch }) {
   const [soru, setSoru] = useState("");
@@ -1255,6 +1345,9 @@ function ReklamMerkezi({ authFetch }) {
       </div>
 
       {hata && <div style={{ fontSize: 12.5, color: THEME.danger, marginBottom: 12 }}>{hata}</div>}
+
+      {/* Teşhis — kural tabanlı, AI gerektirmez */}
+      <ReklamTeshisi authFetch={authFetch} />
 
       {/* Danışman */}
       <div style={{ background: THEME.panelBg, border: `1px solid ${THEME.cyan}`, borderRadius: 8, padding: "16px 18px", marginBottom: 16 }}>
@@ -2417,7 +2510,7 @@ function MetaReklamView({ authFetch }) {
       const r = await authFetch("/api/admin/meta/sync", { method: "POST" });
       const d = await r.json();
       if (d.bagli === false) setMsg({ ok: false, text: d.mesaj });
-      else setMsg({ ok: true, text: `${d.senkronize} kampanya senkronlandı (${d.eslesmeyaen || 0} eşleşmeyen).` });
+      else setMsg({ ok: true, text: `${d.senkronize ?? 0} kampanya senkronlandı (${d.eslesmeyaen ?? 0} eşleşmeyen).` });
       load();
     } catch { setMsg({ ok: false, text: "Hata." }); } finally { setSyncing(false); }
   };
