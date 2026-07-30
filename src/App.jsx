@@ -1064,6 +1064,145 @@ const TEKLIF_DURUM = {
   iptal:       { ad: "İptal",         renk: "#7A7A7A" },
 };
 
+// ============ Demo Hesaplar — yazar adayı satış provası ============
+// Satış ekibi aday için kişisel demo oluşturur, bağlantıyı gönderir.
+// Adayın hangi adıma kadar geldiği takip edilir — nerede bıraktığı görünür.
+const DEMO_DURUM = {
+  gonderildi:       { ad: "Gönderildi",   renk: "#7A7A7A" },
+  acildi:           { ad: "Açıldı",       renk: "#C9A227" },
+  form_dolduruldu:  { ad: "Form doldurdu", renk: "#C0392B" },
+  sozlesmeye_gecti: { ad: "Sözleşmeye geçti", renk: "#2E7D32" },
+  kaybedildi:       { ad: "Kaybedildi",   renk: "#7A7A7A" },
+};
+const DEMO_ADIMLAR = ["Karşılama", "Pano", "Yayın süreci", "Telif", "Tanıtım", "Danışman", "Paketler", "Başvuru"];
+
+function DemoHesaplar({ authFetch }) {
+  const [veri, setVeri] = useState(null);
+  const [yeni, setYeni] = useState({ hedefPaket: "profesyonel" });
+  const [acik, setAcik] = useState(false);
+  const [calisiyor, setCalisiyor] = useState(false);
+  const [sonuc, setSonuc] = useState("");
+
+  const yukle = async () => {
+    try {
+      const r = await authFetch("/api/admin/demo/liste");
+      const d = await r.json();
+      if (d.ok) setVeri(d); else setSonuc(d.error || "Okunamadı.");
+    } catch { setSonuc("Sunucuya ulaşılamadı."); }
+  };
+  useEffect(() => { yukle(); }, []);
+
+  const olustur = async () => {
+    if (calisiyor || !yeni.adayAd) return;
+    setCalisiyor(true); setSonuc("");
+    try {
+      const r = await authFetch("/api/admin/demo/olustur", { method: "POST", body: JSON.stringify(yeni) });
+      const d = await r.json();
+      if (d.ok) {
+        setSonuc(`Demo hazır: ${d.link}`);
+        setYeni({ hedefPaket: "profesyonel" }); setAcik(false); yukle();
+        try { navigator.clipboard.writeText(d.link); } catch {}
+      } else setSonuc(d.error || "Oluşturulamadı.");
+    } catch { setSonuc("Sunucuya ulaşılamadı."); }
+    finally { setCalisiyor(false); }
+  };
+
+  const durumDegistir = async (id, durum) => {
+    await authFetch(`/api/admin/demo/${id}/durum`, { method: "POST", body: JSON.stringify({ durum }) });
+    yukle();
+  };
+
+  const inputStyle = { background: THEME.bg, color: THEME.textLight, border: `1px solid ${THEME.border}`, borderRadius: 4, padding: "8px 11px", fontSize: 13, fontFamily: "inherit", width: "100%", boxSizing: "border-box" };
+
+  if (!veri) return <div style={{ color: THEME.textMuted, fontSize: 13 }}>{sonuc || "Yükleniyor..."}</div>;
+  const o = veri.ozet;
+
+  return (
+    <div>
+      <h2 style={{ color: THEME.textLight, fontFamily: FONT, fontSize: 20, marginBottom: 6 }}>Demo Hesaplar</h2>
+      <div style={{ color: THEME.textMuted, fontSize: 13, marginBottom: 16, lineHeight: 1.55, maxWidth: 720 }}>
+        Yazar adayı için kişisel bir yolculuk provası oluşturun. Aday bağlantıya tıklayınca
+        kendi adı ve kitabının adıyla dolu sekiz adımlık bir deneyim görür — pano, yayın süreci,
+        telif, tanıtım, danışman, paket karşılaştırması ve başvuru formu. Giriş gerekmez.
+      </div>
+
+      <div style={{ display: "flex", gap: 22, marginBottom: 16, flexWrap: "wrap" }}>
+        {[["Gönderildi", o.gonderildi, THEME.textFaint], ["Açıldı", o.acildi, THEME.warn],
+          ["Form doldurdu", o.formDolduruldu, THEME.danger], ["Sözleşme", o.sozlesme, THEME.success]].map(([e, v, c]) => (
+          <div key={e}>
+            <div style={{ fontSize: 22, fontFamily: FONT_MONO, fontWeight: 700, color: c }}>{v}</div>
+            <div style={{ fontSize: 10.5, color: THEME.textMuted }}>{e}</div>
+          </div>
+        ))}
+      </div>
+
+      {sonuc && <div style={{ fontSize: 12.5, color: THEME.textLight, marginBottom: 14, background: THEME.panelBgAlt, padding: "10px 12px", borderRadius: 6, wordBreak: "break-all" }}>{sonuc}</div>}
+
+      {!acik ? (
+        <Btn onClick={() => setAcik(true)}>+ Yeni demo oluştur</Btn>
+      ) : (
+        <div style={{ background: THEME.panelBg, border: `1px solid ${THEME.cyan}`, borderRadius: 8, padding: "16px 18px", marginBottom: 16 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))", gap: 10 }}>
+            <input style={inputStyle} placeholder="Aday adı soyadı *" value={yeni.adayAd || ""} onChange={(e) => setYeni({ ...yeni, adayAd: e.target.value })} />
+            <input style={inputStyle} placeholder="Eserinin adı" value={yeni.kitapAdi || ""} onChange={(e) => setYeni({ ...yeni, kitapAdi: e.target.value })} />
+            <input style={inputStyle} placeholder="Türü (roman, şiir...)" value={yeni.kitapTuru || ""} onChange={(e) => setYeni({ ...yeni, kitapTuru: e.target.value })} />
+            <input style={inputStyle} placeholder="Telefon" value={yeni.telefon || ""} onChange={(e) => setYeni({ ...yeni, telefon: e.target.value })} />
+            <select style={inputStyle} value={yeni.hedefPaket} onChange={(e) => setYeni({ ...yeni, hedefPaket: e.target.value })}>
+              <option value="standart">Başlangıç paketine yönlendir</option>
+              <option value="profesyonel">Profesyonel paketine yönlendir</option>
+              <option value="vip">VIP paketine yönlendir</option>
+            </select>
+            <input style={inputStyle} placeholder="İç not (adaya görünmez)" value={yeni.notlar || ""} onChange={(e) => setYeni({ ...yeni, notlar: e.target.value })} />
+          </div>
+          <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+            <Btn small disabled={calisiyor || !yeni.adayAd} onClick={olustur}>{calisiyor ? "Oluşturuluyor..." : "Oluştur ve linki kopyala"}</Btn>
+            <Btn small variant="ghost" onClick={() => setAcik(false)}>Vazgeç</Btn>
+          </div>
+        </div>
+      )}
+
+      <div style={{ display: "grid", gap: 9, marginTop: 16 }}>
+        {veri.demolar.map((x) => {
+          const dd = DEMO_DURUM[x.durum] || DEMO_DURUM.gonderildi;
+          const fv = x.form_verisi || {};
+          return (
+            <div key={x.id} style={{ background: THEME.panelBg, border: `1px solid ${x.durum === "form_dolduruldu" ? dd.renk : THEME.border}`, borderRadius: 8, padding: "13px 15px" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: 14, color: THEME.textLight, fontWeight: 600 }}>{x.aday_ad}</div>
+                  {x.kitap_adi && <div style={{ fontSize: 12.5, color: THEME.cyan, marginTop: 2 }}>{x.kitap_adi}</div>}
+                  <div style={{ fontSize: 11.5, color: THEME.textMuted, marginTop: 5 }}>
+                    {x.goruntulenme > 0
+                      ? `${x.goruntulenme} kez açıldı · ${DEMO_ADIMLAR[x.ulasilan_adim] || "başlangıç"} adımına kadar geldi`
+                      : "Henüz açılmadı"}
+                    {x.telefon ? ` · ${x.telefon}` : ""}
+                  </div>
+                  {x.notlar && <div style={{ fontSize: 11.5, color: THEME.textFaint, marginTop: 4, fontStyle: "italic" }}>{x.notlar}</div>}
+                  {x.form_tarihi && (
+                    <div style={{ fontSize: 12, color: THEME.success, marginTop: 6, lineHeight: 1.5 }}>
+                      Form: {fv.adSoyad} · {fv.telefon}{fv.eposta ? ` · ${fv.eposta}` : ""}
+                      {x.secilen_paket ? ` · ${x.secilen_paket} paketi` : ""}
+                      {fv.mesaj ? <div style={{ color: THEME.textMuted, marginTop: 3 }}>"{fv.mesaj}"</div> : null}
+                    </div>
+                  )}
+                </div>
+                <div style={{ textAlign: "right", flexShrink: 0 }}>
+                  <span style={{ fontSize: 10.5, color: dd.renk, border: `1px solid ${dd.renk}`, borderRadius: 12, padding: "3px 9px", whiteSpace: "nowrap" }}>{dd.ad}</span>
+                  <div style={{ marginTop: 8, display: "flex", gap: 5, justifyContent: "flex-end", flexWrap: "wrap" }}>
+                    <Btn small variant="ghost" onClick={() => { try { navigator.clipboard.writeText(x.link); setSonuc("Link kopyalandı: " + x.link); } catch {} }}>Link</Btn>
+                    {x.durum === "form_dolduruldu" && <Btn small onClick={() => durumDegistir(x.id, "sozlesmeye_gecti")}>Sözleşmeye geçti</Btn>}
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+        {veri.demolar.length === 0 && <div style={{ color: THEME.textFaint, fontSize: 13 }}>Henüz demo oluşturulmadı.</div>}
+      </div>
+    </div>
+  );
+}
+
 // ============ Reklam Merkezi — danışman + rakip istihbaratı ============
 function ReklamMerkezi({ authFetch }) {
   const [soru, setSoru] = useState("");
@@ -1137,7 +1276,14 @@ function ReklamMerkezi({ authFetch }) {
 
         {cevap && (
           <div style={{ marginTop: 14, borderTop: `1px solid ${THEME.border}`, paddingTop: 12 }}>
-            <div style={{ fontSize: 13.5, color: THEME.textLight, lineHeight: 1.7, whiteSpace: "pre-wrap" }}>{cevap.cevap}</div>
+            {cevap.cevap ? (
+              <div style={{ fontSize: 13.5, color: THEME.textLight, lineHeight: 1.7, whiteSpace: "pre-wrap" }}>{cevap.cevap}</div>
+            ) : (
+              <div style={{ fontSize: 13, color: THEME.warn, lineHeight: 1.6 }}>
+                Danışman cevap üretemedi.
+                {cevap.hataDetay && <div style={{ color: THEME.textMuted, marginTop: 6, fontFamily: FONT_MONO, fontSize: 11.5 }}>{cevap.hataDetay}</div>}
+              </div>
+            )}
             <div style={{ fontSize: 11, color: THEME.textFaint, marginTop: 10 }}>
               {cevap.veriDurumu.toplamKampanya} kampanya incelendi, {cevap.veriDurumu.harcamaGorulenKampanya} tanesinde harcama verisi var
               {cevap.rakipVerisiVar ? " · rakip verisi dahil" : ""}
@@ -1161,29 +1307,36 @@ function ReklamMerkezi({ authFetch }) {
 
         {rakipler && (
           <div style={{ marginTop: 14 }}>
-            <div style={{ fontSize: 11.5, color: THEME.textMuted, marginBottom: 10 }}>
-              {rakipler.taranmisTerim} arama terimi · {rakipler.bulunanSayfa} yayınevi · {rakipler.toplamReklam} aktif reklam
+            <div style={{ background: THEME.panelBgAlt, borderRadius: 6, padding: "12px 14px", marginBottom: 12 }}>
+              <div style={{ fontSize: 12.5, color: THEME.textLight, lineHeight: 1.6 }}>{rakipler.aciklama}</div>
+              <div style={{ fontSize: 12, color: THEME.textMuted, marginTop: 8, lineHeight: 1.6 }}>
+                <b style={{ color: THEME.cyan }}>Neye bakmalı:</b> {rakipler.neyeBakmali}
+              </div>
             </div>
-            <div style={{ display: "grid", gap: 8 }}>
-              {rakipler.rakipler.map((r) => (
-                <div key={r.sayfaId} style={{ background: THEME.panelBgAlt, borderRadius: 6, padding: "10px 12px", borderLeft: `3px solid ${renk[r.ciddiyet]}` }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
-                    <div style={{ fontSize: 13, color: THEME.textLight, fontWeight: 600 }}>{r.sayfa}</div>
-                    <div style={{ fontSize: 11.5, color: THEME.textMuted, fontFamily: FONT_MONO }}>
-                      {r.aktifReklam} reklam{r.enUzunSurenGun ? ` · ${r.enUzunSurenGun} gündür` : ""}
-                    </div>
-                  </div>
-                  {r.ornekMetinler[0] && (
-                    <div style={{ fontSize: 11.5, color: THEME.textMuted, marginTop: 6, fontStyle: "italic", lineHeight: 1.5 }}>
-                      "{r.ornekMetinler[0].slice(0, 180)}..."
-                    </div>
-                  )}
-                </div>
+
+            <div style={{ display: "grid", gap: 6 }}>
+              {(rakipler.aramalar || []).map((a) => (
+                <a key={a.terim} href={a.link} target="_blank" rel="noopener noreferrer"
+                   style={{ display: "flex", justifyContent: "space-between", alignItems: "center",
+                            background: THEME.panelBgAlt, borderRadius: 6, padding: "10px 12px",
+                            textDecoration: "none", border: `1px solid ${THEME.border}` }}>
+                  <span style={{ fontSize: 13, color: THEME.textLight }}>"{a.terim}"</span>
+                  <span style={{ fontSize: 11.5, color: THEME.cyan }}>Reklam Kütüphanesi'nde aç →</span>
+                </a>
               ))}
             </div>
-            {rakipler.rakipler.length === 0 && (
-              <div style={{ fontSize: 12.5, color: THEME.textFaint }}>
-                Aktif rakip reklamı bulunamadı. Reklam Kütüphanesi Türkiye'de bazı kategorilerde sınırlı veri döndürebiliyor.
+
+            {rakipler.apiSonuc && rakipler.apiSonuc.length > 0 && (
+              <div style={{ marginTop: 14 }}>
+                <div style={{ fontSize: 11.5, color: THEME.textMuted, marginBottom: 8 }}>
+                  API'den dönen kayıtlar (siyasi/toplumsal kategoride olanlar):
+                </div>
+                {rakipler.apiSonuc.map((x, i) => (
+                  <div key={i} style={{ background: THEME.panelBgAlt, borderRadius: 6, padding: "9px 11px", marginBottom: 5 }}>
+                    <div style={{ fontSize: 12.5, color: THEME.textLight, fontWeight: 600 }}>{x.sayfa}</div>
+                    {x.metin && <div style={{ fontSize: 11.5, color: THEME.textMuted, marginTop: 3, fontStyle: "italic" }}>"{x.metin}"</div>}
+                  </div>
+                ))}
               </div>
             )}
           </div>
@@ -4566,6 +4719,7 @@ export default function AdminPanel() {
     ["orders", "Mağaza Siparişleri"], ["ads", "Reklam Talepleri"], ["translations", "Çeviri Talepleri"],
     ["destek", "Destek & Şikayet"], ["duyurular", "Duyurular"], ["meta", "Meta Reklam"],
     ["oyun", "Görev & Ödül"],
+    ["demoHesap", "Demo Hesaplar"],
     ["reklamMerkezi", "Reklam Merkezi"],
     ["yazarKampanya", "Yazar Kampanyaları"],
     ["reklamTeklif", "Reklam Başvuruları"],
@@ -4699,6 +4853,7 @@ export default function AdminPanel() {
         {view === "duyurular" && <DuyurularView authFetch={authFetch} authors={authors} />}
         {view === "meta" && <MetaReklamView authFetch={authFetch} />}
         {view === "oyun" && <OyunView authFetch={authFetch} authors={authors} />}
+        {view === "demoHesap" && <DemoHesaplar authFetch={authFetch} />}
         {view === "reklamMerkezi" && <ReklamMerkezi authFetch={authFetch} />}
         {view === "yazarKampanya" && <YazarKampanyalari authFetch={authFetch} />}
         {view === "reklamTeklif" && <ReklamBasvurulari authFetch={authFetch} />}
