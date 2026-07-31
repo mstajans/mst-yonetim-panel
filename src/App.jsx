@@ -1203,6 +1203,967 @@ function DemoHesaplar({ authFetch }) {
   );
 }
 
+// ============ Kreatif Üretim Motoru ============
+// Sistem video üretemez ama üretim ihtiyacını azaltır: organik içeriği
+// reklama çevirir, varyasyon önerir, ne üretileceğini kesin söyler.
+function KreatifUretim({ authFetch }) {
+  const [sekme, setSekme] = useState("organik");
+  const [organik, setOrganik] = useState(null);
+  const [brief, setBrief] = useState(null);
+  const [kuyruk, setKuyruk] = useState(null);
+  const [metinler, setMetinler] = useState(null);
+  const [secilenMetinler, setSecilenMetinler] = useState([]);
+  const [senaryo, setSenaryo] = useState(null);
+  const [senaryoAci, setSenaryoAci] = useState("duygusal");
+  const [performans, setPerformans] = useState(null);
+  const [calisiyor, setCalisiyor] = useState("");
+  const [hata, setHata] = useState("");
+  const [mesaj, setMesaj] = useState("");
+
+  const cagir = async (yol, ayar, etiket) => {
+    setCalisiyor(etiket); setHata(""); setMesaj("");
+    try {
+      const r = await authFetch(yol, ayar);
+      const d = await r.json();
+      if (!d.ok) { setHata(d.error || "İşlem başarısız."); return null; }
+      if (d.mesaj) setMesaj(d.mesaj);
+      return d;
+    } catch { setHata("Sunucuya ulaşılamadı."); return null; }
+    finally { setCalisiyor(""); }
+  };
+
+  const organikTara = async () => { const d = await cagir("/api/admin/reklam/organik-tara", {}, "organik"); if (d) setOrganik(d); };
+  const briefAl = async () => { const d = await cagir("/api/admin/reklam/kreatif-brief", {}, "brief"); if (d) setBrief(d); };
+  const kuyrukAl = async () => { const d = await cagir("/api/admin/reklam/kuyruk", {}, "kuyruk"); if (d) setKuyruk(d); };
+  const metinUret = async () => { const d = await cagir("/api/admin/reklam/metin-uret?adet=8", {}, "metin"); if (d) { setMetinler(d); setSecilenMetinler([]); } };
+  const senaryoAl = async (aci) => { setSenaryoAci(aci); const d = await cagir(`/api/admin/reklam/senaryo?aci=${aci}&sure=20`, {}, "senaryo"); if (d) setSenaryo(d); };
+  const performansAl = async () => { const d = await cagir("/api/admin/reklam/metin-performans", {}, "performans"); if (d) setPerformans(d); };
+
+  const metinleriYayinla = async () => {
+    if (!secilenMetinler.length) { setHata("En az bir metin seçin."); return; }
+    if (!window.confirm(`${secilenMetinler.length} kreatif tek reklam setinde yayına alınacak.\n\nGünlük 300 ₺, 14 gün. Meta hangisinin kazandığını kendisi bulacak.\n\nOnaylıyor musun?`)) return;
+    const secilen = metinler.metinler.filter((_, i) => secilenMetinler.includes(i));
+    const d = await cagir("/api/admin/reklam/metinden-reklam", {
+      method: "POST", body: JSON.stringify({ metinler: secilen, gunlukButce: 300, gun: 14 }) }, "yayinla");
+    if (d) setSecilenMetinler([]);
+  };
+
+  const reklamlastir = async (g) => {
+    if (!window.confirm(`Bu Instagram gönderisi reklama çevrilecek.\n\nMevcut ${g.begeni} beğeni ve ${g.yorum} yorum reklamla birlikte taşınacak.\n\nGünlük 200 ₺, 14 gün. Onaylıyor musun?`)) return;
+    const d = await cagir("/api/admin/reklam/organik-reklamlastir", {
+      method: "POST", body: JSON.stringify({ gonderiId: g.id, gunlukButce: 200, gun: 14 }) }, "reklamlastir");
+    if (d) organikTara();
+  };
+
+  const kuyrugaAl = async (b) => {
+    const d = await cagir("/api/admin/reklam/kuyruga-al", { method: "POST", body: JSON.stringify({ brief: b }) }, "kuyruga");
+    if (d) kuyrukAl();
+  };
+
+  const durumDegistir = async (id, durum) => {
+    await cagir(`/api/admin/reklam/kuyruk/${id}/durum`, { method: "POST", body: JSON.stringify({ durum }) }, "durum");
+    kuyrukAl();
+  };
+
+  useEffect(() => { if (sekme === "kuyruk" && !kuyruk) kuyrukAl(); }, [sekme]);
+
+  const oncelikRenk = { 1: THEME.danger, 2: THEME.warn, 3: THEME.warn, 4: THEME.cyan, 5: THEME.textFaint };
+  const durumAd = { bekliyor: "Bekliyor", uretiliyor: "Üretiliyor", hazir: "Hazır", yayinda: "Yayında" };
+  const durumRenk = { bekliyor: THEME.warn, uretiliyor: THEME.cyan, hazir: THEME.success, yayinda: THEME.textFaint };
+
+  return (
+    <div style={{ background: "linear-gradient(135deg, rgba(46,125,50,.08), rgba(0,0,0,0))", border: `2px solid ${THEME.success}`, borderRadius: 8, padding: "18px 20px", marginBottom: 18 }}>
+      <div style={{ marginBottom: 12 }}>
+        <div style={{ fontSize: 16, fontWeight: 700, color: THEME.textLight }}>Kreatif Üretim Motoru</div>
+        <div style={{ fontSize: 12.5, color: THEME.textMuted, marginTop: 6, lineHeight: 1.65, maxWidth: 700 }}>
+          Performansın büyük kısmı kreatiften geliyor ve sistem video üretemez. Ama üretim
+          <b style={{ color: THEME.success }}> ihtiyacını azaltabilir</b>: Instagram'da zaten yayınlanmış
+          içeriğinizi reklama çevirir, kazanan kreatiften varyasyon önerir ve ne üretileceğini
+          tahminle değil veriyle söyler.
+        </div>
+      </div>
+
+      <div style={{ display: "flex", gap: 6, marginBottom: 14, flexWrap: "wrap" }}>
+        {[["organik", "Instagram → Reklam"], ["metin", "Metin üret"], ["senaryo", "Video senaryosu"],
+          ["brief", "Ne üretmeli?"], ["performans", "Hangi açı kazanıyor?"], ["kuyruk", "Üretim kuyruğu"]].map(([k, ad]) => (
+          <Btn key={k} small variant={sekme === k ? undefined : "ghost"} onClick={() => {
+            setSekme(k);
+            if (k === "organik" && !organik) organikTara();
+            if (k === "brief" && !brief) briefAl();
+            if (k === "kuyruk") kuyrukAl();
+            if (k === "metin" && !metinler) metinUret();
+            if (k === "senaryo" && !senaryo) senaryoAl("duygusal");
+            if (k === "performans") performansAl();
+          }}>{ad}</Btn>
+        ))}
+      </div>
+
+      {hata && <div style={{ fontSize: 12.5, color: THEME.danger, marginBottom: 10 }}>{hata}</div>}
+      {mesaj && <div style={{ fontSize: 12.5, color: THEME.success, marginBottom: 10, lineHeight: 1.6 }}>{mesaj}</div>}
+      {calisiyor && <div style={{ fontSize: 12.5, color: THEME.textMuted, marginBottom: 10 }}>Yükleniyor...</div>}
+
+      {/* ── ORGANİK → REKLAM ── */}
+      {sekme === "organik" && organik && (
+        <div>
+          {!organik.bagli ? (
+            <div style={{ fontSize: 12.5, color: THEME.textMuted }}>{organik.mesaj}</div>
+          ) : (
+            <>
+              <div style={{ fontSize: 12, color: THEME.textMuted, marginBottom: 12, lineHeight: 1.6, background: THEME.panelBgAlt, borderRadius: 6, padding: "10px 12px" }}>
+                {organik.aciklama}
+                <div style={{ marginTop: 6, color: THEME.textFaint }}>{organik.olcut}</div>
+              </div>
+              <div style={{ display: "grid", gap: 8 }}>
+                {organik.gonderiler.slice(0, 10).map((g) => (
+                  <div key={g.id} style={{ background: THEME.panelBgAlt, borderRadius: 6, padding: "11px 13px", display: "flex", gap: 12, alignItems: "flex-start", flexWrap: "wrap" }}>
+                    {g.kapak && <img src={g.kapak} alt="" style={{ width: 54, height: 54, objectFit: "cover", borderRadius: 4, flexShrink: 0 }} />}
+                    <div style={{ flex: 1, minWidth: 180 }}>
+                      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                        <span style={{ fontSize: 10, color: g.reklamaUygunluk >= 60 ? THEME.success : g.reklamaUygunluk >= 45 ? THEME.warn : THEME.textFaint,
+                          border: `1px solid ${g.reklamaUygunluk >= 60 ? THEME.success : g.reklamaUygunluk >= 45 ? THEME.warn : THEME.border}`,
+                          borderRadius: 9, padding: "2px 7px" }}>
+                          uygunluk {Math.round(g.reklamaUygunluk)}
+                        </span>
+                        <span style={{ fontSize: 11, color: THEME.textFaint }}>{g.tur === "VIDEO" ? "video" : g.tur === "CAROUSEL_ALBUM" ? "karusel" : "görsel"}</span>
+                        {g.yasGun != null && <span style={{ fontSize: 11, color: THEME.textFaint }}>{g.yasGun} gün önce</span>}
+                      </div>
+                      <div style={{ fontSize: 12.5, color: THEME.textLight, marginTop: 5, lineHeight: 1.5 }}>{g.metin.slice(0, 120)}...</div>
+                      <div style={{ fontSize: 11.5, color: THEME.textMuted, marginTop: 4, fontFamily: FONT_MONO }}>
+                        {g.begeni} beğeni · {g.yorum} yorum
+                        {g.kaydetme ? ` · ${g.kaydetme} kaydetme` : ""}
+                        {g.etkilesimOrani != null ? ` · etkileşim %${g.etkilesimOrani}` : ""}
+                      </div>
+                    </div>
+                    <Btn small disabled={!!calisiyor} onClick={() => reklamlastir(g)}>Reklama çevir</Btn>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* ── BRIEF ── */}
+      {sekme === "brief" && brief && (
+        <div>
+          <div style={{ fontSize: 12, color: THEME.textMuted, marginBottom: 12, lineHeight: 1.6, background: THEME.panelBgAlt, borderRadius: 6, padding: "10px 12px" }}>
+            {brief.aciklama}
+            <div style={{ marginTop: 6, color: THEME.textLight }}>
+              {brief.durum.aktifKreatif} aktif kreatif · önerilen {brief.durum.gerekliKreatif} ·
+              {" "}{brief.durum.zayifKanca} zayıf kanca · {brief.durum.gucluKanca} güçlü kanca
+            </div>
+          </div>
+          <div style={{ display: "grid", gap: 10 }}>
+            {brief.briefler.map((b, i) => (
+              <div key={i} style={{ background: THEME.panelBgAlt, borderRadius: 6, padding: "13px 15px", borderLeft: `3px solid ${oncelikRenk[b.oncelik] || THEME.border}` }}>
+                <div style={{ fontSize: 13.5, color: THEME.textLight, fontWeight: 600 }}>{b.baslik}</div>
+                <div style={{ fontSize: 12.5, color: THEME.textMuted, marginTop: 5, lineHeight: 1.6 }}>{b.gerekce}</div>
+                <div style={{ marginTop: 9, background: THEME.bg, borderRadius: 5, padding: "10px 12px" }}>
+                  {Object.entries(b.brief || {}).map(([k, v]) => (
+                    <div key={k} style={{ fontSize: 12, marginBottom: 5, lineHeight: 1.55 }}>
+                      <span style={{ color: THEME.cyan }}>{k}:</span>{" "}
+                      <span style={{ color: THEME.textLight }}>{Array.isArray(v) ? v.join(" · ") : String(v)}</span>
+                    </div>
+                  ))}
+                </div>
+                <div style={{ marginTop: 10 }}>
+                  <Btn small disabled={!!calisiyor} onClick={() => kuyrugaAl(b)}>Üretim kuyruğuna al</Btn>
+                </div>
+              </div>
+            ))}
+            {brief.briefler.length === 0 && <div style={{ fontSize: 13, color: THEME.success }}>Kreatif tarafında acil bir eksik görünmüyor.</div>}
+          </div>
+        </div>
+      )}
+
+      {/* ── METİN ÜRET ── */}
+      {sekme === "metin" && metinler && (
+        <div>
+          <div style={{ fontSize: 12, color: THEME.textMuted, marginBottom: 12, lineHeight: 1.6, background: THEME.panelBgAlt, borderRadius: 6, padding: "10px 12px" }}>
+            {metinler.aciklama}
+            <div style={{ marginTop: 5, color: THEME.textFaint }}>{metinler.not}</div>
+          </div>
+
+          {secilenMetinler.length > 0 && (
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, background: "rgba(46,125,50,.10)", border: `1px solid ${THEME.success}`, borderRadius: 6, padding: "10px 13px", marginBottom: 12, flexWrap: "wrap" }}>
+              <div style={{ fontSize: 12.5, color: THEME.success }}>{secilenMetinler.length} metin seçildi</div>
+              <div style={{ display: "flex", gap: 6 }}>
+                <Btn small disabled={!!calisiyor} onClick={metinleriYayinla}>Seçilenleri yayına al</Btn>
+                <Btn small variant="ghost" onClick={() => setSecilenMetinler([])}>Temizle</Btn>
+              </div>
+            </div>
+          )}
+
+          <div style={{ display: "grid", gap: 9 }}>
+            {metinler.metinler.map((m, i) => {
+              const secili = secilenMetinler.includes(i);
+              return (
+                <div key={i} onClick={() => setSecilenMetinler(secili ? secilenMetinler.filter((x) => x !== i) : [...secilenMetinler, i])}
+                  style={{ background: secili ? "rgba(46,125,50,.10)" : THEME.panelBgAlt, borderRadius: 6, padding: "12px 14px",
+                    border: `1px solid ${secili ? THEME.success : "transparent"}`, cursor: "pointer" }}>
+                  <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                    <span style={{ fontSize: 9.5, color: THEME.cyan, border: `1px solid ${THEME.cyan}`, borderRadius: 9, padding: "2px 7px" }}>{m.aciAdi}</span>
+                    <span style={{ fontSize: 9.5, color: THEME.textMuted, border: `1px solid ${THEME.border}`, borderRadius: 9, padding: "2px 7px" }}>{m.yapiAdi}</span>
+                    {m.denenmeSayisi === 0 && <span style={{ fontSize: 10, color: THEME.warn }}>hiç denenmemiş</span>}
+                    {secili && <span style={{ fontSize: 11, color: THEME.success, marginLeft: "auto" }}>✓ seçildi</span>}
+                  </div>
+                  <div style={{ fontSize: 13, color: THEME.textLight, marginTop: 8, lineHeight: 1.7, whiteSpace: "pre-wrap" }}>{m.metin}</div>
+                  <div style={{ fontSize: 11, color: THEME.textFaint, marginTop: 7 }}>
+                    {m.uzunluk} karakter · {m.yapiAciklamasi}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          <div style={{ marginTop: 12 }}>
+            <Btn small variant="ghost" disabled={!!calisiyor} onClick={metinUret}>Yeni metinler üret</Btn>
+          </div>
+        </div>
+      )}
+
+      {/* ── VİDEO SENARYOSU ── */}
+      {sekme === "senaryo" && senaryo && (
+        <div>
+          <div style={{ fontSize: 12, color: THEME.textMuted, marginBottom: 12, lineHeight: 1.6, background: THEME.panelBgAlt, borderRadius: 6, padding: "10px 12px" }}>
+            {senaryo.aciklama}
+          </div>
+          <div style={{ display: "flex", gap: 5, marginBottom: 12, flexWrap: "wrap" }}>
+            {[["duygusal", "Duygusal"], ["merak", "Merak"], ["sosyal_kanit", "Sosyal kanıt"],
+              ["mantik", "Mantık"], ["korku_giderme", "Korku giderme"], ["otorite", "Otorite"]].map(([k, ad]) => (
+              <Btn key={k} small variant={senaryoAci === k ? undefined : "ghost"} onClick={() => senaryoAl(k)}>{ad}</Btn>
+            ))}
+          </div>
+
+          <div style={{ fontSize: 13, color: THEME.textLight, fontWeight: 600, marginBottom: 10 }}>
+            {senaryo.senaryo.aci} · {senaryo.senaryo.toplamSure} · {senaryo.senaryo.format}
+          </div>
+
+          <div style={{ display: "grid", gap: 8 }}>
+            {senaryo.senaryo.sahneler.map((sh, i) => (
+              <div key={i} style={{ background: THEME.panelBgAlt, borderRadius: 6, padding: "12px 14px", borderLeft: `3px solid ${i === 0 ? THEME.danger : THEME.border}` }}>
+                <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+                  <span style={{ fontSize: 11.5, color: THEME.cyan, fontFamily: FONT_MONO }}>{sh.zaman}</span>
+                  <span style={{ fontSize: 12.5, color: THEME.textLight, fontWeight: 700 }}>{sh.ad}</span>
+                </div>
+                <div style={{ marginTop: 8, display: "grid", gap: 5 }}>
+                  <div style={{ fontSize: 12.5, color: THEME.textLight }}>
+                    <span style={{ color: THEME.textMuted }}>Ekranda:</span> {sh.ekranMetni}
+                  </div>
+                  <div style={{ fontSize: 12.5, color: THEME.textLight }}>
+                    <span style={{ color: THEME.textMuted }}>Görüntü:</span> {sh.goruntu}
+                  </div>
+                  <div style={{ fontSize: 12.5, color: THEME.textLight, lineHeight: 1.55 }}>
+                    <span style={{ color: THEME.textMuted }}>Ses:</span> {sh.ses}
+                  </div>
+                  <div style={{ fontSize: 11.5, color: THEME.warn, lineHeight: 1.5, marginTop: 2 }}>{sh.not}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginTop: 12 }}>
+            <div style={{ background: "rgba(46,125,50,.08)", borderRadius: 6, padding: "11px 13px" }}>
+              <div style={{ fontSize: 11.5, color: THEME.success, marginBottom: 6 }}>Zorunlular</div>
+              {senaryo.senaryo.zorunlular.map((z, i) => (
+                <div key={i} style={{ fontSize: 12, color: THEME.textMuted, marginBottom: 3 }}>· {z}</div>
+              ))}
+            </div>
+            <div style={{ background: "rgba(192,57,43,.08)", borderRadius: 6, padding: "11px 13px" }}>
+              <div style={{ fontSize: 11.5, color: THEME.danger, marginBottom: 6 }}>Kaçınılacaklar</div>
+              {senaryo.senaryo.kacinilacaklar.map((z, i) => (
+                <div key={i} style={{ fontSize: 12, color: THEME.textMuted, marginBottom: 3 }}>· {z}</div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── HANGİ AÇI KAZANIYOR ── */}
+      {sekme === "performans" && performans && (
+        <div>
+          <div style={{ background: performans.yeterliVeri ? "rgba(46,125,50,.10)" : THEME.panelBgAlt,
+            border: `1px solid ${performans.yeterliVeri ? THEME.success : THEME.border}`,
+            borderRadius: 6, padding: "12px 14px", marginBottom: 12 }}>
+            <div style={{ fontSize: 13, color: performans.yeterliVeri ? THEME.success : THEME.textMuted, fontWeight: 600, lineHeight: 1.6 }}>
+              {performans.mesaj}
+            </div>
+          </div>
+
+          {performans.olcutAciklamasi && (
+            <div style={{ fontSize: 11.5, color: THEME.textMuted, marginBottom: 10, lineHeight: 1.6, background: THEME.panelBgAlt, borderRadius: 6, padding: "9px 12px" }}>
+              {performans.olcutAciklamasi}
+            </div>
+          )}
+
+          {performans.aciSirasi.length > 0 && (
+            <div style={{ display: "grid", gap: 7 }}>
+              {performans.aciSirasi.map((a, i) => (
+                <div key={a.aci} style={{ background: THEME.panelBgAlt, borderRadius: 6, padding: "11px 13px",
+                  borderLeft: `3px solid ${i === 0 ? THEME.success : THEME.border}` }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+                    <div style={{ fontSize: 13, color: THEME.textLight, fontWeight: 600 }}>
+                      {i === 0 && performans.yeterliVeri ? "🏆 " : ""}{a.aciAdi}
+                    </div>
+                    <div style={{ fontSize: 12, color: THEME.textMuted, fontFamily: FONT_MONO }}>
+                      {a.ctr != null ? `CTR %${a.ctr}` : ""}
+                      {a.ortSkor != null ? ` · ${a.ortSkor} ₺/tıklama` : ""}
+                      {a.harcamaPayi != null ? ` · bütçe payı %${a.harcamaPayi}` : ""}
+                    </div>
+                  </div>
+                  <div style={{ fontSize: 11.5, color: THEME.textFaint, marginTop: 4 }}>
+                    {a.adet} metin · {Number(a.gosterim).toLocaleString("tr-TR")} gösterim · {a.tiklama} tıklama
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+          {performans.aciSirasi.length === 0 && (
+            <div style={{ fontSize: 12.5, color: THEME.textMuted }}>
+              Henüz ölçülebilir metin yok. "Metin üret" sekmesinden metin üretip yayına alın.
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── KUYRUK ── */}
+      {sekme === "kuyruk" && kuyruk && (
+        <div>
+          <div style={{ display: "flex", gap: 18, marginBottom: 12, flexWrap: "wrap" }}>
+            {[["Bekliyor", kuyruk.ozet.bekliyor, THEME.warn], ["Üretiliyor", kuyruk.ozet.uretiliyor, THEME.cyan],
+              ["Hazır", kuyruk.ozet.hazir, THEME.success]].map(([e, v, c]) => (
+              <div key={e}>
+                <div style={{ fontSize: 18, fontFamily: FONT_MONO, fontWeight: 700, color: c }}>{v}</div>
+                <div style={{ fontSize: 10.5, color: THEME.textMuted }}>{e}</div>
+              </div>
+            ))}
+          </div>
+          <div style={{ display: "grid", gap: 8 }}>
+            {kuyruk.kuyruk.map((k) => (
+              <div key={k.id} style={{ background: THEME.panelBgAlt, borderRadius: 6, padding: "11px 13px" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+                  <div style={{ flex: 1, minWidth: 200 }}>
+                    <div style={{ fontSize: 13, color: THEME.textLight, fontWeight: 600 }}>{k.baslik}</div>
+                    {k.gerekce && <div style={{ fontSize: 11.5, color: THEME.textMuted, marginTop: 3, lineHeight: 1.5 }}>{k.gerekce}</div>}
+                  </div>
+                  <div style={{ display: "flex", gap: 5, alignItems: "flex-start", flexWrap: "wrap" }}>
+                    <span style={{ fontSize: 10, color: durumRenk[k.durum], border: `1px solid ${durumRenk[k.durum]}`, borderRadius: 9, padding: "2px 8px", whiteSpace: "nowrap" }}>{durumAd[k.durum]}</span>
+                    {k.durum === "bekliyor" && <Btn small variant="ghost" onClick={() => durumDegistir(k.id, "uretiliyor")}>Başla</Btn>}
+                    {k.durum === "uretiliyor" && <Btn small onClick={() => durumDegistir(k.id, "hazir")}>Hazır</Btn>}
+                  </div>
+                </div>
+              </div>
+            ))}
+            {kuyruk.kuyruk.length === 0 && <div style={{ fontSize: 12.5, color: THEME.textMuted }}>Kuyruk boş. "Ne üretmeli?" sekmesinden brief ekleyin.</div>}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ============ Kreatif Teşhisi ============
+// Uzmanların yukarıdan aşağı okuma sırası: kanca → tutma → tıklama → dönüşüm.
+// Zayıf kanca ilk basamakta görünür; gerisini iyileştirmenin anlamı yoktur.
+function KreatifTeshisi({ authFetch }) {
+  const [veri, setVeri] = useState(null);
+  const [calisiyor, setCalisiyor] = useState(false);
+  const [hata, setHata] = useState("");
+
+  const yukle = async () => {
+    if (calisiyor) return;
+    setCalisiyor(true); setHata("");
+    try {
+      const r = await authFetch("/api/admin/reklam/kreatif-teshis?gun=30");
+      const d = await r.json();
+      if (d.ok) setVeri(d); else setHata(d.error || "Teşhis yapılamadı.");
+    } catch { setHata("Sunucuya ulaşılamadı."); }
+    finally { setCalisiyor(false); }
+  };
+
+  const seviyeRenk = { ustun: THEME.success, iyi: THEME.success, orta: THEME.warn, zayif: THEME.danger };
+  const seviyeAd = { ustun: "ÜSTÜN", iyi: "İYİ", orta: "ORTA", zayif: "ZAYIF" };
+
+  return (
+    <div style={{ background: THEME.panelBg, border: `1px solid ${THEME.warn}`, borderRadius: 8, padding: "16px 18px", marginBottom: 16 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, flexWrap: "wrap" }}>
+        <div style={{ flex: 1, minWidth: 250 }}>
+          <div style={{ fontSize: 13.5, fontWeight: 700, color: THEME.textLight }}>Kreatif Teşhisi — Kanca Merdiveni</div>
+          <div style={{ fontSize: 11.5, color: THEME.textMuted, marginTop: 5, lineHeight: 1.6, maxWidth: 660 }}>
+            Uzmanlar veriyi yukarıdan aşağı okur: <b>kanca</b> (3 saniyeyi geçen izleyici) →
+            <b> tutma</b> → <b>tıklama</b> → <b>dönüşüm</b>. Zayıf kanca ilk basamakta görünür;
+            gerisini iyileştirmenin anlamı yoktur. Bu ayrım nereye müdahale edeceğinizi söyler.
+          </div>
+        </div>
+        <Btn small disabled={calisiyor} onClick={yukle}>{calisiyor ? "İnceleniyor..." : "Kreatifleri incele"}</Btn>
+      </div>
+
+      {hata && <div style={{ fontSize: 12.5, color: THEME.danger, marginTop: 12 }}>{hata}</div>}
+
+      {veri && (
+        <div style={{ marginTop: 14 }}>
+          <div style={{ background: THEME.panelBgAlt, borderRadius: 6, padding: "11px 13px", marginBottom: 12 }}>
+            <div style={{ fontSize: 13, color: THEME.textLight, fontWeight: 600 }}>{veri.ozet.degerlendirme}</div>
+            <div style={{ fontSize: 11.5, color: THEME.textMuted, marginTop: 4 }}>
+              {veri.ozet.videoluReklam} video reklam
+              {veri.ozet.ortalamaKanca != null ? ` · ortalama kanca %${veri.ozet.ortalamaKanca}` : ""}
+              {" · ölçüt: "}{veri.olcutler.kanca}
+            </div>
+          </div>
+
+          <div style={{ display: "grid", gap: 8 }}>
+            {veri.reklamlar.map((r, i) => (
+              <div key={i} style={{ background: THEME.panelBgAlt, borderRadius: 6, padding: "11px 13px",
+                borderLeft: `3px solid ${seviyeRenk[r.seviye] || THEME.border}` }}>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+                  <div style={{ fontSize: 13, color: THEME.textLight, fontWeight: 600 }}>{r.ad}</div>
+                  {r.seviye && (
+                    <span style={{ fontSize: 9.5, color: seviyeRenk[r.seviye], border: `1px solid ${seviyeRenk[r.seviye]}`, borderRadius: 9, padding: "2px 7px" }}>
+                      {seviyeAd[r.seviye]}
+                    </span>
+                  )}
+                </div>
+                <div style={{ fontSize: 12, color: THEME.textMuted, marginTop: 5, fontFamily: FONT_MONO }}>
+                  {r.kancaOrani != null ? `kanca %${r.kancaOrani}` : "video değil"}
+                  {r.tutmaOrani != null ? ` · tutma %${r.tutmaOrani}` : ""}
+                  {" · CTR %"}{r.ctr.toFixed(2)}
+                  {r.cpc ? ` · ${r.cpc.toFixed(2)} ₺/tıklama` : ""}
+                </div>
+                {r.teshis && (
+                  <div style={{ fontSize: 12.5, color: THEME.cyan, marginTop: 6, fontWeight: 500 }}>{r.teshis}</div>
+                )}
+                {r.oneri && (
+                  <div style={{ fontSize: 12.5, color: THEME.textLight, marginTop: 4, lineHeight: 1.55 }}>
+                    <b style={{ color: THEME.success }}>→</b> {r.oneri}
+                  </div>
+                )}
+              </div>
+            ))}
+            {veri.reklamlar.length === 0 && (
+              <div style={{ fontSize: 12.5, color: THEME.textMuted }}>Yeterli gösterim alan reklam bulunamadı.</div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ============ Birleşik Karar ============
+// İki motorun ortak çıktısı. Kurallar yerleşik uzmanlık, deneyler kendi verinden
+// keşif. "kural+deney" etiketli maddeler ikisiyle birden doğrulanmış — en güvenilir.
+function BirlesikKarar({ authFetch }) {
+  const [veri, setVeri] = useState(null);
+  const [calisiyor, setCalisiyor] = useState(false);
+  const [hata, setHata] = useState("");
+  const [uygulanan, setUygulanan] = useState(null);
+  const [sonuc, setSonuc] = useState(null);
+
+  const yukle = async () => {
+    if (calisiyor) return;
+    setCalisiyor(true); setHata(""); setSonuc(null);
+    try {
+      const r = await authFetch("/api/admin/reklam/karar");
+      const d = await r.json();
+      if (d.ok) setVeri(d); else setHata(d.error || "Karar üretilemedi.");
+    } catch { setHata("Sunucuya ulaşılamadı."); }
+    finally { setCalisiyor(false); }
+  };
+
+  const uygula = async (k, i) => {
+    if (uygulanan !== null) return;
+    if (!window.confirm(`Meta'da değişiklik yapılacak:\n\n${k.aksiyon}\n\nOnaylıyor musun?`)) return;
+    setUygulanan(i); setHata("");
+    try {
+      const r = await authFetch("/api/admin/reklam/aksiyon-uygula", {
+        method: "POST", body: JSON.stringify({ aksiyon: k }) });
+      const d = await r.json();
+      if (d.ok) { setSonuc(d); yukle(); } else setHata(d.error || "Uygulanamadı.");
+    } catch { setHata("Sunucuya ulaşılamadı."); }
+    finally { setUygulanan(null); }
+  };
+
+  const kaynakRozet = {
+    "kural+deney": { ad: "KURAL + DENEY", renk: THEME.success, not: "Hem genel uzmanlık hem kendi verinizle doğrulandı" },
+    kural: { ad: "KURAL", renk: THEME.cyan, not: "Yerleşik uzmanlık — sıfır veriyle bile geçerli" },
+    deney: { ad: "DENEY", renk: THEME.warn, not: "Kendi verinizden çıkan bulgu" },
+  };
+  const guvenAd = { yuksek: "yüksek güven", orta: "orta güven", dusuk: "düşük güven", yerlesik_bilgi: "yerleşik bilgi" };
+  const t = (x) => Number(x || 0).toLocaleString("tr-TR", { maximumFractionDigits: 2 });
+
+  return (
+    <div style={{ background: "linear-gradient(135deg, rgba(201,162,75,.10), rgba(0,0,0,0))", border: `2px solid ${THEME.warn}`, borderRadius: 8, padding: "18px 20px", marginBottom: 18 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 14, flexWrap: "wrap" }}>
+        <div style={{ flex: 1, minWidth: 260 }}>
+          <div style={{ fontSize: 16, fontWeight: 700, color: THEME.textLight }}>Birleşik Karar</div>
+          <div style={{ fontSize: 12.5, color: THEME.textMuted, marginTop: 6, lineHeight: 1.65, maxWidth: 700 }}>
+            İki motor birlikte çalışır. <b style={{ color: THEME.cyan }}>100 kural</b> yerleşik uzmanlıktır —
+            hesap sıfır veriyken bile geçerli. <b style={{ color: THEME.warn }}>Deney motoru</b> kendi verinizden
+            keşfeder — veri biriktikçe güçlenir. Kurallar sınır koyar, deney o sınırın içinde arar.
+            Çelişirlerse yeterli veri varsa <b>kendi veriniz</b> kazanır.
+          </div>
+        </div>
+        <Btn disabled={calisiyor} onClick={yukle}>{calisiyor ? "Karar veriliyor..." : "Kararları getir"}</Btn>
+      </div>
+
+      {hata && <div style={{ fontSize: 12.5, color: THEME.danger, marginTop: 12 }}>{hata}</div>}
+      {sonuc && (
+        <div style={{ marginTop: 12, background: "rgba(46,125,50,.12)", border: `1px solid ${THEME.success}`, borderRadius: 6, padding: "11px 13px" }}>
+          {(sonuc.sonuclar || []).map((x, i) => <div key={i} style={{ fontSize: 12.5, color: THEME.success, lineHeight: 1.6 }}>✓ {x}</div>)}
+        </div>
+      )}
+
+      {veri && (
+        <div style={{ marginTop: 16 }}>
+          {/* Motor durumu */}
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 12 }}>
+            <div style={{ background: THEME.panelBgAlt, borderRadius: 6, padding: "10px 13px", flex: 1, minWidth: 160 }}>
+              <div style={{ fontSize: 11, color: THEME.cyan, letterSpacing: "0.08em" }}>KURAL MOTORU</div>
+              <div style={{ fontSize: 13, color: THEME.textLight, marginTop: 4 }}>
+                {veri.motorDurumu.kural.ihlal} ihlal · {veri.motorDurumu.kural.temiz} temiz
+              </div>
+              <div style={{ fontSize: 11, color: THEME.textMuted, marginTop: 2 }}>{veri.motorDurumu.kural.toplam} kural kayıtlı</div>
+            </div>
+            <div style={{ background: THEME.panelBgAlt, borderRadius: 6, padding: "10px 13px", flex: 1, minWidth: 160 }}>
+              <div style={{ fontSize: 11, color: THEME.warn, letterSpacing: "0.08em" }}>DENEY MOTORU</div>
+              <div style={{ fontSize: 13, color: THEME.textLight, marginTop: 4 }}>
+                {veri.motorDurumu.deney.yeterliVeri
+                  ? `${veri.motorDurumu.deney.bulguSayisi} bulgu`
+                  : "veri birikiyor"}
+              </div>
+              <div style={{ fontSize: 11, color: THEME.textMuted, marginTop: 2 }}>{veri.motorDurumu.deney.deneySayisi} deney</div>
+            </div>
+          </div>
+
+          <div style={{ fontSize: 12.5, color: THEME.textMuted, marginBottom: 12, lineHeight: 1.6 }}>{veri.aciklama}</div>
+
+          {/* Çelişkiler — en dikkat çekici kısım */}
+          {veri.celiskiler.length > 0 && (
+            <div style={{ marginBottom: 14 }}>
+              <div style={{ fontSize: 11.5, color: THEME.danger, marginBottom: 7 }}>
+                Genel kural ile kendi veriniz çelişiyor
+              </div>
+              {veri.celiskiler.map((c, i) => (
+                <div key={i} style={{ background: "rgba(192,57,43,.10)", border: `1px solid ${THEME.danger}`, borderRadius: 6, padding: "12px 14px", marginBottom: 8 }}>
+                  <div style={{ fontSize: 12.5, color: THEME.textMuted, lineHeight: 1.6 }}>{c.kural}</div>
+                  <div style={{ fontSize: 12.5, color: THEME.warn, marginTop: 5, lineHeight: 1.6 }}>{c.deney}</div>
+                  <div style={{ fontSize: 13, color: THEME.success, marginTop: 7, fontWeight: 600 }}>{c.karar}</div>
+                  <div style={{ fontSize: 11.5, color: THEME.textFaint, marginTop: 3, lineHeight: 1.5 }}>{c.gerekce}</div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Kararlar */}
+          <div style={{ display: "grid", gap: 10 }}>
+            {veri.kararlar.map((k, i) => {
+              const kr = kaynakRozet[k.kaynak] || kaynakRozet.kural;
+              return (
+                <div key={i} style={{ background: THEME.panelBgAlt, borderRadius: 6, padding: "13px 15px", borderLeft: `3px solid ${kr.renk}` }}>
+                  <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                    <span style={{ fontSize: 9.5, letterSpacing: "0.08em", color: kr.renk, border: `1px solid ${kr.renk}`, borderRadius: 10, padding: "2px 8px", fontWeight: 600 }}>{kr.ad}</span>
+                    {(k.kuralNo || []).length > 0 && (
+                      <span style={{ fontSize: 10.5, color: THEME.textFaint, fontFamily: FONT_MONO }}>
+                        {k.kuralNo.map((n) => "#" + n).join(" ")}
+                      </span>
+                    )}
+                    <span style={{ fontSize: 10, color: THEME.textFaint }}>{guvenAd[k.guvenSeviyesi]}</span>
+                  </div>
+                  <div style={{ fontSize: 13.5, color: THEME.textLight, fontWeight: 600, marginTop: 7 }}>{k.baslik}</div>
+                  <div style={{ fontSize: 12.5, color: THEME.cyan, marginTop: 5, fontFamily: FONT_MONO, lineHeight: 1.5 }}>{k.olcum}</div>
+                  <div style={{ fontSize: 12.5, color: THEME.textMuted, marginTop: 6, lineHeight: 1.6 }}>{k.neden}</div>
+
+                  {k.deneyDestegi && (
+                    <div style={{ fontSize: 12, color: THEME.success, marginTop: 7, background: "rgba(46,125,50,.10)", borderRadius: 4, padding: "6px 9px", lineHeight: 1.5 }}>
+                      {k.deneyDestegi.not}
+                    </div>
+                  )}
+
+                  <div style={{ marginTop: 10, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                    <div style={{ fontSize: 13, color: THEME.textLight, lineHeight: 1.5, flex: 1, minWidth: 200 }}>
+                      <b style={{ color: THEME.success }}>Yapılacak:</b> {k.aksiyon}
+                      {k.etki && <div style={{ fontSize: 11.5, color: THEME.textFaint, marginTop: 3, fontStyle: "italic" }}>{k.etki}</div>}
+                    </div>
+                    {k.uygulanabilir
+                      ? <Btn small disabled={uygulanan !== null} onClick={() => uygula(k, i)}>{uygulanan === i ? "Uygulanıyor..." : "Uygula"}</Btn>
+                      : <span style={{ fontSize: 11, color: THEME.textFaint, border: `1px solid ${THEME.border}`, borderRadius: 10, padding: "3px 9px", whiteSpace: "nowrap" }}>elle</span>}
+                  </div>
+                </div>
+              );
+            })}
+            {veri.kararlar.length === 0 && (
+              <div style={{ fontSize: 13, color: THEME.success }}>İki motor da müdahale gerektiren bir durum bulmadı.</div>
+            )}
+          </div>
+
+          {veri.sonrakiDeneyOnerisi && (
+            <div style={{ marginTop: 14, background: THEME.panelBgAlt, borderRadius: 6, padding: "11px 14px" }}>
+              <div style={{ fontSize: 11, letterSpacing: "0.1em", color: THEME.warn, marginBottom: 4 }}>SIRADAKİ DENEY</div>
+              <div style={{ fontSize: 13, color: THEME.textLight, lineHeight: 1.6 }}>
+                Test edilecek değişken: <b style={{ color: THEME.warn }}>{veri.sonrakiDeneyOnerisi}</b> —
+                kural motorunun bulguları ve deney geçmişi birlikte bunu işaret ediyor.
+              </div>
+            </div>
+          )}
+
+          {veri.ozet && (
+            <div style={{ display: "flex", gap: 18, flexWrap: "wrap", marginTop: 14, paddingTop: 12, borderTop: `1px solid ${THEME.border}` }}>
+              {[["Harcama", t(veri.ozet.harcama) + " ₺"], ["CPM", t(veri.ozet.cpm) + " ₺"],
+                ["CTR", "%" + t(veri.ozet.ctr)], ["Frekans", t(veri.ozet.frekans)]].map(([e, x]) => (
+                <div key={e}>
+                  <div style={{ fontSize: 14, fontFamily: FONT_MONO, fontWeight: 700, color: THEME.textLight }}>{x}</div>
+                  <div style={{ fontSize: 10, color: THEME.textMuted }}>{e}</div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ============ Deney Motoru ============
+// Kural uygulamaz, ÖĞRENİR. Her kampanya bir deney; sonuçlardan hangi
+// kurgunun kazandığı çıkar; yeni kampanya kazanandan + bir meydan okuyandan kurulur.
+function DeneyMotoru({ authFetch }) {
+  const [ogrenme, setOgrenme] = useState(null);
+  const [calisiyor, setCalisiyor] = useState("");
+  const [hata, setHata] = useState("");
+  const [mesaj, setMesaj] = useState("");
+  const [kurAcik, setKurAcik] = useState(false);
+  const [yeniDeney, setYeniDeney] = useState({ gunlukButce: 200, gun: 14 });
+  const [gozlemAcik, setGozlemAcik] = useState(false);
+  const [gozlem, setGozlem] = useState({});
+
+  const cagir = async (yol, ayar, etiket) => {
+    setCalisiyor(etiket); setHata(""); setMesaj("");
+    try {
+      const r = await authFetch(yol, ayar);
+      const d = await r.json();
+      if (!d.ok) { setHata(d.error + (d.detay ? " — " + d.detay : "") + (d.oneri ? " " + d.oneri : "")); return null; }
+      if (d.mesaj) setMesaj(d.mesaj);
+      return d;
+    } catch { setHata("Sunucuya ulaşılamadı."); return null; }
+    finally { setCalisiyor(""); }
+  };
+
+  const ogren = async () => {
+    await cagir("/api/admin/reklam/deney-esitle", { method: "POST", body: "{}" }, "esitle");
+    const d = await cagir("/api/admin/reklam/ogrenilenler", {}, "ogren");
+    if (d) setOgrenme(d);
+  };
+
+  const deneyKur = async () => {
+    if (!yeniDeney.metin) { setHata("Reklam metni gerekli."); return; }
+    if (!window.confirm("Meta'da yeni bir deney kampanyası açılacak: bir ŞAMPİYON, bir MEYDAN OKUYAN set.\n\nBütçe ikiye bölünecek. Onaylıyor musun?")) return;
+    const d = await cagir("/api/admin/reklam/deney-kur", { method: "POST", body: JSON.stringify(yeniDeney) }, "kur");
+    if (d) { setKurAcik(false); ogren(); }
+  };
+
+  const sonucla = async () => {
+    const d = await cagir("/api/admin/reklam/deney-sonucla", { method: "POST", body: "{}" }, "sonuc");
+    if (d && d.sonuclar) {
+      setMesaj(d.mesaj + " " + d.sonuclar.map((x) => x.not || "").join(" "));
+      ogren();
+    }
+  };
+
+  const gozlemKaydet = async () => {
+    if (!gozlem.yayinevi) { setHata("Yayınevi adı gerekli."); return; }
+    const d = await cagir("/api/admin/reklam/rakip-gozlem", { method: "POST", body: JSON.stringify(gozlem) }, "gozlem");
+    if (d) { setGozlem({}); setGozlemAcik(false); ogren(); }
+  };
+
+  const inp = { background: THEME.bg, color: THEME.textLight, border: `1px solid ${THEME.border}`, borderRadius: 4, padding: "8px 11px", fontSize: 13, fontFamily: "inherit", width: "100%", boxSizing: "border-box" };
+  const guvenRenk = { guvenilir: THEME.success, erken: THEME.warn, yetersiz: THEME.textFaint };
+
+  return (
+    <div style={{ background: "linear-gradient(135deg, rgba(91,33,182,.10), rgba(0,0,0,0))", border: `2px solid ${THEME.cyan}`, borderRadius: 8, padding: "18px 20px", marginBottom: 18 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 14, flexWrap: "wrap" }}>
+        <div style={{ flex: 1, minWidth: 260 }}>
+          <div style={{ fontSize: 16, fontWeight: 700, color: THEME.textLight }}>Deney Motoru — Öğrenen Sistem</div>
+          <div style={{ fontSize: 12.5, color: THEME.textMuted, marginTop: 6, lineHeight: 1.65, maxWidth: 680 }}>
+            Kural uygulamaz, <b style={{ color: THEME.cyan }}>öğrenir</b>. Her kampanya bir deneydir:
+            değişkenleri ve sonucu kaydedilir. Biriken sonuçlardan hangi kurgunun kazandığı çıkar.
+            Yeni kampanya <b>şampiyon</b> (kazanan kurgu) ve <b>meydan okuyan</b> (tek değişkeni
+            değiştirilmiş hali) olarak kurulur — sistem yanılabilir, o yüzden her zaman test eder.
+          </div>
+        </div>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+          <Btn small disabled={!!calisiyor} onClick={ogren}>{calisiyor === "ogren" || calisiyor === "esitle" ? "Öğreniyor..." : "Öğren"}</Btn>
+          <Btn small variant="ghost" disabled={!!calisiyor} onClick={sonucla}>Deneyleri sonuçlandır</Btn>
+        </div>
+      </div>
+
+      {hata && <div style={{ fontSize: 12.5, color: THEME.danger, marginTop: 12, lineHeight: 1.6 }}>{hata}</div>}
+      {mesaj && <div style={{ fontSize: 12.5, color: THEME.success, marginTop: 12, lineHeight: 1.6 }}>{mesaj}</div>}
+
+      {ogrenme && (
+        <div style={{ marginTop: 16 }}>
+          {!ogrenme.yeterliVeri ? (
+            <div style={{ background: THEME.panelBgAlt, borderRadius: 6, padding: "13px 15px" }}>
+              <div style={{ fontSize: 13, color: THEME.warn, fontWeight: 600 }}>Henüz öğrenecek kadar veri yok</div>
+              <div style={{ fontSize: 12.5, color: THEME.textMuted, marginTop: 5, lineHeight: 1.6 }}>{ogrenme.mesaj}</div>
+            </div>
+          ) : (
+            <>
+              <div style={{ fontSize: 12.5, color: THEME.textMuted, marginBottom: 10 }}>
+                {ogrenme.deneySayisi} ölçülebilir deney incelendi
+              </div>
+
+              {ogrenme.sampiyon && (
+                <div style={{ background: "rgba(46,125,50,.10)", border: `1px solid ${THEME.success}`, borderRadius: 6, padding: "12px 14px", marginBottom: 12 }}>
+                  <div style={{ fontSize: 11, letterSpacing: "0.1em", color: THEME.success, marginBottom: 5 }}>ŞU ANKİ ŞAMPİYON</div>
+                  <div style={{ fontSize: 13.5, color: THEME.textLight, fontWeight: 600 }}>{ogrenme.sampiyon.ad}</div>
+                  <div style={{ fontSize: 12, color: THEME.textMuted, marginTop: 4, fontFamily: FONT_MONO }}>
+                    tıklama başına {ogrenme.sampiyon.skor} ₺ ·
+                    {" "}{Object.entries(ogrenme.sampiyon.degiskenler || {}).filter(([, v]) => v != null).map(([k, v]) => `${k}: ${v}`).join(" · ")}
+                  </div>
+                </div>
+              )}
+
+              {ogrenme.bulgular.length > 0 && (
+                <div style={{ display: "grid", gap: 8, marginBottom: 12 }}>
+                  <div style={{ fontSize: 11.5, color: THEME.textMuted }}>Sistemin öğrendikleri</div>
+                  {ogrenme.bulgular.map((b, i) => (
+                    <div key={i} style={{ background: THEME.panelBgAlt, borderRadius: 6, padding: "11px 13px" }}>
+                      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                        <span style={{ fontSize: 13, color: THEME.textLight, fontWeight: 600 }}>{b.degisken}</span>
+                        <span style={{ fontSize: 9.5, color: guvenRenk[b.guven], border: `1px solid ${guvenRenk[b.guven]}`, borderRadius: 9, padding: "1px 7px" }}>{b.guven}</span>
+                      </div>
+                      <div style={{ fontSize: 12.5, color: THEME.textMuted, marginTop: 5, lineHeight: 1.6 }}>
+                        <b style={{ color: THEME.success }}>{b.kazananDeger}</b> ({b.kazananSkor} ₺) ·
+                        <b style={{ color: THEME.danger }}> {b.kaybedenDeger}</b> ({b.kaybedenSkor} ₺) —
+                        <b> %{b.farkYuzde} fark</b>, {b.deneySayisi} deneyde
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {ogrenme.rakipDersleri && (
+                <div style={{ background: THEME.panelBgAlt, borderRadius: 6, padding: "12px 14px", marginBottom: 12 }}>
+                  <div style={{ fontSize: 11.5, color: THEME.cyan, marginBottom: 7 }}>
+                    Rakiplerden öğrenilenler — {ogrenme.rakipDersleri.gozlemSayisi} gözlem
+                  </div>
+                  {ogrenme.rakipDersleri.desenler.map((r, i) => (
+                    <div key={i} style={{ fontSize: 12.5, color: THEME.textMuted, marginBottom: 4, lineHeight: 1.55 }}>
+                      · <b style={{ color: THEME.textLight }}>{r.aci || "?"} + {r.format || "?"}</b> —
+                      ortalama {r.ortalamaGun} gün yayında, {r.ortalamaVaryant} varyant. {r.yorum}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <div style={{ fontSize: 12.5, color: THEME.textLight, background: THEME.panelBgAlt, borderRadius: 6, padding: "10px 13px", marginBottom: 12 }}>
+                Sıradaki test: <b style={{ color: THEME.cyan }}>{ogrenme.sonrakiTest}</b> —
+                sistem bu değişken hakkında en az bilgiye sahip.
+              </div>
+            </>
+          )}
+
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            <Btn small onClick={() => setKurAcik(!kurAcik)}>Yeni deney kur</Btn>
+            <Btn small variant="ghost" onClick={() => setGozlemAcik(!gozlemAcik)}>Rakip gözlemi ekle</Btn>
+            <Btn small variant="ghost" disabled={!!calisiyor} onClick={async () => {
+              const metin = window.prompt("Advantage+ kampanya için reklam metni:");
+              if (!metin) return;
+              if (!window.confirm("Meta'nın Advantage+ kampanyası kurulacak — hedefleme, yerleşim ve bütçe dağıtımını Meta yönetecek.\n\nOnaylıyor musun?")) return;
+              const d = await cagir("/api/admin/reklam/advantage-kur", {
+                method: "POST", body: JSON.stringify({ metin, gunlukButce: 300, gun: 30, amac: "lead" }) }, "asc");
+              if (d) ogren();
+            }}>Advantage+ kampanya kur</Btn>
+          </div>
+        </div>
+      )}
+
+      {kurAcik && (
+        <div style={{ marginTop: 14, background: THEME.panelBg, border: `1px solid ${THEME.cyan}`, borderRadius: 6, padding: "14px 16px" }}>
+          <div style={{ fontSize: 12.5, color: THEME.textMuted, marginBottom: 10, lineHeight: 1.6 }}>
+            İki set açılır: <b style={{ color: THEME.success }}>ŞAMPİYON</b> (öğrenilen en iyi kurgu) ve
+            <b style={{ color: THEME.warn }}> MEYDAN OKUYAN</b> (tek değişkeni farklı). Bütçe ikiye bölünür.
+            Aralarındaki TEK fark test edilen değişkendir — böylece sonucu neyin değiştirdiği kesin bilinir.
+          </div>
+          <div style={{ display: "grid", gap: 9 }}>
+            <textarea style={{ ...inp, resize: "vertical" }} rows={3} placeholder="Reklam metni *"
+              value={yeniDeney.metin || ""} onChange={(e) => setYeniDeney({ ...yeniDeney, metin: e.target.value })} />
+            <input style={inp} placeholder="Başlık" value={yeniDeney.baslik || ""} onChange={(e) => setYeniDeney({ ...yeniDeney, baslik: e.target.value })} />
+            <input style={inp} placeholder="Yönlendirme adresi" value={yeniDeney.hedefAdres || ""} onChange={(e) => setYeniDeney({ ...yeniDeney, hedefAdres: e.target.value })} />
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 9 }}>
+              <input style={inp} placeholder="Günlük bütçe (₺)" value={yeniDeney.gunlukButce} onChange={(e) => setYeniDeney({ ...yeniDeney, gunlukButce: e.target.value.replace(/[^0-9]/g, "") })} />
+              <input style={inp} placeholder="Süre (gün)" value={yeniDeney.gun} onChange={(e) => setYeniDeney({ ...yeniDeney, gun: e.target.value.replace(/[^0-9]/g, "") })} />
+            </div>
+          </div>
+          <div style={{ marginTop: 11, display: "flex", gap: 7 }}>
+            <Btn small disabled={!!calisiyor} onClick={deneyKur}>{calisiyor === "kur" ? "Kuruluyor..." : "Deneyi başlat"}</Btn>
+            <Btn small variant="ghost" onClick={() => setKurAcik(false)}>Vazgeç</Btn>
+          </div>
+        </div>
+      )}
+
+      {gozlemAcik && (
+        <div style={{ marginTop: 14, background: THEME.panelBg, border: `1px solid ${THEME.border}`, borderRadius: 6, padding: "14px 16px" }}>
+          <div style={{ fontSize: 12.5, color: THEME.textMuted, marginBottom: 10, lineHeight: 1.6 }}>
+            Reklam Kütüphanesi'nde gördüğünüz rakip reklamı buraya kaydedin. Sistem bu desenlerden de öğrenir —
+            özellikle <b>kaç gündür yayında</b> olduğu değerli: uzun süre = çalışan reklam.
+          </div>
+          <div style={{ display: "grid", gap: 9 }}>
+            <input style={inp} placeholder="Yayınevi adı *" value={gozlem.yayinevi || ""} onChange={(e) => setGozlem({ ...gozlem, yayinevi: e.target.value })} />
+            <textarea style={{ ...inp, resize: "vertical" }} rows={2} placeholder="Reklam metni" value={gozlem.reklamMetni || ""} onChange={(e) => setGozlem({ ...gozlem, reklamMetni: e.target.value })} />
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 9 }}>
+              <select style={inp} value={gozlem.format || ""} onChange={(e) => setGozlem({ ...gozlem, format: e.target.value })}>
+                <option value="">Format</option><option value="video">Video</option>
+                <option value="gorsel">Görsel</option><option value="karusel">Karusel</option>
+              </select>
+              <select style={inp} value={gozlem.aci || ""} onChange={(e) => setGozlem({ ...gozlem, aci: e.target.value })}>
+                <option value="">Açı</option><option value="duygusal">Duygusal</option>
+                <option value="merak">Merak</option><option value="sosyal_kanit">Sosyal kanıt</option>
+                <option value="mantik">Mantık</option><option value="otorite">Otorite</option>
+              </select>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 9 }}>
+              <input style={inp} placeholder="Kaç gündür yayında" value={gozlem.gunSayisi || ""} onChange={(e) => setGozlem({ ...gozlem, gunSayisi: e.target.value.replace(/[^0-9]/g, "") })} />
+              <input style={inp} placeholder="Varyant sayısı" value={gozlem.varyantSayisi || ""} onChange={(e) => setGozlem({ ...gozlem, varyantSayisi: e.target.value.replace(/[^0-9]/g, "") })} />
+            </div>
+            <input style={inp} placeholder="Öne çıkan vaat" value={gozlem.vaat || ""} onChange={(e) => setGozlem({ ...gozlem, vaat: e.target.value })} />
+          </div>
+          <div style={{ marginTop: 11, display: "flex", gap: 7 }}>
+            <Btn small disabled={!!calisiyor} onClick={gozlemKaydet}>Kaydet</Btn>
+            <Btn small variant="ghost" onClick={() => setGozlemAcik(false)}>Vazgeç</Btn>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ============ Otomatik Optimizasyon ============
+// Kullanıcı reklamcılıktan anlamak zorunda değil. Tek düğme: sistem denetler,
+// güvenli düzeltmeleri doğru sırayla uygular, ne yaptığını sade dille anlatır.
+function OtomatikOptimizasyon({ authFetch }) {
+  const [calisiyor, setCalisiyor] = useState(false);
+  const [sonuc, setSonuc] = useState(null);
+  const [hata, setHata] = useState("");
+
+  const optimize = async () => {
+    if (calisiyor) return;
+    if (!window.confirm(
+      "Sistem reklamlarınızı inceleyip GEREKLİ DÜZELTMELERİ Meta'da uygulayacak.\n\n" +
+      "Sadece güvenli değişiklikler yapılır: kötü reklamları durdurma, kitleyi genişletme.\n" +
+      "Bütçe artırma bu turda yapılmaz.\n\nBaşlatalım mı?")) return;
+    setCalisiyor(true); setHata(""); setSonuc(null);
+    try {
+      const r = await authFetch("/api/admin/reklam/otomatik-optimize", { method: "POST", body: "{}" });
+      const d = await r.json();
+      if (d.ok) setSonuc(d); else setHata(d.error || "Çalıştırılamadı.");
+    } catch { setHata("Sunucuya ulaşılamadı."); }
+    finally { setCalisiyor(false); }
+  };
+
+  const t = (x) => Number(x || 0).toLocaleString("tr-TR", { maximumFractionDigits: 2 });
+
+  return (
+    <div style={{
+      background: "linear-gradient(135deg, rgba(46,125,50,.10), rgba(0,0,0,0))",
+      border: `2px solid ${THEME.success}`, borderRadius: 8, padding: "18px 20px", marginBottom: 18,
+    }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 14, flexWrap: "wrap" }}>
+        <div style={{ flex: 1, minWidth: 260 }}>
+          <div style={{ fontSize: 16, fontWeight: 700, color: THEME.textLight }}>Reklamlarımı Otomatik Optimize Et</div>
+          <div style={{ fontSize: 12.5, color: THEME.textMuted, marginTop: 6, lineHeight: 1.65, maxWidth: 640 }}>
+            Reklamcılıktan anlamanıza gerek yok. Düğmeye basın — sistem hesabınızı inceler,
+            sorunları bulur ve <b style={{ color: THEME.success }}>düzeltir</b>. Sonra ne yaptığını
+            sade dille anlatır. Yapay zekâ gerektirmez, her zaman çalışır.
+          </div>
+        </div>
+        <Btn disabled={calisiyor} onClick={optimize}>
+          {calisiyor ? "Optimize ediliyor..." : "Optimize et"}
+        </Btn>
+      </div>
+
+      {calisiyor && (
+        <div style={{ fontSize: 12.5, color: THEME.textMuted, marginTop: 14 }}>
+          Meta'dan veri çekiliyor, kurallar kontrol ediliyor, düzeltmeler uygulanıyor... (20-40 sn)
+        </div>
+      )}
+
+      {hata && <div style={{ fontSize: 12.5, color: THEME.danger, marginTop: 14 }}>{hata}</div>}
+
+      {sonuc && (
+        <div style={{ marginTop: 16 }}>
+          <div style={{ fontSize: 14, color: THEME.textLight, fontWeight: 600, marginBottom: 12 }}>{sonuc.mesaj}</div>
+
+          {sonuc.yapilanlar.map((y, i) => (
+            <div key={i} style={{ background: "rgba(46,125,50,.10)", border: `1px solid ${THEME.success}`, borderRadius: 6, padding: "13px 15px", marginBottom: 9 }}>
+              <div style={{ fontSize: 14, color: THEME.success, fontWeight: 600 }}>✓ {y.ne}</div>
+              <div style={{ fontSize: 12.5, color: THEME.textMuted, marginTop: 5, lineHeight: 1.6 }}>{y.detay}</div>
+              {y.kazanc && <div style={{ fontSize: 12.5, color: THEME.textLight, marginTop: 5 }}>{y.kazanc}</div>}
+              {y.uyari && <div style={{ fontSize: 11.5, color: THEME.warn, marginTop: 6, lineHeight: 1.5 }}>{y.uyari}</div>}
+            </div>
+          ))}
+
+          {sonuc.sonrakiAdim && (
+            <div style={{ background: THEME.panelBgAlt, borderRadius: 6, padding: "12px 14px", marginTop: 10 }}>
+              <div style={{ fontSize: 11, letterSpacing: "0.1em", color: THEME.cyan, marginBottom: 5 }}>SIRADAKİ ADIM</div>
+              <div style={{ fontSize: 13, color: THEME.textLight, lineHeight: 1.6 }}>{sonuc.sonrakiAdim}</div>
+            </div>
+          )}
+
+          {sonuc.olceklemeNotu && (
+            <div style={{ fontSize: 12.5, color: THEME.textMuted, marginTop: 10, lineHeight: 1.6, paddingLeft: 11, borderLeft: `2px solid ${THEME.border}` }}>
+              {sonuc.olceklemeNotu}
+            </div>
+          )}
+
+          {sonuc.atlananlar.length > 0 && (
+            <div style={{ marginTop: 12 }}>
+              <div style={{ fontSize: 11.5, color: THEME.textMuted, marginBottom: 6 }}>Bu turda yapılmayanlar ve sebepleri</div>
+              {sonuc.atlananlar.map((a, i) => (
+                <div key={i} style={{ fontSize: 12.5, color: THEME.textMuted, marginBottom: 4, lineHeight: 1.55 }}>· {a}</div>
+              ))}
+            </div>
+          )}
+
+          {sonuc.insanIsleri.length > 0 && (
+            <div style={{ marginTop: 14, background: THEME.panelBgAlt, borderRadius: 6, padding: "13px 15px" }}>
+              <div style={{ fontSize: 12.5, color: THEME.cyan, fontWeight: 600, marginBottom: 8 }}>
+                Sistemin yapamadığı, sizin yapmanız gerekenler
+              </div>
+              {sonuc.insanIsleri.map((x, i) => (
+                <div key={i} style={{ marginBottom: 10 }}>
+                  <div style={{ fontSize: 13, color: THEME.textLight, fontWeight: 500 }}>{x.ne}</div>
+                  <div style={{ fontSize: 12, color: THEME.textMuted, marginTop: 3, lineHeight: 1.55 }}>{x.neden}</div>
+                  <div style={{ fontSize: 12.5, color: THEME.success, marginTop: 4 }}>→ {x.yapilacak}</div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {sonuc.hatalar.length > 0 && (
+            <div style={{ marginTop: 12 }}>
+              {sonuc.hatalar.map((h, i) => (
+                <div key={i} style={{ fontSize: 12, color: THEME.danger, marginBottom: 3 }}>{h}</div>
+              ))}
+            </div>
+          )}
+
+          {sonuc.ozet && (
+            <div style={{ display: "flex", gap: 18, flexWrap: "wrap", marginTop: 14, paddingTop: 12, borderTop: `1px solid ${THEME.border}` }}>
+              {[["Harcama", t(sonuc.ozet.harcama) + " ₺"], ["CPM", t(sonuc.ozet.cpm) + " ₺"],
+                ["CTR", "%" + t(sonuc.ozet.ctr)], ["Frekans", t(sonuc.ozet.frekans)]].map(([e, x]) => (
+                <div key={e}>
+                  <div style={{ fontSize: 14, fontFamily: FONT_MONO, fontWeight: 700, color: THEME.textLight }}>{x}</div>
+                  <div style={{ fontSize: 10, color: THEME.textMuted }}>{e}</div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ============ 100 Altın Kural Denetimi ============
 // Her kural kayıtlı, kontrol edilebilenler ölçülüyor, ihlaller aksiyona bağlı.
 function YuzKuralDenetimi({ authFetch }) {
@@ -1748,6 +2709,21 @@ function ReklamMerkezi({ authFetch }) {
       </div>
 
       {hata && <div style={{ fontSize: 12.5, color: THEME.danger, marginBottom: 12 }}>{hata}</div>}
+
+      {/* BİRLEŞİK KARAR — iki motorun ortak çıktısı, en üstte */}
+      <BirlesikKarar authFetch={authFetch} />
+
+      {/* KREATİF ÜRETİM MOTORU — en büyük boşluğun kapatılması */}
+      <KreatifUretim authFetch={authFetch} />
+
+      {/* KREATİF TEŞHİSİ — kanca merdiveni */}
+      <KreatifTeshisi authFetch={authFetch} />
+
+      {/* DENEY MOTORU — öğrenen sistem */}
+      <DeneyMotoru authFetch={authFetch} />
+
+      {/* OTOMATİK OPTİMİZASYON — tek düğme */}
+      <OtomatikOptimizasyon authFetch={authFetch} />
 
       {/* 100 kural denetimi — tam tablo */}
       <YuzKuralDenetimi authFetch={authFetch} />
