@@ -1064,6 +1064,198 @@ const TEKLIF_DURUM = {
   iptal:       { ad: "İptal",         renk: "#7A7A7A" },
 };
 
+// ============ Yazar Adayları — reklamdan gelen huni + AI ön inceleme ============
+// GİZLİLİK: Eser metni panele HİÇ gelmez (sunucuda o uç yok). Görünen tek şey AI raporudur.
+const ADAY_KATEGORI = {
+  kisi_kurum_hedef: "Kişi/kurum hedef gösterme",
+  suca_tesvik: "Suça teşvik",
+  nefret_ayrimcilik: "Nefret / ayrımcılık",
+  kisilik_haklari_hakaret: "Kişilik hakları / hakaret",
+  yaniltici_saglik_finans: "Yanıltıcı sağlık-finans iddiası",
+  siddet_intihar_detayi: "Şiddet / intihar detayı",
+  telif_intihal_suphesi: "Telif / intihal şüphesi",
+  mustehcenlik_cocuk_riski: "Müstehcenlik / çocuk riski",
+};
+const ADAY_SIDDET = { yuksek: "#C0392B", orta: "#C9A227", dusuk: "#7A7A7A" };
+const ADAY_ESER_DURUM = {
+  incelemede: { ad: "AI inceliyor", renk: "#C9A227" },
+  rapor_hazir: { ad: "ONAY BEKLİYOR", renk: "#C0392B" },
+  onaylandi: { ad: "Onaylandı", renk: "#2E7D32" },
+  reddedildi: { ad: "Reddedildi", renk: "#7A7A7A" },
+};
+
+function YazarAdaylari({ authFetch }) {
+  const [adaylar, setAdaylar] = useState([]);
+  const [kaynaklar, setKaynaklar] = useState([]);
+  const [secili, setSecili] = useState(null); // { aday, eserler }
+  const [filtre, setFiltre] = useState("hepsi");
+  const [redMetni, setRedMetni] = useState("");
+  const [redAcik, setRedAcik] = useState(null); // eser id
+  const [mesaj, setMesaj] = useState("");
+  const [calisiyor, setCalisiyor] = useState(false);
+
+  const yukle = async () => {
+    try {
+      const r = await authFetch("/api/admin/adaylar");
+      const d = await r.json();
+      setAdaylar(d.adaylar || []);
+      const r2 = await authFetch("/api/admin/aday-kaynak-analizi");
+      const d2 = await r2.json();
+      setKaynaklar(d2.kaynaklar || []);
+    } catch { setMesaj("Sunucuya ulaşılamadı."); }
+  };
+  useEffect(() => { yukle(); }, []);
+
+  const detayAc = async (aday) => {
+    setMesaj("");
+    try {
+      const r = await authFetch(`/api/admin/adaylar/${aday.id}/rapor`);
+      const d = await r.json();
+      setSecili({ aday, eserler: d.eserler || [] });
+    } catch { setMesaj("Rapor okunamadı."); }
+  };
+
+  const onayla = async (eserId) => {
+    if (calisiyor) return; setCalisiyor(true); setMesaj("");
+    try {
+      const r = await authFetch(`/api/admin/eserler/${eserId}/onayla`, { method: "POST" });
+      const d = await r.json();
+      if (d.ok) { setMesaj(`Onaylandı — sertifika no: ${d.sertifikaNo}`); detayAc(secili.aday); yukle(); }
+      else setMesaj(d.error || "Onaylanamadı.");
+    } catch { setMesaj("Sunucuya ulaşılamadı."); }
+    finally { setCalisiyor(false); }
+  };
+
+  const reddet = async (eserId) => {
+    const gerekceler = redMetni.split("\n").map(s => s.trim()).filter(Boolean);
+    if (!gerekceler.length) { setMesaj("Her satıra bir gerekçe yazın."); return; }
+    if (calisiyor) return; setCalisiyor(true); setMesaj("");
+    try {
+      const r = await authFetch(`/api/admin/eserler/${eserId}/reddet`, { method: "POST", body: JSON.stringify({ gerekceler }) });
+      const d = await r.json();
+      if (d.ok) { setMesaj("Reddedildi — gerekçeler adayın uygulamasında görünecek."); setRedAcik(null); setRedMetni(""); detayAc(secili.aday); yukle(); }
+      else setMesaj(d.error || "Reddedilemedi.");
+    } catch { setMesaj("Sunucuya ulaşılamadı."); }
+    finally { setCalisiyor(false); }
+  };
+
+  const filtreli = adaylar.filter(a =>
+    filtre === "hepsi" ? true :
+    filtre === "onay_bekleyen" ? a.eser_durum === "rapor_hazir" :
+    filtre === "yazar" ? a.tip === "yazar" :
+    filtre === "okur" ? a.tip === "okur" : true);
+  const onayBekleyen = adaylar.filter(a => a.eser_durum === "rapor_hazir").length;
+  const kutu = { background: THEME.cardBg, border: `1px solid ${THEME.border}`, borderRadius: 8, padding: 16, marginBottom: 14 };
+  const inputStyle = { background: THEME.bg, color: THEME.textLight, border: `1px solid ${THEME.border}`, borderRadius: 4, padding: "8px 11px", fontSize: 13, fontFamily: "inherit", width: "100%", boxSizing: "border-box" };
+
+  if (secili) {
+    return (
+      <div>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+          <h2 style={{ color: THEME.textLight, fontFamily: FONT, fontSize: 20, margin: 0 }}>{secili.aday.ad_soyad}</h2>
+          <button onClick={() => { setSecili(null); setRedAcik(null); setMesaj(""); }} style={{ ...inputStyle, width: "auto", cursor: "pointer" }}>← Listeye dön</button>
+        </div>
+        <div style={{ fontSize: 12.5, color: THEME.textMuted, marginBottom: 14 }}>
+          {secili.aday.telefon} · {secili.aday.eposta || "e-posta yok"} · Kaynak: <b>{secili.aday.kaynak || "bilinmiyor"}</b>
+        </div>
+        {mesaj && <div style={{ ...kutu, color: THEME.cyan, fontSize: 13 }}>{mesaj}</div>}
+        {!secili.eserler.length && <div style={kutu}>Bu aday henüz eser yüklemedi.</div>}
+        {secili.eserler.map(e => {
+          const d = ADAY_ESER_DURUM[e.durum] || { ad: e.durum, renk: THEME.textMuted };
+          const rapor = e.rapor || {};
+          const ozet = rapor.ozet || {};
+          return (
+            <div key={e.id} style={kutu}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                <div style={{ color: THEME.textLight, fontWeight: 700, fontSize: 15 }}>{e.eser_adi} <span style={{ color: THEME.textMuted, fontWeight: 400, fontSize: 12 }}>({e.tur || "tür belirtilmedi"} · {Math.round((e.karakter_sayisi || 0) / 1000)}k karakter)</span></div>
+                <span style={{ color: d.renk, fontWeight: 700, fontSize: 12.5 }}>{d.ad}{e.sertifika_no ? ` · ${e.sertifika_no}` : ""}</span>
+              </div>
+              {rapor.oneri && (
+                <div style={{ fontSize: 13, marginBottom: 10, color: THEME.textLight }}>
+                  AI önerisi: <b style={{ color: rapor.oneri === "yayina_uygun_gorunuyor" ? "#2E7D32" : rapor.oneri === "duzeltme_gerekli" ? "#C0392B" : "#C9A227" }}>
+                    {rapor.oneri === "yayina_uygun_gorunuyor" ? "Yayına uygun görünüyor" : rapor.oneri === "duzeltme_gerekli" ? "Düzeltme gerekli" : "Dikkatli inceleme"}
+                  </b>
+                  <span style={{ color: THEME.textMuted }}> — {ozet.toplam ?? 0} bulgu ({ozet.yuksek ?? 0} yüksek · {ozet.orta ?? 0} orta · {ozet.dusuk ?? 0} düşük)</span>
+                </div>
+              )}
+              {(rapor.bulgular || []).map((b, i) => (
+                <div key={i} style={{ borderLeft: `3px solid ${ADAY_SIDDET[b.siddet] || "#7A7A7A"}`, padding: "6px 10px", marginBottom: 6, background: THEME.bg, borderRadius: 4 }}>
+                  <div style={{ fontSize: 12.5, color: THEME.textLight, fontWeight: 600 }}>{ADAY_KATEGORI[b.kategori] || b.kategori} <span style={{ color: ADAY_SIDDET[b.siddet], fontSize: 11 }}>({b.siddet})</span> <span style={{ color: THEME.textMuted, fontWeight: 400 }}>· {b.parca}. bölüm</span></div>
+                  {b.alinti && <div style={{ fontSize: 12, color: THEME.textMuted, fontStyle: "italic" }}>"{b.alinti}"</div>}
+                  <div style={{ fontSize: 12, color: THEME.textMuted }}>{b.aciklama}</div>
+                </div>
+              ))}
+              {e.durum === "rapor_hazir" && (
+                <div style={{ marginTop: 12 }}>
+                  <button onClick={() => onayla(e.id)} disabled={calisiyor} style={{ background: "#2E7D32", color: "#fff", border: "none", borderRadius: 4, padding: "9px 18px", fontSize: 13, fontWeight: 700, cursor: "pointer", marginRight: 8 }}>ONAYLA — SERTİFİKA AÇ</button>
+                  <button onClick={() => setRedAcik(redAcik === e.id ? null : e.id)} style={{ background: "transparent", color: "#C0392B", border: "1px solid #C0392B", borderRadius: 4, padding: "9px 18px", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>REDDET…</button>
+                  {redAcik === e.id && (
+                    <div style={{ marginTop: 10 }}>
+                      <textarea value={redMetni} onChange={ev => setRedMetni(ev.target.value)} rows={4} placeholder={"Her satıra bir gerekçe yazın — aday bunları uygulamasında görecek.\nÖrn: Gerçek bir kurum hedef gösteriliyor (3. bölüm)"} style={{ ...inputStyle, resize: "vertical" }} />
+                      <button onClick={() => reddet(e.id)} disabled={calisiyor} style={{ marginTop: 8, background: "#C0392B", color: "#fff", border: "none", borderRadius: 4, padding: "9px 18px", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>Gerekçelerle reddet</button>
+                    </div>
+                  )}
+                </div>
+              )}
+              {e.durum === "incelemede" && <div style={{ fontSize: 12.5, color: THEME.textMuted }}>AI incelemesi sürüyor: {e.toplam_parca ? Math.round(((e.son_islenen_parca || 0) / e.toplam_parca) * 100) : 0}%</div>}
+              {e.durum === "reddedildi" && (e.red_gerekceleri || []).map((g, i) => <div key={i} style={{ fontSize: 12.5, color: THEME.textMuted }}>• {g}</div>)}
+            </div>
+          );
+        })}
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+        <h2 style={{ color: THEME.textLight, fontFamily: FONT, fontSize: 20, margin: 0 }}>Yazar Adayları</h2>
+        <button onClick={yukle} style={{ ...inputStyle, width: "auto", cursor: "pointer" }}>Yenile</button>
+      </div>
+      <div style={{ fontSize: 12, color: THEME.textMuted, marginBottom: 14 }}>
+        Eser metinleri panele gelmez — yalnızca AI raporu görünür. Bu, adaylara verdiğimiz gizlilik sözünün teknik karşılığıdır.
+      </div>
+      {mesaj && <div style={{ ...kutu, color: THEME.cyan, fontSize: 13 }}>{mesaj}</div>}
+      <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
+        {[["hepsi", `Hepsi (${adaylar.length})`], ["onay_bekleyen", `Onay bekleyen (${onayBekleyen})`], ["yazar", "Yazar adayları"], ["okur", "Okurlar"]].map(([k, ad]) => (
+          <button key={k} onClick={() => setFiltre(k)} style={{ ...inputStyle, width: "auto", cursor: "pointer", background: filtre === k ? THEME.cyan : THEME.bg, color: filtre === k ? THEME.onAccent : THEME.textLight, fontWeight: filtre === k ? 700 : 500 }}>{ad}</button>
+        ))}
+      </div>
+      <div style={kutu}>
+        {!filtreli.length && <div style={{ color: THEME.textMuted, fontSize: 13 }}>Kayıt yok.</div>}
+        {filtreli.map(a => {
+          const d = a.eser_durum ? (ADAY_ESER_DURUM[a.eser_durum] || { ad: a.eser_durum, renk: THEME.textMuted }) : null;
+          return (
+            <div key={a.id} onClick={() => detayAc(a)} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 8px", borderBottom: `1px solid ${THEME.border}`, cursor: "pointer" }}>
+              <div>
+                <div style={{ color: THEME.textLight, fontWeight: 600, fontSize: 13.5 }}>{a.ad_soyad} <span style={{ color: THEME.textMuted, fontWeight: 400, fontSize: 12 }}>· {a.tip === "okur" ? "okur" : a.tip === "yazar" ? "yazar adayı" : "seçim yapmadı"}</span></div>
+                <div style={{ color: THEME.textMuted, fontSize: 12 }}>{a.telefon} · kaynak: {a.kaynak || "—"} · {a.eser_adi ? `Eser: ${a.eser_adi}` : "eser yüklemedi"}</div>
+              </div>
+              <div style={{ textAlign: "right" }}>
+                {d && <div style={{ color: d.renk, fontWeight: 700, fontSize: 12 }}>{d.ad}</div>}
+                <div style={{ color: THEME.textMuted, fontSize: 11 }}>{new Date(a.created_at).toLocaleDateString("tr-TR")}</div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      <div style={kutu}>
+        <div style={{ color: THEME.textLight, fontWeight: 700, fontSize: 14, marginBottom: 10 }}>Reklam Kaynak Analizi — hangi kanal ne getiriyor</div>
+        <table style={{ width: "100%", fontSize: 12.5, color: THEME.textLight, borderCollapse: "collapse" }}>
+          <thead><tr style={{ color: THEME.textMuted, textAlign: "left" }}><th style={{ padding: 6 }}>Kaynak</th><th>Kayıt</th><th>Yazar adayı</th><th>Okur</th><th>Eser yükleyen</th><th>Onaylanan</th></tr></thead>
+          <tbody>
+            {kaynaklar.map((k, i) => (
+              <tr key={i} style={{ borderTop: `1px solid ${THEME.border}` }}>
+                <td style={{ padding: 6, fontWeight: 600 }}>{k.kaynak}</td><td>{k.kayit}</td><td>{k.yazar_adayi}</td><td>{k.okur}</td><td>{k.eser_yukleyen}</td><td style={{ color: "#2E7D32", fontWeight: 700 }}>{k.onaylanan}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 // ============ Demo Hesaplar — yazar adayı satış provası ============
 // Satış ekibi aday için kişisel demo oluşturur, bağlantıyı gönderir.
 // Adayın hangi adıma kadar geldiği takip edilir — nerede bıraktığı görünür.
@@ -6201,6 +6393,7 @@ export default function AdminPanel() {
     ["destek", "Destek & Şikayet"], ["duyurular", "Duyurular"], ["meta", "Meta Reklam"],
     ["oyun", "Görev & Ödül"],
     ["demoHesap", "Demo Hesaplar"],
+    ["yazarAdaylari", "Yazar Adayları"],
     ["reklamMerkezi", "Reklam Merkezi"],
     ["yazarKampanya", "Yazar Kampanyaları"],
     ["reklamTeklif", "Reklam Başvuruları"],
@@ -6335,6 +6528,7 @@ export default function AdminPanel() {
         {view === "meta" && <MetaReklamView authFetch={authFetch} />}
         {view === "oyun" && <OyunView authFetch={authFetch} authors={authors} />}
         {view === "demoHesap" && <DemoHesaplar authFetch={authFetch} />}
+        {view === "yazarAdaylari" && <YazarAdaylari authFetch={authFetch} />}
         {view === "reklamMerkezi" && <ReklamMerkezi authFetch={authFetch} />}
         {view === "yazarKampanya" && <YazarKampanyalari authFetch={authFetch} />}
         {view === "reklamTeklif" && <ReklamBasvurulari authFetch={authFetch} />}
