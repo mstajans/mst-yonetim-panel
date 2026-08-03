@@ -1251,12 +1251,14 @@ function YazarAdaylari({ authFetch }) {
               <div style={{ textAlign: "right", display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
                 {d && <div style={{ color: d.renk, fontWeight: 700, fontSize: 12 }}>{d.ad}</div>}
                 <div style={{ color: THEME.textMuted, fontSize: 11 }}>{new Date(a.created_at).toLocaleDateString("tr-TR")}</div>
-                {/* Akademi ilerleme */}
-                <div style={{ display: "flex", alignItems: "center", gap: 4, marginTop: 2 }}>
-                  <div style={{ width: 60, height: 4, background: "rgba(201,162,75,.15)", borderRadius: 2, overflow: "hidden" }}>
-                    <div style={{ height: "100%", width: `${Math.round(((a.akademi_mod || 0) / 10) * 100)}%`, background: "linear-gradient(90deg,#8C6A22,#C9A24B)" }} />
+                {/* Akademi ilerleme — her zaman görünür */}
+                <div style={{ display: "flex", alignItems: "center", gap: 5, marginTop: 4 }}>
+                  <div style={{ width: 64, height: 5, background: "rgba(201,162,75,.18)", borderRadius: 2, overflow: "hidden", border: "1px solid rgba(201,162,75,.25)" }}>
+                    <div style={{ height: "100%", width: `${Math.max(4, Math.round(((a.akademi_mod || 0) / 10) * 100))}%`, background: (a.akademi_mod || 0) === 0 ? "rgba(201,162,75,.3)" : "linear-gradient(90deg,#8C6A22,#C9A24B)", transition: "width .3s" }} />
                   </div>
-                  <span style={{ fontSize: 10, color: "rgba(201,162,75,.75)" }}>AKD {a.akademi_mod || 0}/10</span>
+                  <span style={{ fontSize: 10, color: (a.akademi_mod || 0) > 0 ? "rgba(201,162,75,.9)" : "rgba(201,162,75,.45)", fontWeight: (a.akademi_mod || 0) > 0 ? 600 : 400 }}>
+                    {(a.akademi_mod || 0) === 0 ? "Başlamadı" : `${a.akademi_mod}/10 modül`}
+                  </span>
                 </div>
               </div>
             </div>
