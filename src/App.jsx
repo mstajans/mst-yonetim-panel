@@ -1157,6 +1157,23 @@ function YazarAdaylari({ authFetch }) {
         </div>
         <div style={{ fontSize: 12.5, color: THEME.textMuted, marginBottom: 14 }}>
           {secili.aday.telefon} · {secili.aday.eposta || "e-posta yok"} · Kaynak: <b>{secili.aday.kaynak || "bilinmiyor"}</b>
+          {/* İkna profili */}
+          {secili.aday.ikna_profili && (
+            <div style={{ marginTop: 12, padding: "12px 14px", background: "rgba(201,162,75,.06)", border: "1px solid rgba(201,162,75,.25)", borderRadius: 4 }}>
+              <div style={{ fontSize: 10, letterSpacing: ".2em", color: "rgba(201,162,75,.7)", marginBottom: 8 }}>DANIŞMAN İKNA PROFİLİ</div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                {Object.entries(secili.aday.ikna_profili).map(([k, v]) => (
+                  <div key={k} style={{ fontSize: 12 }}>
+                    <span style={{ color: THEME.textMuted }}>{k}: </span>
+                    <span style={{ color: THEME.textLight, fontWeight: 600 }}>{v}</span>
+                  </div>
+                ))}
+              </div>
+              <div style={{ marginTop: 8, fontSize: 11, color: "rgba(201,162,75,.6)", fontStyle: "italic" }}>
+                Akademi ilerleme: Modül {secili.aday.akademi_mod || 0}/10
+              </div>
+            </div>
+          )}
         </div>
         {mesaj && <div style={{ ...kutu, color: THEME.cyan, fontSize: 13 }}>{mesaj}</div>}
         {!secili.eserler.length && <div style={kutu}>Bu aday henüz eser yüklemedi.</div>}
@@ -1231,9 +1248,16 @@ function YazarAdaylari({ authFetch }) {
                 <div style={{ color: THEME.textLight, fontWeight: 600, fontSize: 13.5 }}>{a.ad_soyad} <span style={{ color: THEME.textMuted, fontWeight: 400, fontSize: 12 }}>· {a.tip === "okur" ? "okur" : a.tip === "yazar" ? "yazar adayı" : "seçim yapmadı"}</span></div>
                 <div style={{ color: THEME.textMuted, fontSize: 12 }}>{a.telefon} · kaynak: {a.kaynak || "—"} · {a.eser_adi ? `Eser: ${a.eser_adi}` : "eser yüklemedi"}</div>
               </div>
-              <div style={{ textAlign: "right" }}>
+              <div style={{ textAlign: "right", display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
                 {d && <div style={{ color: d.renk, fontWeight: 700, fontSize: 12 }}>{d.ad}</div>}
                 <div style={{ color: THEME.textMuted, fontSize: 11 }}>{new Date(a.created_at).toLocaleDateString("tr-TR")}</div>
+                {/* Akademi ilerleme */}
+                <div style={{ display: "flex", alignItems: "center", gap: 4, marginTop: 2 }}>
+                  <div style={{ width: 60, height: 4, background: "rgba(201,162,75,.15)", borderRadius: 2, overflow: "hidden" }}>
+                    <div style={{ height: "100%", width: `${Math.round(((a.akademi_mod || 0) / 10) * 100)}%`, background: "linear-gradient(90deg,#8C6A22,#C9A24B)" }} />
+                  </div>
+                  <span style={{ fontSize: 10, color: "rgba(201,162,75,.75)" }}>AKD {a.akademi_mod || 0}/10</span>
+                </div>
               </div>
             </div>
           );
