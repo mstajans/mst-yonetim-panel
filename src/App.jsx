@@ -1294,6 +1294,99 @@ const DEMO_DURUM = {
 };
 const DEMO_ADIMLAR = ["Karşılama", "Pano", "Yayın süreci", "Telif", "Tanıtım", "Danışman", "Paketler", "Başvuru"];
 
+function VersiyonSkorboard({ authFetch }) {
+  const [skorlar, setSkorlar] = React.useState([]);
+  const [yukleniyor, setYukleniyor] = React.useState(true);
+
+  React.useEffect(() => {
+    authFetch("/api/admin/versiyon-skor")
+      .then(r => r.json())
+      .then(d => { setSkorlar(d.skorlar || []); setYukleniyor(false); })
+      .catch(() => setYukleniyor(false));
+  }, []);
+
+  const YAKLASIM_RENK = { A:"rgba(201,162,75,.8)", B:"rgba(80,180,120,.8)", C:"rgba(100,160,220,.8)", D:"rgba(220,100,100,.8)", E:"rgba(180,120,220,.8)" };
+  const YAKLASIM_AD = { A:"Prestij", B:"Veri", C:"Merak", D:"Risk", E:"Topluluk" };
+
+  return (
+    <div style={{ padding: "20px 16px" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+        <div>
+          <div style={{ fontSize: 18, fontWeight: 700, color: THEME.textLight, marginBottom: 4 }}>Versiyon Test Skorboard</div>
+          <div style={{ fontSize: 12, color: THEME.textMuted }}>Hangi karşılama versiyonu daha çok dosya göndertiyor?</div>
+        </div>
+        <button onClick={() => authFetch("/api/admin/versiyon-skor").then(r=>r.json()).then(d=>setSkorlar(d.skorlar||[]))}
+          style={{ padding: "6px 14px", border: `1px solid ${THEME.border}`, background: "none", color: THEME.textMuted, fontSize: 12, cursor: "pointer" }}>
+          Yenile
+        </button>
+      </div>
+
+      {yukleniyor ? (
+        <div style={{ textAlign: "center", color: THEME.textMuted, padding: 40 }}>Yükleniyor...</div>
+      ) : skorlar.length === 0 ? (
+        <div style={{ textAlign: "center", color: THEME.textMuted, padding: 40 }}>
+          Henüz veri yok. Sistem çalışmaya başladığında skorlar burada görünecek.
+        </div>
+      ) : (
+        <div>
+          {/* Özet kartlar */}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(5,1fr)", gap: 8, marginBottom: 24 }}>
+            {["A","B","C","D","E"].map(harf => {
+              const grp = skorlar.filter(s => s.versiyon_id?.startsWith(harf));
+              const topGorulme = grp.reduce((s,r) => s + Number(r.gorulme||0), 0);
+              const topDosya = grp.reduce((s,r) => s + Number(r.dosya||0), 0);
+              const oran = topGorulme > 0 ? Math.round(100*topDosya/topGorulme) : 0;
+              return (
+                <div key={harf} style={{ padding: "12px 10px", background: "rgba(245,240,228,.04)", border: `1px solid ${THEME.border}`, textAlign: "center" }}>
+                  <div style={{ fontSize: 20, fontWeight: 700, color: YAKLASIM_RENK[harf] }}>{oran}%</div>
+                  <div style={{ fontSize: 9, letterSpacing: ".2em", color: THEME.textMuted, marginTop: 4 }}>{YAKLASIM_AD[harf]}</div>
+                  <div style={{ fontSize: 10, color: THEME.textMuted }}>{topGorulme} kişi</div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Detay tablo */}
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+            <thead>
+              <tr style={{ borderBottom: `1px solid ${THEME.border}` }}>
+                {["Versiyon", "Yaklaşım", "Görüldü", "Tıklandı", "Dosya Gönderdi", "Dosya Oranı", "Sözleşme"].map(h => (
+                  <th key={h} style={{ padding: "8px 10px", textAlign: "left", color: THEME.textMuted, fontWeight: 400 }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {skorlar.map((s, i) => {
+                const harf = s.versiyon_id?.[0] || "A";
+                const oran = Number(s.dosya_oran || 0);
+                return (
+                  <tr key={i} style={{ borderBottom: `1px solid ${THEME.border}` }}>
+                    <td style={{ padding: "8px 10px", fontWeight: 700, color: YAKLASIM_RENK[harf] }}>{s.versiyon_id}</td>
+                    <td style={{ padding: "8px 10px", color: THEME.textMuted }}>{YAKLASIM_AD[harf] || harf}</td>
+                    <td style={{ padding: "8px 10px" }}>{s.gorulme}</td>
+                    <td style={{ padding: "8px 10px" }}>{s.tiklama}</td>
+                    <td style={{ padding: "8px 10px", color: Number(s.dosya) > 0 ? "#6DBF8A" : THEME.textMuted, fontWeight: Number(s.dosya) > 0 ? 700 : 400 }}>{s.dosya}</td>
+                    <td style={{ padding: "8px 10px" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <div style={{ width: 60, height: 4, background: "rgba(245,240,228,.1)", borderRadius: 2, overflow: "hidden" }}>
+                          <div style={{ height: "100%", width: `${Math.min(100, oran*3)}%`, background: oran > 20 ? "#6DBF8A" : oran > 10 ? "#C9A24B" : "rgba(245,240,228,.3)" }} />
+                        </div>
+                        <span style={{ color: oran > 10 ? "#6DBF8A" : THEME.textMuted }}>%{oran}</span>
+                      </div>
+                    </td>
+                    <td style={{ padding: "8px 10px", color: Number(s.sozlesme) > 0 ? "rgba(201,162,75,.9)" : THEME.textMuted, fontWeight: Number(s.sozlesme) > 0 ? 700 : 400 }}>{s.sozlesme}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
 function DemoHesaplar({ authFetch }) {
   const [veri, setVeri] = useState(null);
   const [yeni, setYeni] = useState({ hedefPaket: "profesyonel" });
@@ -6420,6 +6513,7 @@ export default function AdminPanel() {
     ["oyun", "Görev & Ödül"],
     ["demoHesap", "Demo Hesaplar"],
     ["yazarAdaylari", "Yazar Adayları"],
+    ["versiyonTest", "Versiyon Testi"],
     ["reklamMerkezi", "Reklam Merkezi"],
     ["yazarKampanya", "Yazar Kampanyaları"],
     ["reklamTeklif", "Reklam Başvuruları"],
