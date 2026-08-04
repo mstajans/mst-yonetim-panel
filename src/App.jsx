@@ -1128,7 +1128,7 @@ function YazarAdaylari({ authFetch }) {
     try {
       const r = await authFetch(`/api/admin/eserler/${eserId}/onayla`, { method: "POST" });
       const d = await r.json();
-      if (d.ok) { setMesaj(`Onaylandı — sertifika no: ${d.sertifikaNo}`); detayAc(secili.aday); yukle(); }
+      if (d.ok) { setMesaj(`Onaylandı — belge no: ${d.sertifikaNo}`); detayAc(secili.aday); yukle(); }
       else setMesaj(d.error || "Onaylanamadı.");
     } catch { setMesaj("Sunucuya ulaşılamadı."); }
     finally { setCalisiyor(false); }
@@ -1248,7 +1248,7 @@ function YazarAdaylari({ authFetch }) {
               ))}
               {e.durum === "rapor_hazir" && (
                 <div style={{ marginTop: 12 }}>
-                  <button onClick={() => onayla(e.id)} disabled={calisiyor} style={{ background: "#2E7D32", color: "#fff", border: "none", borderRadius: 4, padding: "9px 18px", fontSize: 13, fontWeight: 700, cursor: "pointer", marginRight: 8 }}>ONAYLA — SERTİFİKA AÇ</button>
+                  <button onClick={() => onayla(e.id)} disabled={calisiyor} style={{ background: "#2E7D32", color: "#fff", border: "none", borderRadius: 4, padding: "9px 18px", fontSize: 13, fontWeight: 700, cursor: "pointer", marginRight: 8 }}>ONAYLA — YAYINA UYGUNLUK BELGESİ AÇ</button>
                   <button onClick={() => setRedAcik(redAcik === e.id ? null : e.id)} style={{ background: "transparent", color: "#C0392B", border: "1px solid #C0392B", borderRadius: 4, padding: "9px 18px", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>REDDET…</button>
                   {redAcik === e.id && (
                     <div style={{ marginTop: 10 }}>
