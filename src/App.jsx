@@ -1093,6 +1093,14 @@ function YazarAdaylari({ authFetch }) {
   const [redAcik, setRedAcik] = useState(null); // eser id
   const [mesaj, setMesaj] = useState("");
   const [calisiyor, setCalisiyor] = useState(false);
+  // Model 2 madde 7-8 — Editöryal değerlendirme formu (hukuki/güvenlik onay-red
+  // akışından AYRI, ek bir katman). Backend ucu hazır olunca /api/admin/eserler/:id/editoryal-degerlendirme'ye kaydedilecek.
+  const [editForm, setEditForm] = useState({
+    karar: "", // "hazir" | "gelistirme" | "henuz_degil"
+    gucluYonler: "", eksikYonler: "", hedefOkur: "", editorlukIhtiyaci: "",
+    hazirlikSeviyesi: "", sonrakiAdim: "", editorNotu: "",
+  });
+  const [editAcikEserId, setEditAcikEserId] = useState(null);
 
   const yukle = async () => {
     try {
@@ -1139,11 +1147,46 @@ function YazarAdaylari({ authFetch }) {
     finally { setCalisiyor(false); }
   };
 
-  const filtreli = adaylar.filter(a =>
-    filtre === "hepsi" ? true :
-    filtre === "onay_bekleyen" ? a.eser_durum === "rapor_hazir" :
-    filtre === "yazar" ? a.tip === "yazar" :
-    filtre === "okur" ? a.tip === "okur" : true);
+  // Model 2 madde 7 — Editöryal karar modeli. Hukuki/güvenlik onay-red akışından
+  // ayrı, ek bir değerlendirme katmanı. Boş veya tamamen genel rapor engellenir:
+  // en az bir güçlü yön ve bir geliştirme önerisi zorunludur.
+  const editoryalKaydet = async (eserId) => {
+    if (!editForm.karar) { setMesaj("Bir karar seçin: Yayına hazır / Editöryal geliştirmeyle uygun / Henüz hazır değil."); return; }
+    if (!editForm.gucluYonler.trim()) { setMesaj("En az bir güçlü yön belirtin."); return; }
+    if (!editForm.eksikYonler.trim()) { setMesaj("En az bir geliştirme önerisi belirtin."); return; }
+    if (calisiyor) return; setCalisiyor(true); setMesaj("");
+    try {
+      const r = await authFetch(`/api/admin/eserler/${eserId}/editoryal-degerlendirme`, {
+        method: "POST",
+        body: JSON.stringify({
+          karar: editForm.karar,
+          gucluYonler: editForm.gucluYonler, eksikYonler: editForm.eksikYonler,
+          hedefOkur: editForm.hedefOkur, editorlukIhtiyaci: editForm.editorlukIhtiyaci,
+          hazirlikSeviyesi: editForm.hazirlikSeviyesi, sonrakiAdim: editForm.sonrakiAdim,
+          editorNotu: editForm.editorNotu,
+        }),
+      });
+      const d = await r.json();
+      if (d.ok) { setMesaj("Editöryal değerlendirme kaydedildi."); setEditAcikEserId(null); detayAc(secili.aday); yukle(); }
+      else setMesaj(d.error || "Kaydedilemedi.");
+    } catch { setMesaj("Sunucuya ulaşılamadı — bu özellik için backend ucu henüz eklenmemiş olabilir."); }
+    finally { setCalisiyor(false); }
+  };
+
+  // Model 2 madde 11 — genişletilmiş filtreler
+  const filtreli = adaylar.filter(a => {
+    if (filtre === "hepsi") return true;
+    if (filtre === "onay_bekleyen") return a.eser_durum === "rapor_hazir";
+    if (filtre === "yazar") return a.tip === "yazar";
+    if (filtre === "okur") return a.tip === "okur";
+    if (filtre === "dosya_yuklemeyen") return a.tip === "yazar" && !a.eser_id;
+    if (filtre === "analizi_suren") return a.eser_durum === "incelemede";
+    if (filtre === "raporu_hazir") return a.eser_durum === "rapor_hazir";
+    if (filtre === "gorusme_bekleyen") return (a.bekleyen_gorusme || 0) > 0;
+    if (filtre === "hareketsiz") return a.son_giris && (Date.now() - new Date(a.son_giris).getTime()) > 7 * 24 * 3600 * 1000;
+    if (filtre === "takip_yaklasan") return a.sonraki_takip_tarihi && new Date(a.sonraki_takip_tarihi) <= new Date(Date.now() + 3 * 24 * 3600 * 1000);
+    return true;
+  });
   const onayBekleyen = adaylar.filter(a => a.eser_durum === "rapor_hazir").length;
   const kutu = { background: THEME.cardBg, border: `1px solid ${THEME.border}`, borderRadius: 8, padding: 16, marginBottom: 14 };
   const inputStyle = { background: THEME.bg, color: THEME.textLight, border: `1px solid ${THEME.border}`, borderRadius: 4, padding: "8px 11px", fontSize: 13, fontFamily: "inherit", width: "100%", boxSizing: "border-box" };
@@ -1157,10 +1200,11 @@ function YazarAdaylari({ authFetch }) {
         </div>
         <div style={{ fontSize: 12.5, color: THEME.textMuted, marginBottom: 14 }}>
           {secili.aday.telefon} · {secili.aday.eposta || "e-posta yok"} · Kaynak: <b>{secili.aday.kaynak || "bilinmiyor"}</b>
-          {/* İkna profili */}
+          {/* Model 2 madde 10: "İkna profili" ifadesi kullanıcı arayüzünden kaldırıldı,
+              admin panelinde "Aday Hazırlık Puanı" kullanılıyor. Bu puan adaya hiç gösterilmez. */}
           {secili.aday.ikna_profili && (
             <div style={{ marginTop: 12, padding: "12px 14px", background: "rgba(201,162,75,.06)", border: "1px solid rgba(201,162,75,.25)", borderRadius: 4 }}>
-              <div style={{ fontSize: 10, letterSpacing: ".2em", color: "rgba(201,162,75,.7)", marginBottom: 8 }}>DANIŞMAN İKNA PROFİLİ</div>
+              <div style={{ fontSize: 10, letterSpacing: ".2em", color: "rgba(201,162,75,.7)", marginBottom: 8 }}>ADAY HAZIRLIK PUANI</div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
                 {Object.entries(secili.aday.ikna_profili).map(([k, v]) => (
                   <div key={k} style={{ fontSize: 12 }}>
@@ -1214,6 +1258,57 @@ function YazarAdaylari({ authFetch }) {
                   )}
                 </div>
               )}
+
+              {/* Model 2 madde 7 — Editöryal değerlendirme (hukuki onay/red'den ayrı katman).
+                  Sertifika onayından bağımsız olarak, hukuki riski onaylanmış (ya da bekleyen)
+                  her eser için editör kalite değerlendirmesi girilebilir. */}
+              {(e.durum === "rapor_hazir" || e.durum === "onaylandi") && (
+                <div style={{ marginTop: 14, borderTop: `1px dashed ${THEME.border}`, paddingTop: 12 }}>
+                  <button onClick={() => setEditAcikEserId(editAcikEserId === e.id ? null : e.id)}
+                    style={{ ...inputStyle, width: "auto", cursor: "pointer", background: "transparent", color: THEME.cyan, border: `1px solid ${THEME.cyan}` }}>
+                    {editAcikEserId === e.id ? "Editöryal formu kapat" : "Editöryal Değerlendirme Gir…"}
+                  </button>
+                  {editAcikEserId === e.id && (
+                    <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 8 }}>
+                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                        {[["hazir", "Yayına hazırlık için uygun"], ["gelistirme", "Editöryal geliştirmeyle uygun"], ["henuz_degil", "Henüz hazır değil"]].map(([k, ad]) => (
+                          <button key={k} onClick={() => setEditForm({ ...editForm, karar: k })}
+                            style={{ ...inputStyle, width: "auto", cursor: "pointer",
+                              background: editForm.karar === k ? THEME.cyan : THEME.bg,
+                              color: editForm.karar === k ? THEME.onAccent : THEME.textLight,
+                              fontWeight: editForm.karar === k ? 700 : 500 }}>{ad}</button>
+                        ))}
+                      </div>
+                      <textarea value={editForm.gucluYonler} onChange={ev => setEditForm({ ...editForm, gucluYonler: ev.target.value })} rows={2} placeholder="Güçlü yönler (zorunlu — en az bir madde)" style={{ ...inputStyle, resize: "vertical" }} />
+                      <textarea value={editForm.eksikYonler} onChange={ev => setEditForm({ ...editForm, eksikYonler: ev.target.value })} rows={2} placeholder="Geliştirilmesi gereken alanlar (zorunlu — en az bir madde)" style={{ ...inputStyle, resize: "vertical" }} />
+                      <textarea value={editForm.hedefOkur} onChange={ev => setEditForm({ ...editForm, hedefOkur: ev.target.value })} rows={2} placeholder="Hedef okur değerlendirmesi" style={{ ...inputStyle, resize: "vertical" }} />
+                      <input value={editForm.editorlukIhtiyaci} onChange={ev => setEditForm({ ...editForm, editorlukIhtiyaci: ev.target.value })} placeholder="Editörlük ihtiyacı" style={inputStyle} />
+                      <input value={editForm.hazirlikSeviyesi} onChange={ev => setEditForm({ ...editForm, hazirlikSeviyesi: ev.target.value })} placeholder="Yayın hazırlık seviyesi" style={inputStyle} />
+                      <input value={editForm.sonrakiAdim} onChange={ev => setEditForm({ ...editForm, sonrakiAdim: ev.target.value })} placeholder="Önerilen sonraki adım" style={inputStyle} />
+                      <textarea value={editForm.editorNotu} onChange={ev => setEditForm({ ...editForm, editorNotu: ev.target.value })} rows={2} placeholder="Adaya özel editör notu" style={{ ...inputStyle, resize: "vertical" }} />
+                      <button onClick={() => editoryalKaydet(e.id)} disabled={calisiyor}
+                        style={{ background: THEME.cyan, color: THEME.onAccent, border: "none", borderRadius: 4, padding: "9px 18px", fontSize: 13, fontWeight: 700, cursor: "pointer", width: "fit-content" }}>
+                        Editöryal Değerlendirmeyi Kaydet
+                      </button>
+                      {/* Madde 8 — Rapor görünürlüğü onay/sertifikadan AYRIDIR.
+                          Böylece "henuz_degil" sonucu da adaya gösterilebilir. */}
+                      <button onClick={async () => {
+                        setCalisiyor(true); setMesaj("");
+                        try {
+                          const r = await authFetch(`/api/admin/eserler/${e.id}/rapor-yayinla`, { method: "POST" });
+                          const v = await r.json();
+                          setMesaj(v.ok ? "Rapor adaya açıldı." : (v.error || "Yayınlanamadı."));
+                          if (v.ok) { detayAc(secili.aday); yukle(); }
+                        } catch { setMesaj("Sunucuya ulaşılamadı."); }
+                        finally { setCalisiyor(false); }
+                      }} disabled={calisiyor}
+                        style={{ background: "transparent", color: "#C9A227", border: "1px solid #C9A227", borderRadius: 4, padding: "9px 18px", fontSize: 13, fontWeight: 700, cursor: "pointer", width: "fit-content", marginTop: 6 }}>
+                        RAPORU ADAYA AÇ (onaydan bağımsız)
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
               {e.durum === "incelemede" && <div style={{ fontSize: 12.5, color: THEME.textMuted }}>AI incelemesi sürüyor: {e.toplam_parca ? Math.round(((e.son_islenen_parca || 0) / e.toplam_parca) * 100) : 0}%</div>}
               {e.durum === "reddedildi" && (e.red_gerekceleri || []).map((g, i) => <div key={i} style={{ fontSize: 12.5, color: THEME.textMuted }}>• {g}</div>)}
             </div>
@@ -1234,7 +1329,9 @@ function YazarAdaylari({ authFetch }) {
       </div>
       {mesaj && <div style={{ ...kutu, color: THEME.cyan, fontSize: 13 }}>{mesaj}</div>}
       <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
-        {[["hepsi", `Hepsi (${adaylar.length})`], ["onay_bekleyen", `Onay bekleyen (${onayBekleyen})`], ["yazar", "Yazar adayları"], ["okur", "Okurlar"]].map(([k, ad]) => (
+        {[["hepsi", `Hepsi (${adaylar.length})`], ["onay_bekleyen", `Onay bekleyen (${onayBekleyen})`], ["yazar", "Yazar adayları"], ["okur", "Okurlar"],
+          ["dosya_yuklemeyen", "Dosya yüklemeyen"], ["analizi_suren", "Analizi süren"], ["gorusme_bekleyen", "Görüşme bekleyen"],
+          ["hareketsiz", "Hareketsiz (7g+)"], ["takip_yaklasan", "Takibi yaklaşan"]].map(([k, ad]) => (
           <button key={k} onClick={() => setFiltre(k)} style={{ ...inputStyle, width: "auto", cursor: "pointer", background: filtre === k ? THEME.cyan : THEME.bg, color: filtre === k ? THEME.onAccent : THEME.textLight, fontWeight: filtre === k ? 700 : 500 }}>{ad}</button>
         ))}
       </div>
@@ -1247,9 +1344,17 @@ function YazarAdaylari({ authFetch }) {
               <div>
                 <div style={{ color: THEME.textLight, fontWeight: 600, fontSize: 13.5 }}>{a.ad_soyad} <span style={{ color: THEME.textMuted, fontWeight: 400, fontSize: 12 }}>· {a.tip === "okur" ? "okur" : a.tip === "yazar" ? "yazar adayı" : "seçim yapmadı"}</span></div>
                 <div style={{ color: THEME.textMuted, fontSize: 12 }}>{a.telefon} · kaynak: {a.kaynak || "—"} · {a.eser_adi ? `Eser: ${a.eser_adi}` : "eser yüklemedi"}</div>
+                {/* Model 2 madde 11 — UTM, danışman, sonraki takip */}
+                <div style={{ color: THEME.textMuted, fontSize: 11, marginTop: 2 }}>
+                  {a.utm_campaign && <span>UTM: {a.utm_campaign} · </span>}
+                  {a.son_atanan_danisman && <span>Danışman: {a.son_atanan_danisman} · </span>}
+                  {a.bekleyen_gorusme > 0 && <span style={{ color: "#C9A227" }}>{a.bekleyen_gorusme} bekleyen görüşme · </span>}
+                  {a.sonraki_takip_tarihi && <span>Takip: {new Date(a.sonraki_takip_tarihi).toLocaleDateString("tr-TR")}</span>}
+                </div>
               </div>
               <div style={{ textAlign: "right", display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
                 {d && <div style={{ color: d.renk, fontWeight: 700, fontSize: 12 }}>{d.ad}</div>}
+                <div style={{ color: "rgba(201,162,75,.8)", fontSize: 11 }}>Hazırlık: {a.hazirlik_puani ?? 0}</div>
                 <div style={{ color: THEME.textMuted, fontSize: 11 }}>{new Date(a.created_at).toLocaleDateString("tr-TR")}</div>
                 {/* Akademi ilerleme — her zaman görünür */}
                 <div style={{ display: "flex", alignItems: "center", gap: 5, marginTop: 4 }}>
@@ -1277,6 +1382,1462 @@ function YazarAdaylari({ authFetch }) {
             ))}
           </tbody>
         </table>
+      </div>
+    </div>
+  );
+}
+
+// ============ Model 2 Faz 9 — Aday Görüşmeleri (danışman randevu yönetimi) ============
+const GORUSME_DURUM = {
+  talep_edildi: { ad: "Talep edildi", renk: "#C9A227" },
+  planlandi:    { ad: "Planlandı",    renk: "#2C7BE5" },
+  tamamlandi:   { ad: "Tamamlandı",   renk: "#2E7D32" },
+  gelmedi:      { ad: "Gelmedi",      renk: "#C0392B" },
+  iptal:        { ad: "İptal",        renk: "#7A7A7A" },
+};
+
+function AdayGorusmeleri({ authFetch }) {
+  const [gorusmeler, setGorusmeler] = useState([]);
+  const [mesaj, setMesaj] = useState("");
+  const [duzenleId, setDuzenleId] = useState(null);
+  const [duzenleForm, setDuzenleForm] = useState({ durum: "", atananDanisman: "", danismanNotu: "", sonrakiTakipTarihi: "" });
+  const [calisiyor, setCalisiyor] = useState(false);
+
+  const yukle = async () => {
+    try {
+      const r = await authFetch("/api/admin/gorusmeler");
+      const d = await r.json();
+      setGorusmeler(d.gorusmeler || []);
+    } catch { setMesaj("Sunucuya ulaşılamadı."); }
+  };
+  useEffect(() => { yukle(); }, []);
+
+  const kutu = { background: THEME.cardBg, border: `1px solid ${THEME.border}`, borderRadius: 8, padding: 16, marginBottom: 14 };
+  const inputStyle = { background: THEME.bg, color: THEME.textLight, border: `1px solid ${THEME.border}`, borderRadius: 4, padding: "8px 11px", fontSize: 13, fontFamily: "inherit", width: "100%", boxSizing: "border-box" };
+
+  const duzenleAc = (g) => {
+    setDuzenleId(g.id);
+    setDuzenleForm({ durum: g.durum, atananDanisman: g.atanan_danisman || "", danismanNotu: g.danisman_notu || "", sonrakiTakipTarihi: g.sonraki_takip_tarihi ? String(g.sonraki_takip_tarihi).slice(0, 10) : "" });
+  };
+
+  const kaydet = async (id) => {
+    if (calisiyor) return; setCalisiyor(true); setMesaj("");
+    try {
+      const r = await authFetch(`/api/admin/gorusmeler/${id}`, { method: "POST", body: JSON.stringify(duzenleForm) });
+      const d = await r.json();
+      if (d.ok) { setMesaj("Güncellendi."); setDuzenleId(null); yukle(); }
+      else setMesaj(d.error || "Güncellenemedi.");
+    } catch { setMesaj("Sunucuya ulaşılamadı."); }
+    finally { setCalisiyor(false); }
+  };
+
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+        <h2 style={{ color: THEME.textLight, fontFamily: FONT, fontSize: 20, margin: 0 }}>Aday Görüşmeleri</h2>
+        <button onClick={yukle} style={{ ...inputStyle, width: "auto", cursor: "pointer" }}>Yenile</button>
+      </div>
+      <div style={{ fontSize: 12, color: THEME.textMuted, marginBottom: 14 }}>Adayların talep ettiği danışman görüşmeleri. Durumu, atanan danışmanı ve sonraki takip tarihini burada yönetin.</div>
+      {mesaj && <div style={{ ...kutu, color: THEME.cyan, fontSize: 13 }}>{mesaj}</div>}
+      <div style={kutu}>
+        {!gorusmeler.length && <div style={{ color: THEME.textMuted, fontSize: 13 }}>Görüşme talebi yok.</div>}
+        {gorusmeler.map(g => {
+          const d = GORUSME_DURUM[g.durum] || { ad: g.durum, renk: THEME.textMuted };
+          return (
+            <div key={g.id} style={{ padding: "10px 8px", borderBottom: `1px solid ${THEME.border}` }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div>
+                  <div style={{ color: THEME.textLight, fontWeight: 600, fontSize: 13.5 }}>{g.ad_soyad} <span style={{ color: THEME.textMuted, fontWeight: 400, fontSize: 12 }}>· {g.telefon}</span></div>
+                  <div style={{ color: THEME.textMuted, fontSize: 12 }}>
+                    {g.uygun_gun ? new Date(g.uygun_gun).toLocaleDateString("tr-TR") : "gün belirtilmedi"} · {g.uygun_saat || "saat belirtilmedi"} · {g.yontem === "telefon" ? "Telefon" : "Çevrim içi"}
+                    {g.atanan_danisman ? ` · Danışman: ${g.atanan_danisman}` : ""}
+                  </div>
+                  {g.soru && <div style={{ color: THEME.textMuted, fontSize: 12, marginTop: 4, fontStyle: "italic" }}>"{g.soru}"</div>}
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={{ color: d.renk, fontWeight: 700, fontSize: 12 }}>{d.ad}</span>
+                  <button onClick={() => duzenleAc(g)} style={{ ...inputStyle, width: "auto", cursor: "pointer", fontSize: 12 }}>Düzenle</button>
+                </div>
+              </div>
+              {duzenleId === g.id && (
+                <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 8 }}>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    {Object.entries(GORUSME_DURUM).map(([k, v]) => (
+                      <button key={k} onClick={() => setDuzenleForm({ ...duzenleForm, durum: k })}
+                        style={{ ...inputStyle, width: "auto", cursor: "pointer",
+                          background: duzenleForm.durum === k ? THEME.cyan : THEME.bg,
+                          color: duzenleForm.durum === k ? THEME.onAccent : THEME.textLight }}>{v.ad}</button>
+                    ))}
+                  </div>
+                  <input value={duzenleForm.atananDanisman} onChange={e => setDuzenleForm({ ...duzenleForm, atananDanisman: e.target.value })} placeholder="Atanan danışman" style={inputStyle} />
+                  <textarea value={duzenleForm.danismanNotu} onChange={e => setDuzenleForm({ ...duzenleForm, danismanNotu: e.target.value })} rows={2} placeholder="Danışman notu" style={{ ...inputStyle, resize: "vertical" }} />
+                  <input type="date" value={duzenleForm.sonrakiTakipTarihi} onChange={e => setDuzenleForm({ ...duzenleForm, sonrakiTakipTarihi: e.target.value })} style={inputStyle} />
+                  <button onClick={() => kaydet(g.id)} disabled={calisiyor} style={{ background: THEME.cyan, color: THEME.onAccent, border: "none", borderRadius: 4, padding: "9px 18px", fontSize: 13, fontWeight: 700, cursor: "pointer", width: "fit-content" }}>Kaydet</button>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ============ Model 2 Faz 13 — Aday Takip Önerileri ============
+// Sistem yalnızca ÖNERİR; hiçbir mesaj admin onayı olmadan gönderilmez.
+const TAKIP_TIPI_ETIKET = {
+  testi_tamamlayip_dosya_yuklemeyen: "Testi tamamlayıp dosya yüklemeyen",
+  dosya_yukleyip_raporu_acmayan: "Dosya yükleyip raporu açmayan",
+  raporu_acip_gorusme_istemeyen: "Raporu açıp görüşme istemeyen",
+  gorusme_yapip_teklif_almayan: "Görüşme yapıp teklif almayan",
+};
+
+function AdayTakipOnerileri({ authFetch }) {
+  const [oneriler, setOneriler] = useState([]);
+  const [mesaj, setMesaj] = useState("");
+  const [notFormAcik, setNotFormAcik] = useState(null);
+  const [notMetni, setNotMetni] = useState("");
+  const [kanal, setKanal] = useState("telefon");
+  const [calisiyor, setCalisiyor] = useState(false);
+
+  const yukle = async () => {
+    try {
+      const r = await authFetch("/api/admin/takip-onerileri");
+      const d = await r.json();
+      setOneriler(d.oneriler || []);
+    } catch { setMesaj("Sunucuya ulaşılamadı."); }
+  };
+  useEffect(() => { yukle(); }, []);
+
+  const kutu = { background: THEME.cardBg, border: `1px solid ${THEME.border}`, borderRadius: 8, padding: 16, marginBottom: 14 };
+  const inputStyle = { background: THEME.bg, color: THEME.textLight, border: `1px solid ${THEME.border}`, borderRadius: 4, padding: "8px 11px", fontSize: 13, fontFamily: "inherit", width: "100%", boxSizing: "border-box" };
+
+  const kaydiKaydet = async (adayId) => {
+    if (!notMetni.trim()) { setMesaj("Mesaj/not boş olamaz."); return; }
+    if (calisiyor) return; setCalisiyor(true); setMesaj("");
+    try {
+      const r = await authFetch("/api/admin/iletisim-gecmisi", { method: "POST", body: JSON.stringify({ adayId, kanal, mesaj: notMetni }) });
+      const d = await r.json();
+      if (d.ok) { setMesaj("İletişim geçmişine kaydedildi."); setNotFormAcik(null); setNotMetni(""); }
+      else setMesaj(d.error || "Kaydedilemedi.");
+    } catch { setMesaj("Sunucuya ulaşılamadı."); }
+    finally { setCalisiyor(false); }
+  };
+
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+        <h2 style={{ color: THEME.textLight, fontFamily: FONT, fontSize: 20, margin: 0 }}>Aday Takip Önerileri</h2>
+        <button onClick={yukle} style={{ ...inputStyle, width: "auto", cursor: "pointer" }}>Yenile</button>
+      </div>
+      <div style={{ fontSize: 12, color: THEME.textMuted, marginBottom: 14 }}>
+        Sistem yalnızca hangi adayın nerede takıldığını gösterir — hiçbir mesaj otomatik gönderilmez, karar ve gönderim sana ait.
+      </div>
+      {mesaj && <div style={{ ...kutu, color: THEME.cyan, fontSize: 13 }}>{mesaj}</div>}
+      <div style={kutu}>
+        {!oneriler.length && <div style={{ color: THEME.textMuted, fontSize: 13 }}>Şu an takip önerisi yok.</div>}
+        {oneriler.map(o => (
+          <div key={o.aday_id} style={{ padding: "10px 8px", borderBottom: `1px solid ${THEME.border}` }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div>
+                <div style={{ color: THEME.textLight, fontWeight: 600, fontSize: 13.5 }}>{o.ad_soyad} <span style={{ color: THEME.textMuted, fontWeight: 400, fontSize: 12 }}>· {o.telefon}</span></div>
+                <div style={{ color: "#C9A227", fontSize: 12 }}>{TAKIP_TIPI_ETIKET[o.takip_tipi] || o.takip_tipi}</div>
+              </div>
+              <button onClick={() => { setNotFormAcik(notFormAcik === o.aday_id ? null : o.aday_id); setNotMetni(""); }}
+                style={{ ...inputStyle, width: "auto", cursor: "pointer" }}>
+                {notFormAcik === o.aday_id ? "Kapat" : "Takip Kaydı Ekle"}
+              </button>
+            </div>
+            {notFormAcik === o.aday_id && (
+              <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 8 }}>
+                <div style={{ display: "flex", gap: 8 }}>
+                  {[["telefon", "Telefon"], ["sms", "SMS"], ["eposta", "E-posta"], ["panel_notu", "Sadece not"]].map(([k, ad]) => (
+                    <button key={k} onClick={() => setKanal(k)}
+                      style={{ ...inputStyle, width: "auto", cursor: "pointer",
+                        background: kanal === k ? THEME.cyan : THEME.bg,
+                        color: kanal === k ? THEME.onAccent : THEME.textLight }}>{ad}</button>
+                  ))}
+                </div>
+                <textarea value={notMetni} onChange={e => setNotMetni(e.target.value)} rows={3} placeholder="Gönderilen mesaj / not" style={{ ...inputStyle, resize: "vertical" }} />
+                <button onClick={() => kaydiKaydet(o.aday_id)} disabled={calisiyor} style={{ background: THEME.cyan, color: THEME.onAccent, border: "none", borderRadius: 4, padding: "9px 18px", fontSize: 13, fontWeight: 700, cursor: "pointer", width: "fit-content" }}>Kaydet</button>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ============ Ortak: aday seçici + stil yardımcıları ============
+const P_KUTU = { borderRadius: 8, padding: 16, marginBottom: 14 };
+function pKutu() { return { ...P_KUTU, background: THEME.cardBg, border: `1px solid ${THEME.border}` }; }
+function pInput() { return { background: THEME.bg, color: THEME.textLight, border: `1px solid ${THEME.border}`,
+  borderRadius: 4, padding: "8px 11px", fontSize: 13, fontFamily: "inherit", width: "100%", boxSizing: "border-box" }; }
+
+function AdaySecici({ authFetch, secili, onSec, baslik = "Yazar adayları" }) {
+  const [adaylar, setAdaylar] = useState([]);
+  useEffect(() => {
+    (async () => {
+      try { const r = await authFetch("/api/admin/adaylar");
+        setAdaylar(((await r.json()).adaylar || []).filter(a => a.tip === "yazar")); } catch {}
+    })();
+  }, []);
+  return (
+    <div style={{ ...pKutu(), flex: "0 0 260px", maxHeight: 560, overflowY: "auto" }}>
+      <div style={{ color: THEME.textLight, fontWeight: 700, fontSize: 13, marginBottom: 8 }}>{baslik}</div>
+      {!adaylar.length && <div style={{ color: THEME.textMuted, fontSize: 12.5 }}>Aday yok.</div>}
+      {adaylar.map(a => (
+        <div key={a.id} onClick={() => onSec(a)}
+          style={{ padding: "8px 6px", borderBottom: `1px solid ${THEME.border}`, cursor: "pointer",
+                   background: secili?.id === a.id ? "rgba(201,162,75,.08)" : "transparent" }}>
+          <div style={{ color: THEME.textLight, fontSize: 13 }}>{a.ad_soyad}</div>
+          <div style={{ color: THEME.textMuted, fontSize: 11 }}>{a.telefon}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ============ Bölüm 12 — GÖRÜŞME OYUN PLANI (Danışman Kokpiti 2.0) ============
+const ITIRAZ_TEMA_ADI = {
+  fiyat: "Fiyat / bütçe", zamanlama: "Zamanlama", guven: "Güven / kanıt ihtiyacı",
+  kapsam: "Kapsam belirsizliği", es_karari: "Eş veya aile kararı",
+  onceki_deneyim: "Önceki kötü deneyim", sonuc_belirsizligi: "Sonuç belirsizliği",
+};
+const SONUC_ADI = {
+  uygun: "Uygun", dogrulama_bekliyor: "Doğrulama bekliyor", zamanlama: "Zamanlama",
+  finansman: "Finansman", uygun_degil: "Uygun değil",
+};
+
+function GorusmeOyunPlani({ authFetch }) {
+  const [secili, setSecili] = useState(null);
+  const [plan, setPlan] = useState(null);
+  const [mesaj, setMesaj] = useState("");
+  const [itiraz, setItiraz] = useState({ tema: "fiyat", detay: "", cozuldu: false, cozumYolu: "" });
+  const [sonuc, setSonuc] = useState({ sonuc: "dogrulama_bekliyor", takipTarihi: "", takipKanali: "telefon", acikSoru: "" });
+  const [ovr, setOvr] = useState({ alan: "", danismanKarari: "", gerekce: "" });
+  const [calisiyor, setCalisiyor] = useState(false);
+
+  const planAc = async (a) => {
+    setSecili(a); setPlan(null); setMesaj("");
+    try {
+      const r = await authFetch(`/api/admin/adaylar/${a.id}/gorusme-plani`);
+      if (r.status === 404) { setMesaj("Bu aday değerlendirmeyi tamamlamamış — görüşme planı üretilemez."); return; }
+      setPlan(await r.json());
+    } catch { setMesaj("Sunucuya ulaşılamadı."); }
+  };
+
+  const gonder = async (yol, govde, basarili) => {
+    if (calisiyor) return; setCalisiyor(true); setMesaj("");
+    try {
+      const r = await authFetch(yol, { method: "POST", body: JSON.stringify(govde) });
+      const v = await r.json();
+      setMesaj(v.ok ? basarili : (v.error || "Kaydedilemedi."));
+      if (v.ok) planAc(secili);
+    } catch { setMesaj("Sunucuya ulaşılamadı."); }
+    finally { setCalisiyor(false); }
+  };
+
+  const B = ({ baslik, children, vurgu }) => (
+    <div style={{ marginBottom: 14 }}>
+      <div style={{ fontSize: 10.5, letterSpacing: ".16em", color: vurgu ? "#C0392B" : THEME.textMuted, marginBottom: 5 }}>{baslik}</div>
+      {children}
+    </div>
+  );
+
+  return (
+    <div>
+      <h2 style={{ color: THEME.textLight, fontFamily: FONT, fontSize: 20, margin: "0 0 6px" }}>Görüşme Oyun Planı</h2>
+      <div style={{ fontSize: 12, color: THEME.textMuted, marginBottom: 14 }}>
+        Adayın hedefini yeniden keşfetmiyorsunuz. Belirsizliği doğruluyor, uygunluğu teyit ediyor ve bilinçli sözleşmeyi kapatıyorsunuz.
+      </div>
+      {mesaj && <div style={{ ...pKutu(), color: THEME.cyan, fontSize: 13 }}>{mesaj}</div>}
+
+      <div style={{ display: "flex", gap: 14, alignItems: "flex-start", flexWrap: "wrap" }}>
+        <AdaySecici authFetch={authFetch} secili={secili} onSec={planAc} />
+        <div style={{ flex: 1, minWidth: 360 }}>
+          {!secili && <div style={pKutu()}><span style={{ color: THEME.textMuted, fontSize: 13 }}>Soldan bir aday seçin.</span></div>}
+
+          {plan && (
+            <>
+              <div style={pKutu()}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                  <div style={{ color: THEME.textLight, fontWeight: 700, fontSize: 15 }}>{secili.ad_soyad}</div>
+                  <span style={{ fontSize: 12, fontWeight: 700,
+                    color: plan.paketGosterilebilir ? "#2E7D32" : "#C0392B" }}>
+                    {plan.paketGosterilebilir ? "Paket kapısı AÇIK" : "Paket kapısı KAPALI"}
+                  </span>
+                </div>
+                <B baslik="GÖRÜŞME AÇILIŞI">
+                  <div style={{ fontSize: 13.5, color: THEME.textLight, lineHeight: 1.6 }}>{plan.acilis}</div>
+                </B>
+                <B baslik="SONRAKİ EN İYİ AKSİYON">
+                  <div style={{ fontSize: 13, color: "#C9A227" }}>{plan.sonrakiEnIyiAksiyon}</div>
+                </B>
+                <B baslik="ANALİZ GÜVENİ">
+                  <div style={{ fontSize: 12.5, color: THEME.textLight }}>
+                    {plan.analizGuveni} — <span style={{ color: THEME.textMuted }}>{plan.analizGuvenNedeni}</span>
+                  </div>
+                </B>
+              </div>
+
+              <div style={pKutu()}>
+                <B baslik="DOĞRULAMA SORULARI">
+                  {(plan.dogrulamaSorulari || []).map((s, i) => (
+                    <div key={i} style={{ marginBottom: 8, paddingLeft: 8, borderLeft: `2px solid ${THEME.border}` }}>
+                      <div style={{ fontSize: 13, color: THEME.textLight }}>{s.soru}</div>
+                      <div style={{ fontSize: 11.5, color: THEME.textMuted }}>
+                        {s.gosterge} · {s.seviye}{s.neden?.length ? ` — ${s.neden.join(", ")}` : ""}
+                      </div>
+                    </div>
+                  ))}
+                  {!(plan.dogrulamaSorulari || []).length && <span style={{ fontSize: 12.5, color: THEME.textMuted }}>Doğrulanacak boşluk yok.</span>}
+                </B>
+                <B baslik="AÇIKÇA SÖYLENECEKLER" vurgu>
+                  {(plan.acikSoylenecekler || []).map((x, i) => (
+                    <div key={i} style={{ fontSize: 12.5, color: THEME.textLight, marginBottom: 3 }}>· {x}</div>
+                  ))}
+                  {!(plan.acikSoylenecekler || []).length && <span style={{ fontSize: 12.5, color: THEME.textMuted }}>—</span>}
+                </B>
+                <B baslik="ÖDEME SENARYOLARI">
+                  {(plan.odemeSenaryolari || []).map((x, i) => (
+                    <div key={i} style={{ fontSize: 12.5, color: THEME.textLight, marginBottom: 3 }}>· {x}</div>
+                  ))}
+                </B>
+                {(plan.kapasiteUyarilari || []).length > 0 && (
+                  <B baslik="KAPASİTE UYARILARI" vurgu>
+                    {plan.kapasiteUyarilari.map((x, i) => (
+                      <div key={i} style={{ fontSize: 12.5, color: "#C0392B", marginBottom: 3 }}>· {x}</div>
+                    ))}
+                  </B>
+                )}
+              </div>
+
+              <div style={{ ...pKutu(), borderColor: "rgba(192,57,43,.35)" }}>
+                <div style={{ fontSize: 11, letterSpacing: ".15em", color: "#C0392B", marginBottom: 6 }}>KAÇINILACAKLAR</div>
+                {(plan.kacinilacaklar || []).map((x, i) => (
+                  <div key={i} style={{ fontSize: 12.5, color: THEME.textLight, marginBottom: 3 }}>· {x}</div>
+                ))}
+              </div>
+
+              {/* İtiraz kaydı — serbest metin değil, tema */}
+              <div style={pKutu()}>
+                <div style={{ color: THEME.textLight, fontWeight: 700, fontSize: 13, marginBottom: 8 }}>İtiraz kaydet</div>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
+                  {Object.entries(ITIRAZ_TEMA_ADI).map(([k, ad]) => (
+                    <button key={k} onClick={() => setItiraz({ ...itiraz, tema: k })}
+                      style={{ ...pInput(), width: "auto", cursor: "pointer", fontSize: 12,
+                        background: itiraz.tema === k ? THEME.cyan : THEME.bg,
+                        color: itiraz.tema === k ? THEME.onAccent : THEME.textLight }}>{ad}</button>
+                  ))}
+                </div>
+                <input value={itiraz.detay} onChange={e => setItiraz({ ...itiraz, detay: e.target.value })}
+                  placeholder="Detay (opsiyonel)" style={{ ...pInput(), marginBottom: 6 }} />
+                <input value={itiraz.cozumYolu} onChange={e => setItiraz({ ...itiraz, cozumYolu: e.target.value, cozuldu: true })}
+                  placeholder="Çözüm yolu (yazarsanız çözüldü işaretlenir)" style={{ ...pInput(), marginBottom: 6 }} />
+                <button disabled={calisiyor}
+                  onClick={() => gonder(`/api/admin/adaylar/${secili.id}/itiraz`, itiraz, "İtiraz kaydedildi.")}
+                  style={{ background: THEME.cyan, color: THEME.onAccent, border: "none", borderRadius: 4,
+                           padding: "8px 16px", fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}>Kaydet</button>
+                {(plan.mevcutItirazlar || []).length > 0 && (
+                  <div style={{ marginTop: 10 }}>
+                    {plan.mevcutItirazlar.map((x, i) => (
+                      <div key={i} style={{ fontSize: 12, color: THEME.textMuted, marginBottom: 2 }}>
+                        · {ITIRAZ_TEMA_ADI[x.tema] || x.tema} {x.cozuldu ? "✓" : "(açık)"} {x.detay ? `— ${x.detay}` : ""}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Görüşme sonucu */}
+              <div style={pKutu()}>
+                <div style={{ color: THEME.textLight, fontWeight: 700, fontSize: 13, marginBottom: 4 }}>Görüşme sonucu</div>
+                <div style={{ fontSize: 11.5, color: THEME.textMuted, marginBottom: 8 }}>
+                  "Uygun" ve "uygun değil" dışındaki sonuçlarda takip tarihi ve açık soru zorunludur — görüşme kayıp olarak kapanmaz.
+                </div>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
+                  {Object.entries(SONUC_ADI).map(([k, ad]) => (
+                    <button key={k} onClick={() => setSonuc({ ...sonuc, sonuc: k })}
+                      style={{ ...pInput(), width: "auto", cursor: "pointer", fontSize: 12,
+                        background: sonuc.sonuc === k ? THEME.cyan : THEME.bg,
+                        color: sonuc.sonuc === k ? THEME.onAccent : THEME.textLight }}>{ad}</button>
+                  ))}
+                </div>
+                <input value={sonuc.acikSoru} onChange={e => setSonuc({ ...sonuc, acikSoru: e.target.value })}
+                  placeholder="Açık sorular (virgülle ayırın)" style={{ ...pInput(), marginBottom: 6 }} />
+                <input type="date" value={sonuc.takipTarihi} onChange={e => setSonuc({ ...sonuc, takipTarihi: e.target.value })}
+                  style={{ ...pInput(), marginBottom: 6 }} />
+                <button disabled={calisiyor}
+                  onClick={() => gonder(`/api/admin/adaylar/${secili.id}/gorusme-sonuc`,
+                    { ...sonuc, acikSorular: sonuc.acikSoru.split(",").map(s => s.trim()).filter(Boolean) },
+                    "Görüşme sonucu kaydedildi.")}
+                  style={{ background: THEME.cyan, color: THEME.onAccent, border: "none", borderRadius: 4,
+                           padding: "8px 16px", fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}>Sonucu kaydet</button>
+              </div>
+
+              {/* Override */}
+              <div style={pKutu()}>
+                <div style={{ color: THEME.textLight, fontWeight: 700, fontSize: 13, marginBottom: 4 }}>Sistem önerisini değiştir</div>
+                <div style={{ fontSize: 11.5, color: THEME.textMuted, marginBottom: 8 }}>
+                  Değiştirebilirsiniz — ancak gerekçe zorunludur ve denetim kaydına yazılır.
+                </div>
+                <input value={ovr.alan} onChange={e => setOvr({ ...ovr, alan: e.target.value })}
+                  placeholder="Alan (ör. paket_onerisi)" style={{ ...pInput(), marginBottom: 6 }} />
+                <input value={ovr.danismanKarari} onChange={e => setOvr({ ...ovr, danismanKarari: e.target.value })}
+                  placeholder="Danışman kararı" style={{ ...pInput(), marginBottom: 6 }} />
+                <textarea value={ovr.gerekce} onChange={e => setOvr({ ...ovr, gerekce: e.target.value })} rows={2}
+                  placeholder="Gerekçe (en az 10 karakter)" style={{ ...pInput(), resize: "vertical", marginBottom: 6 }} />
+                <button disabled={calisiyor}
+                  onClick={() => gonder(`/api/admin/adaylar/${secili.id}/override`, ovr, "Override kaydedildi.")}
+                  style={{ background: "transparent", color: "#C9A227", border: "1px solid #C9A227", borderRadius: 4,
+                           padding: "8px 16px", fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}>Değişikliği kaydet</button>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============ Bölüm 13-14 — TEKLİF MERKEZİ ============
+function TeklifMerkezi({ authFetch }) {
+  const [secili, setSecili] = useState(null);
+  const [katalog, setKatalog] = useState([]);
+  const [form, setForm] = useState({ hizmetler: [], araToplam: "", odemePlani: "pesin", hedefOzeti: "", cozumGerekcesi: "", gecerlilikTarihi: "" });
+  const [sonuc, setSonuc] = useState(null);
+  const [mesaj, setMesaj] = useState("");
+  const [calisiyor, setCalisiyor] = useState(false);
+
+  useEffect(() => {
+    (async () => { try { const r = await authFetch("/api/admin/vaat-katalogu");
+      setKatalog((await r.json()).katalog || []); } catch {} })();
+  }, []);
+
+  const olustur = async () => {
+    if (calisiyor || !secili) return; setCalisiyor(true); setMesaj("");
+    try {
+      const r = await authFetch("/api/admin/teklif", { method: "POST",
+        body: JSON.stringify({ adayId: secili.id, ...form, araToplam: Number(form.araToplam || 0) }) });
+      const v = await r.json();
+      if (v.ok) { setSonuc(v); setMesaj((v.uyarilar || []).join(" ") || "Teklif oluşturuldu (taslak)."); }
+      else setMesaj(v.error + (v.eksik ? ` (${v.eksik.join(", ")})` : ""));
+    } catch { setMesaj("Sunucuya ulaşılamadı."); }
+    finally { setCalisiyor(false); }
+  };
+
+  const kdv = 20;
+  const toplam = form.araToplam ? Math.round(Number(form.araToplam) * (1 + kdv / 100) * 100) / 100 : 0;
+
+  return (
+    <div>
+      <h2 style={{ color: THEME.textLight, fontFamily: FONT, fontSize: 20, margin: "0 0 6px" }}>Teklif Merkezi</h2>
+      <div style={{ fontSize: 12, color: THEME.textMuted, marginBottom: 14 }}>
+        Teklif satış PDF'i değil, karar dosyasına bağlı yaşayan plandır. Karar dosyası olmayan adaya teklif üretilemez.
+      </div>
+      {mesaj && <div style={{ ...pKutu(), color: THEME.cyan, fontSize: 13 }}>{mesaj}</div>}
+      <div style={{ display: "flex", gap: 14, alignItems: "flex-start", flexWrap: "wrap" }}>
+        <AdaySecici authFetch={authFetch} secili={secili} onSec={a => { setSecili(a); setSonuc(null); setMesaj(""); }} />
+        <div style={{ flex: 1, minWidth: 340 }}>
+          {!secili && <div style={pKutu()}><span style={{ color: THEME.textMuted, fontSize: 13 }}>Soldan bir aday seçin.</span></div>}
+          {secili && (
+            <div style={pKutu()}>
+              <div style={{ color: THEME.textLight, fontWeight: 700, fontSize: 14, marginBottom: 10 }}>{secili.ad_soyad} için teklif</div>
+              <div style={{ fontSize: 11, color: THEME.textMuted, marginBottom: 5 }}>HİZMETLER (yalnız katalogdakiler)</div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
+                {katalog.map(k => {
+                  const sec = form.hizmetler.includes(k.hizmet);
+                  return (
+                    <button key={k.hizmet} onClick={() => setForm({ ...form,
+                      hizmetler: sec ? form.hizmetler.filter(h => h !== k.hizmet) : [...form.hizmetler, k.hizmet] })}
+                      style={{ ...pInput(), width: "auto", cursor: "pointer", fontSize: 12,
+                        background: sec ? THEME.cyan : THEME.bg, color: sec ? THEME.onAccent : THEME.textLight }}>
+                      {k.vaat_adi}
+                    </button>
+                  );
+                })}
+              </div>
+              <textarea value={form.hedefOzeti} onChange={e => setForm({ ...form, hedefOzeti: e.target.value })} rows={2}
+                placeholder="Kişisel hedef özeti" style={{ ...pInput(), resize: "vertical", marginBottom: 6 }} />
+              <textarea value={form.cozumGerekcesi} onChange={e => setForm({ ...form, cozumGerekcesi: e.target.value })} rows={2}
+                placeholder="Önerilen çözüm ve NEDEN — 'neden şimdi' dahil" style={{ ...pInput(), resize: "vertical", marginBottom: 6 }} />
+              <div style={{ display: "flex", gap: 8, marginBottom: 6 }}>
+                <input value={form.araToplam} onChange={e => setForm({ ...form, araToplam: e.target.value })}
+                  placeholder="Ara toplam (₺)" inputMode="decimal" style={{ ...pInput(), width: 160 }} />
+                <select value={form.odemePlani} onChange={e => setForm({ ...form, odemePlani: e.target.value })} style={{ ...pInput(), width: 170 }}>
+                  <option value="pesin">Peşin</option><option value="taksit_3">3 taksit</option>
+                  <option value="taksit_6">6 taksit</option><option value="asamali">Aşamalı</option>
+                </select>
+                <input type="date" value={form.gecerlilikTarihi} onChange={e => setForm({ ...form, gecerlilikTarihi: e.target.value })}
+                  style={{ ...pInput(), width: 160 }} />
+              </div>
+              <div style={{ fontSize: 12.5, color: THEME.textLight, marginBottom: 10 }}>
+                KDV %{kdv} dahil toplam: <b>{toplam} ₺</b>
+                <span style={{ color: THEME.textMuted }}> — adaya gizli maliyet gösterilmez, toplam yük budur.</span>
+              </div>
+              <button disabled={calisiyor || !form.hizmetler.length} onClick={olustur}
+                style={{ background: THEME.cyan, color: THEME.onAccent, border: "none", borderRadius: 4,
+                         padding: "9px 18px", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>Teklif oluştur (taslak)</button>
+
+              {sonuc?.teklif && (
+                <div style={{ marginTop: 12, borderTop: `1px solid ${THEME.border}`, paddingTop: 10 }}>
+                  <div style={{ fontSize: 12.5, color: THEME.textLight }}>
+                    Teklif #{sonuc.teklif.id} · sürüm {sonuc.teklif.surum} · toplam {sonuc.teklif.toplam} ₺
+                  </div>
+                  <button disabled={calisiyor} onClick={async () => {
+                    const r = await authFetch(`/api/admin/teklif/${sonuc.teklif.id}/gonder`, { method: "POST", body: "{}" });
+                    const v = await r.json();
+                    setMesaj(v.ok ? "Teklif adaya gönderildi." : (v.error || "Gönderilemedi."));
+                  }} style={{ ...pInput(), width: "auto", cursor: "pointer", marginTop: 8 }}>Adaya gönder</button>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============ Bölüm 15 — VAAT TESLİMAT MERKEZİ ============
+const GOREV_DURUM_RENK = { bekliyor: "#7A7A7A", basladi: "#C9A227", tamamlandi: "#2E7D32", bloke: "#C0392B", iptal: "#555" };
+
+function VaatTeslimatMerkezi({ authFetch }) {
+  const [sla, setSla] = useState(null);
+  const [mesaj, setMesaj] = useState("");
+  const [kanit, setKanit] = useState({});
+  const [calisiyor, setCalisiyor] = useState(false);
+
+  const yukle = async () => {
+    try { const r = await authFetch("/api/admin/sla-riski"); setSla(await r.json()); }
+    catch { setMesaj("Sunucuya ulaşılamadı."); }
+  };
+  useEffect(() => { yukle(); }, []);
+
+  const gorevGuncelle = async (id, durum) => {
+    if (calisiyor) return; setCalisiyor(true); setMesaj("");
+    try {
+      const r = await authFetch(`/api/admin/gorev/${id}`, { method: "POST",
+        body: JSON.stringify({ durum, kanitNotu: kanit[id] || undefined }) });
+      const v = await r.json();
+      setMesaj(v.ok ? "Görev güncellendi." : (v.error || "Güncellenemedi."));
+      if (v.ok) yukle();
+    } catch { setMesaj("Sunucuya ulaşılamadı."); }
+    finally { setCalisiyor(false); }
+  };
+
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+        <h2 style={{ color: THEME.textLight, fontFamily: FONT, fontSize: 20, margin: 0 }}>Vaat Teslimat Merkezi</h2>
+        <button onClick={yukle} style={{ ...pInput(), width: "auto", cursor: "pointer" }}>Yenile</button>
+      </div>
+      <div style={{ fontSize: 12, color: THEME.textMuted, marginBottom: 14 }}>
+        Satılan vaat otomatik operasyona dönüşür. Kalite kapıları kanıtsız geçilemez, bağımlı görev sırası atlanamaz.
+      </div>
+      {mesaj && <div style={{ ...pKutu(), color: THEME.cyan, fontSize: 13 }}>{mesaj}</div>}
+
+      {sla && (
+        <div style={pKutu()}>
+          <div style={{ color: THEME.textLight, fontWeight: 700, fontSize: 13, marginBottom: 4 }}>
+            SLA riski ({(sla.riskli || []).length})
+          </div>
+          <div style={{ fontSize: 11.5, color: THEME.textMuted, marginBottom: 10 }}>{sla.not}</div>
+          {!(sla.riskli || []).length && <div style={{ color: THEME.textMuted, fontSize: 13 }}>Riskli görev yok.</div>}
+          {(sla.riskli || []).map(g => (
+            <div key={g.id} style={{ padding: "9px 5px", borderTop: `1px solid ${THEME.border}` }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div>
+                  <div style={{ fontSize: 13, color: THEME.textLight }}>
+                    {g.gorev} <span style={{ color: THEME.textMuted, fontSize: 11.5 }}>· {g.vaat_adi}</span>
+                  </div>
+                  <div style={{ fontSize: 11.5, color: THEME.textMuted }}>
+                    {g.ad_soyad} · {g.tarafi === "yazar" ? "YAZAR görevi" : g.ekip || "MST"}
+                    {g.sorumlu ? ` · ${g.sorumlu}` : " · sorumlu atanmamış"}
+                    {" · plan "}{g.planlanan_bitis}
+                  </div>
+                </div>
+                <span style={{ fontSize: 12, fontWeight: 700, color: g.seviye === "gecikti" ? "#C0392B" : "#C9A227" }}>
+                  {g.seviye === "gecikti" ? `${g.gecikme_gun} gün gecikti` : "yaklaşıyor"}
+                </span>
+              </div>
+              {g.seviye === "gecikti" && g.gecikme_eskalasyonu && (
+                <div style={{ fontSize: 11.5, color: "#C0392B", marginTop: 3 }}>Eskalasyon: {g.gecikme_eskalasyonu}</div>
+              )}
+              <div style={{ display: "flex", gap: 6, marginTop: 6, alignItems: "center", flexWrap: "wrap" }}>
+                <input value={kanit[g.id] || ""} onChange={e => setKanit({ ...kanit, [g.id]: e.target.value })}
+                  placeholder="Teslim kanıtı (kalite kapısı için zorunlu)" style={{ ...pInput(), width: 300 }} />
+                <button disabled={calisiyor} onClick={() => gorevGuncelle(g.id, "basladi")}
+                  style={{ ...pInput(), width: "auto", cursor: "pointer", fontSize: 12 }}>Başladı</button>
+                <button disabled={calisiyor} onClick={() => gorevGuncelle(g.id, "tamamlandi")}
+                  style={{ background: "#2E7D32", color: "#fff", border: "none", borderRadius: 4,
+                           padding: "8px 14px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>Tamamlandı</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ============ Laboratuvar uzman kuyruğu ============
+function LaboratuvarKuyrugu({ authFetch }) {
+  const [bekleyen, setBekleyen] = useState([]);
+  const [notlar, setNotlar] = useState({});
+  const [mesaj, setMesaj] = useState("");
+  const [calisiyor, setCalisiyor] = useState(false);
+
+  const yukle = async () => {
+    try { const r = await authFetch("/api/admin/laboratuvar-kuyrugu"); setBekleyen((await r.json()).bekleyen || []); }
+    catch { setMesaj("Sunucuya ulaşılamadı."); }
+  };
+  useEffect(() => { yukle(); }, []);
+
+  const karar = async (id, onay) => {
+    if (calisiyor) return; setCalisiyor(true);
+    try {
+      const r = await authFetch(`/api/admin/laboratuvar-cikti/${id}/uzman`, { method: "POST",
+        body: JSON.stringify({ onay, not: notlar[id] || "" }) });
+      const v = await r.json();
+      setMesaj(v.ok ? (onay ? "Onaylandı — portfolyoya eklendi." : "Reddedildi.") : (v.error || "Kaydedilemedi."));
+      if (v.ok) yukle();
+    } catch { setMesaj("Sunucuya ulaşılamadı."); }
+    finally { setCalisiyor(false); }
+  };
+
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+        <h2 style={{ color: THEME.textLight, fontFamily: FONT, fontSize: 20, margin: 0 }}>Laboratuvar Kuyruğu</h2>
+        <button onClick={yukle} style={{ ...pInput(), width: "auto", cursor: "pointer" }}>Yenile</button>
+      </div>
+      <div style={{ fontSize: 12, color: THEME.textMuted, marginBottom: 14 }}>
+        Uzman kapılı laboratuvar çıktıları onaysız portfolyoya girmez. Aday çıktısını değiştirirse onay sıfırlanır.
+      </div>
+      {mesaj && <div style={{ ...pKutu(), color: THEME.cyan, fontSize: 13 }}>{mesaj}</div>}
+      <div style={pKutu()}>
+        {!bekleyen.length && <div style={{ color: THEME.textMuted, fontSize: 13 }}>Bekleyen çıktı yok.</div>}
+        {bekleyen.map(b => (
+          <div key={b.id} style={{ padding: "10px 6px", borderTop: `1px solid ${THEME.border}` }}>
+            <div style={{ color: THEME.textLight, fontSize: 13, fontWeight: 600 }}>
+              {b.ad_soyad} · {b.lab_adi}
+              <span style={{ color: THEME.textMuted, fontWeight: 400, fontSize: 11.5 }}> → {b.uretilen_kanit}</span>
+            </div>
+            <div style={{ fontSize: 12.5, color: THEME.textMuted, margin: "6px 0", whiteSpace: "pre-wrap",
+                          maxHeight: 160, overflowY: "auto", padding: 8, background: THEME.bg, borderRadius: 4 }}>
+              {b.cikti}
+            </div>
+            <input value={notlar[b.id] || ""} onChange={e => setNotlar({ ...notlar, [b.id]: e.target.value })}
+              placeholder="Uzman notu" style={{ ...pInput(), marginBottom: 6 }} />
+            <div style={{ display: "flex", gap: 8 }}>
+              <button disabled={calisiyor} onClick={() => karar(b.id, true)}
+                style={{ background: "#2E7D32", color: "#fff", border: "none", borderRadius: 4,
+                         padding: "8px 16px", fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}>Onayla</button>
+              <button disabled={calisiyor} onClick={() => karar(b.id, false)}
+                style={{ background: "transparent", color: "#C0392B", border: "1px solid #C0392B", borderRadius: 4,
+                         padding: "8px 16px", fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}>Reddet</button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ============ Bölüm 10 — VAAT KATALOĞU ============
+function VaatKatalogu({ authFetch }) {
+  const [katalog, setKatalog] = useState([]);
+  const [mesaj, setMesaj] = useState("");
+  const [acik, setAcik] = useState(null);
+  const kutu = { background: THEME.cardBg, border: `1px solid ${THEME.border}`, borderRadius: 8, padding: 16, marginBottom: 14 };
+  const inputStyle = { background: THEME.bg, color: THEME.textLight, border: `1px solid ${THEME.border}`, borderRadius: 4, padding: "8px 11px", fontSize: 13, fontFamily: "inherit", width: "100%", boxSizing: "border-box" };
+
+  const yukle = async () => {
+    try { const r = await authFetch("/api/admin/vaat-katalogu"); setKatalog((await r.json()).katalog || []); }
+    catch { setMesaj("Sunucuya ulaşılamadı."); }
+  };
+  useEffect(() => { yukle(); }, []);
+
+  const Satir = ({ etiket, deger, vurgu }) => deger ? (
+    <div style={{ marginBottom: 6 }}>
+      <div style={{ fontSize: 10.5, letterSpacing: ".14em", color: vurgu ? "#C0392B" : THEME.textMuted }}>{etiket}</div>
+      <div style={{ fontSize: 12.5, color: THEME.textLight, lineHeight: 1.5 }}>
+        {Array.isArray(deger) ? deger.join(", ") : deger}
+      </div>
+    </div>
+  ) : null;
+
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+        <h2 style={{ color: THEME.textLight, fontFamily: FONT, fontSize: 20, margin: 0 }}>Vaat Kataloğu</h2>
+        <button onClick={yukle} style={{ ...inputStyle, width: "auto", cursor: "pointer" }}>Yenile</button>
+      </div>
+      <div style={{ fontSize: 12, color: THEME.textMuted, marginBottom: 14 }}>
+        Katalogda tanımlı olmayan hizmet satılamaz. <b>Kapsam dışı</b> alanı yazılmadan hizmet
+        eklenemez — satışta ne söylenebileceği ile operasyonun ne teslim edeceği burada aynı yerde durur.
+      </div>
+      {mesaj && <div style={{ ...kutu, color: THEME.cyan, fontSize: 13 }}>{mesaj}</div>}
+      {katalog.map(k => (
+        <div key={k.id} style={kutu}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer" }}
+               onClick={() => setAcik(acik === k.id ? null : k.id)}>
+            <div>
+              <div style={{ color: THEME.textLight, fontWeight: 700, fontSize: 14 }}>{k.vaat_adi}</div>
+              <div style={{ color: THEME.textMuted, fontSize: 11.5 }}>
+                {k.hizmet} · {k.sozlesme_maddesi || "madde yok"} · SLA {k.sla_gun ?? "—"} gün ·
+                kapasite tüketimi {k.kapasite_tuketimi}
+              </div>
+            </div>
+            <span style={{ color: THEME.textMuted }}>{acik === k.id ? "▾" : "▸"}</span>
+          </div>
+          {acik === k.id && (
+            <div style={{ marginTop: 12, borderTop: `1px solid ${THEME.border}`, paddingTop: 10 }}>
+              <Satir etiket="KAPSAM" deger={k.kapsam} />
+              <Satir etiket="KAPSAM DIŞI — SATIŞTA VAAT EDİLEMEZ" deger={k.kapsam_disi} vurgu />
+              <Satir etiket="BAŞLANGIÇ KOŞULU" deger={k.baslangic_kosulu} />
+              <Satir etiket="BAĞIMLILIKLAR" deger={k.bagimliliklar} />
+              <Satir etiket="SORUMLU EKİP" deger={k.sorumlu_ekip} />
+              <Satir etiket="REVİZYON HAKKI" deger={k.revizyon_hakki != null ? String(k.revizyon_hakki) : null} />
+              <Satir etiket="KABUL KRİTERİ" deger={k.kabul_kriteri} />
+              <Satir etiket="TESLİM KANITI" deger={k.teslim_kaniti} />
+              <Satir etiket="GECİKME ESKALASYONU" deger={k.gecikme_eskalasyonu} />
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ============ Bölüm 9 — AKADEMİ UZMAN KAPISI ============
+function AkademiUzmanKapisi({ authFetch }) {
+  const [bekleyen, setBekleyen] = useState([]);
+  const [sozluk, setSozluk] = useState({});
+  const [mesaj, setMesaj] = useState("");
+  const [notlar, setNotlar] = useState({});
+  const [calisiyor, setCalisiyor] = useState(false);
+  const kutu = { background: THEME.cardBg, border: `1px solid ${THEME.border}`, borderRadius: 8, padding: 16, marginBottom: 14 };
+  const inputStyle = { background: THEME.bg, color: THEME.textLight, border: `1px solid ${THEME.border}`, borderRadius: 4, padding: "8px 11px", fontSize: 13, fontFamily: "inherit", width: "100%", boxSizing: "border-box" };
+
+  const yukle = async () => {
+    try {
+      const r = await authFetch("/api/admin/akademi-kanitlari");
+      const d = await r.json();
+      setBekleyen(d.bekleyen || []); setSozluk(d.sinyalSozlugu || {});
+    } catch { setMesaj("Sunucuya ulaşılamadı."); }
+  };
+  useEffect(() => { yukle(); }, []);
+
+  const karar = async (id, onay) => {
+    if (calisiyor) return; setCalisiyor(true);
+    try {
+      const r = await authFetch(`/api/admin/akademi-kanit/${id}/uzman`, {
+        method: "POST", body: JSON.stringify({ onay, not: notlar[id] || "" }) });
+      const v = await r.json();
+      setMesaj(v.ok ? (onay ? "Onaylandı — portfolyoya eklendi." : "Reddedildi.") : (v.error || "Kaydedilemedi."));
+      if (v.ok) yukle();
+    } catch { setMesaj("Sunucuya ulaşılamadı."); }
+    finally { setCalisiyor(false); }
+  };
+
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+        <h2 style={{ color: THEME.textLight, fontFamily: FONT, fontSize: 20, margin: 0 }}>Akademi Uzman Kapısı</h2>
+        <button onClick={yukle} style={{ ...inputStyle, width: "auto", cursor: "pointer" }}>Yenile</button>
+      </div>
+      <div style={{ fontSize: 12, color: THEME.textMuted, marginBottom: 14 }}>
+        Video izleme yeterlilik sayılmaz. Yalnızca <b>uzman onayı</b> doğrulanmış yetkinlik sinyali üretir.
+      </div>
+      {mesaj && <div style={{ ...kutu, color: THEME.cyan, fontSize: 13 }}>{mesaj}</div>}
+
+      <div style={kutu}>
+        <div style={{ color: THEME.textLight, fontWeight: 700, fontSize: 13, marginBottom: 8 }}>Sinyal anlamları</div>
+        {Object.entries(sozluk).map(([k, v]) => (
+          <div key={k} style={{ fontSize: 12, color: THEME.textMuted, marginBottom: 3 }}>
+            · <b style={{ color: THEME.textLight }}>{k}</b> — {v.anlam}
+            <span style={{ color: v.kanitDegeri === "yuksek" ? "#2E7D32" : v.kanitDegeri === "yok" ? "#C0392B" : "#C9A227" }}>
+              {" "}(kanıt değeri: {v.kanitDegeri})
+            </span>
+          </div>
+        ))}
+      </div>
+
+      <div style={kutu}>
+        <div style={{ color: THEME.textLight, fontWeight: 700, fontSize: 13, marginBottom: 8 }}>
+          Onay bekleyen görev çıktıları ({bekleyen.length})
+        </div>
+        {!bekleyen.length && <div style={{ color: THEME.textMuted, fontSize: 13 }}>Bekleyen görev yok.</div>}
+        {bekleyen.map(b => (
+          <div key={b.id} style={{ padding: "10px 6px", borderTop: `1px solid ${THEME.border}` }}>
+            <div style={{ color: THEME.textLight, fontSize: 13, fontWeight: 600 }}>
+              {b.ad_soyad} · Modül {b.modul_no}
+            </div>
+            <div style={{ fontSize: 12.5, color: THEME.textMuted, margin: "6px 0", whiteSpace: "pre-wrap",
+                          maxHeight: 140, overflowY: "auto", padding: 8, background: THEME.bg, borderRadius: 4 }}>
+              {b.cikti || "(çıktı boş)"}
+            </div>
+            <input value={notlar[b.id] || ""} onChange={e => setNotlar({ ...notlar, [b.id]: e.target.value })}
+              placeholder="Uzman notu" style={{ ...inputStyle, marginBottom: 6 }} />
+            <div style={{ display: "flex", gap: 8 }}>
+              <button disabled={calisiyor} onClick={() => karar(b.id, true)}
+                style={{ background: "#2E7D32", color: "#fff", border: "none", borderRadius: 4, padding: "8px 16px", fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}>Onayla</button>
+              <button disabled={calisiyor} onClick={() => karar(b.id, false)}
+                style={{ background: "transparent", color: "#C0392B", border: "1px solid #C0392B", borderRadius: 4, padding: "8px 16px", fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}>Reddet</button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ============ Bölüm 11 — REKLAM LTV ZİNCİRİ ============
+function ReklamLtv({ authFetch }) {
+  const [veri, setVeri] = useState(null);
+  const [mesaj, setMesaj] = useState("");
+  const kutu = { background: THEME.cardBg, border: `1px solid ${THEME.border}`, borderRadius: 8, padding: 16, marginBottom: 14 };
+  const inputStyle = { background: THEME.bg, color: THEME.textLight, border: `1px solid ${THEME.border}`, borderRadius: 4, padding: "8px 11px", fontSize: 13, fontFamily: "inherit", width: "100%", boxSizing: "border-box" };
+
+  const yukle = async () => {
+    try { const r = await authFetch("/api/admin/reklam-ltv"); setVeri(await r.json()); }
+    catch { setMesaj("Sunucuya ulaşılamadı."); }
+  };
+  useEffect(() => { yukle(); }, []);
+
+  const para = v => v == null ? "—" : `${v} ₺`;
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+        <h2 style={{ color: THEME.textLight, fontFamily: FONT, fontSize: 20, margin: 0 }}>Reklam LTV Zinciri</h2>
+        <button onClick={yukle} style={{ ...inputStyle, width: "auto", cursor: "pointer" }}>Yenile</button>
+      </div>
+      {mesaj && <div style={{ ...kutu, color: THEME.cyan, fontSize: 13 }}>{mesaj}</div>}
+      {veri && (
+        <>
+          <div style={{ fontSize: 12, color: THEME.textMuted, marginBottom: 12 }}>{veri.not}</div>
+
+          <div style={kutu}>
+            <div style={{ color: THEME.textLight, fontWeight: 700, fontSize: 13, marginBottom: 8 }}>
+              Kampanya → sözleşme → ifa → memnuniyet
+            </div>
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", fontSize: 11.5, color: THEME.textLight, borderCollapse: "collapse" }}>
+                <thead><tr style={{ color: THEME.textMuted, textAlign: "left" }}>
+                  <th style={{ padding: 5 }}>Kampanya</th><th>Lead</th><th>Güvenilir değ.</th><th>Nitelikli</th>
+                  <th>Görüşme</th><th>Sözleşme</th><th>Zamanında ifa</th><th>Yeniden yatırım</th>
+                  <th>Şikâyet</th><th>Sağlıklı sözl. maliyeti</th><th>Yazar LTV</th>
+                </tr></thead>
+                <tbody>
+                  {(veri.kampanyalar || []).map((k, i) => (
+                    <tr key={i} style={{ borderTop: `1px solid ${THEME.border}` }}>
+                      <td style={{ padding: 5, fontWeight: 600 }}>{k.kampanya}</td>
+                      <td>{k.lead}</td><td>{k.guvenilir_degerlendirme}</td><td>{k.nitelikli}</td>
+                      <td>{k.gorusme}</td><td>{k.sozlesme}</td>
+                      <td>{k.zamaninda_ifa}/{k.ifa_adet}</td>
+                      <td style={{ color: "#2E7D32" }}>{k.yeniden_yatirim}</td>
+                      <td style={{ color: k.sikayet > 0 ? "#C0392B" : THEME.textMuted }}>{k.sikayet}</td>
+                      <td style={{ fontWeight: 700 }}>{para(k.saglikli_sozlesme_maliyeti)}</td>
+                      <td>{para(k.yazar_ltv)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div style={kutu}>
+            <div style={{ color: THEME.textLight, fontWeight: 700, fontSize: 13, marginBottom: 8 }}>Guardrail'ler</div>
+            {(veri.kampanyalar || []).map((k, i) => (
+              <div key={i} style={{ padding: "7px 4px", borderTop: i ? `1px solid ${THEME.border}` : "none", fontSize: 12 }}>
+                <b style={{ color: THEME.textLight }}>{k.kampanya}</b>
+                <span style={{ color: THEME.textMuted }}>
+                  {" "}· iptal %{k.guardrail?.iptal_orani ?? "—"}
+                  {" "}· şikâyet %{k.guardrail?.sikayet_orani ?? "—"}
+                  {" "}· zamanında ifa %{k.guardrail?.zamaninda_ifa_orani ?? "—"}
+                </span>
+                {k.guardrail?.yanlis_beklenti_riski && (
+                  <span style={{ color: "#C0392B", fontWeight: 700 }}> · YANLIŞ BEKLENTİ RİSKİ</span>
+                )}
+                {k.not && <div style={{ color: THEME.textMuted, fontSize: 11.5 }}>{k.not}</div>}
+              </div>
+            ))}
+          </div>
+
+          <div style={{ ...kutu, borderColor: "rgba(192,57,43,.35)" }}>
+            <div style={{ fontSize: 11, letterSpacing: ".15em", color: "#C0392B", marginBottom: 6 }}>
+              YASAK OTOMASYONLAR
+            </div>
+            {(veri.yasakOtomasyonlar || []).map((y, i) => (
+              <div key={i} style={{ fontSize: 12.5, color: THEME.textLight, marginBottom: 3 }}>· {y}</div>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// ============ Bölüm 8 — DANIŞMAN KOKPİTİ ============
+// Karar dosyasını gerekçe kodlarıyla birlikte gösterir. Hiçbir gösterge
+// tek rozet altında birleştirilmez; "hazırlık", "ticari", "kaynak kalite"
+// ve "riskler" AYRI okunur.
+const SEVIYE_RENK = {
+  yuksek: "#2E7D32", hazir: "#2E7D32", uygun: "#2E7D32", uyumlu: "#2E7D32",
+  orta: "#C9A227", gelisiyor: "#C9A227", planlama: "#C9A227", kismi: "#C9A227",
+  dusuk: "#C0392B", erken: "#C0392B", kapasite_yok: "#C0392B", uyumsuz: "#C0392B",
+  bilinmiyor: "#7A7A7A", belirsiz: "#7A7A7A",
+};
+const GOSTERGE_ADI = {
+  yanit_guvenilirligi: "Yanıt güvenilirliği",
+  hedef_netligi: "Hedef netliği",
+  eser_hazirligi: "Eser hazırlığı",
+  finansal_uyum: "Finansal uyum",
+  beklenti_riski: "Beklenti / memnuniyetsizlik riski",
+  teslimat_uygunlugu: "Teslimat uygunluğu",
+};
+
+function DanismanKokpiti({ authFetch }) {
+  const [adaylar, setAdaylar] = useState([]);
+  const [secili, setSecili] = useState(null);
+  const [dosya, setDosya] = useState(null);
+  const [mesaj, setMesaj] = useState("");
+  const [calisiyor, setCalisiyor] = useState(false);
+
+  const kutu = { background: THEME.cardBg, border: `1px solid ${THEME.border}`, borderRadius: 8, padding: 16, marginBottom: 14 };
+  const inputStyle = { background: THEME.bg, color: THEME.textLight, border: `1px solid ${THEME.border}`, borderRadius: 4, padding: "8px 11px", fontSize: 13, fontFamily: "inherit", width: "100%", boxSizing: "border-box" };
+
+  const yukle = async () => {
+    try {
+      const r = await authFetch("/api/admin/adaylar");
+      const d = await r.json();
+      setAdaylar((d.adaylar || []).filter(a => a.tip === "yazar"));
+    } catch { setMesaj("Sunucuya ulaşılamadı."); }
+  };
+  useEffect(() => { yukle(); }, []);
+
+  const dosyaAc = async (a) => {
+    setSecili(a); setDosya(null); setMesaj("");
+    try {
+      const r = await authFetch(`/api/admin/adaylar/${a.id}/karar-dosyasi`);
+      setDosya(await r.json());
+    } catch { setMesaj("Karar dosyası alınamadı."); }
+  };
+
+  const kanitDogrula = async (kanitId, durum) => {
+    if (calisiyor) return; setCalisiyor(true);
+    try {
+      const r = await authFetch(`/api/admin/adaylar/${secili.id}/dogrulama`, {
+        method: "POST", body: JSON.stringify({ kanitId, durum }) });
+      const v = await r.json();
+      setMesaj(v.ok ? "Doğrulama kaydedildi." : (v.error || "Kaydedilemedi."));
+      if (v.ok) dosyaAc(secili);
+    } catch { setMesaj("Sunucuya ulaşılamadı."); }
+    finally { setCalisiyor(false); }
+  };
+
+  const kd = dosya?.kararDosyasi;
+  const sozluk = dosya?.gerekceSozlugu || {};
+  const kodAcikla = (kodlar) => (kodlar || []).map(k => sozluk[k] || k).join(" · ");
+
+  const JBlok = ({ baslik, veri, bos }) => {
+    let dizi = veri;
+    if (typeof dizi === "string") { try { dizi = JSON.parse(dizi); } catch { dizi = []; } }
+    dizi = Array.isArray(dizi) ? dizi : (dizi ? [dizi] : []);
+    return (
+      <div style={{ marginBottom: 12 }}>
+        <div style={{ fontSize: 11, letterSpacing: ".15em", color: THEME.textMuted, marginBottom: 4 }}>{baslik}</div>
+        {!dizi.length && <div style={{ fontSize: 12.5, color: THEME.textMuted }}>{bos}</div>}
+        {dizi.map((x, i) => (
+          <div key={i} style={{ fontSize: 12.5, color: THEME.textLight, marginBottom: 3 }}>
+            · {x.gosterge ? (GOSTERGE_ADI[x.gosterge] || x.gosterge) : (x.hizmet || x.risk || x.adim || (typeof x === "string" ? x : JSON.stringify(x)))}
+            {x.seviye && <span style={{ color: SEVIYE_RENK[x.seviye] || THEME.textMuted }}> — {x.seviye}</span>}
+            {x.olasilik != null && <span style={{ color: THEME.textMuted }}> (olasılık {x.olasilik})</span>}
+            {(x.dayanak || x.neden || x.gerekce) && (
+              <span style={{ color: THEME.textMuted }}> — {[].concat(x.dayanak || x.neden || x.gerekce).join(", ")}</span>
+            )}
+            {x.aciklama && <span style={{ color: THEME.textMuted }}> — {x.aciklama}</span>}
+          </div>
+        ))}
+      </div>
+    );
+  };
+
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+        <h2 style={{ color: THEME.textLight, fontFamily: FONT, fontSize: 20, margin: 0 }}>Danışman Kokpiti</h2>
+        <button onClick={yukle} style={{ ...inputStyle, width: "auto", cursor: "pointer" }}>Yenile</button>
+      </div>
+      <div style={{ fontSize: 12, color: THEME.textMuted, marginBottom: 14 }}>
+        Karar dosyası; bilinenler, tahminler ve <b>bilinmeyenler</b> ayrı gösterilir. Sistem eksik
+        veride paket önermez — görüşmede doğrulanacak alanlar aşağıda listelenir.
+      </div>
+      {mesaj && <div style={{ ...kutu, color: THEME.cyan, fontSize: 13 }}>{mesaj}</div>}
+
+      <div style={{ display: "flex", gap: 14, alignItems: "flex-start", flexWrap: "wrap" }}>
+        <div style={{ ...kutu, flex: "0 0 280px", maxHeight: 560, overflowY: "auto" }}>
+          <div style={{ color: THEME.textLight, fontWeight: 700, fontSize: 13, marginBottom: 8 }}>Yazar adayları</div>
+          {!adaylar.length && <div style={{ color: THEME.textMuted, fontSize: 12.5 }}>Aday yok.</div>}
+          {adaylar.map(a => (
+            <div key={a.id} onClick={() => dosyaAc(a)}
+              style={{ padding: "8px 6px", borderBottom: `1px solid ${THEME.border}`, cursor: "pointer",
+                       background: secili?.id === a.id ? "rgba(201,162,75,.08)" : "transparent" }}>
+              <div style={{ color: THEME.textLight, fontSize: 13 }}>{a.ad_soyad}</div>
+              <div style={{ color: THEME.textMuted, fontSize: 11 }}>
+                {a.telefon} · hazırlık {a.hazirlik_puani ?? 0}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div style={{ flex: 1, minWidth: 340 }}>
+          {!secili && <div style={kutu}><div style={{ color: THEME.textMuted, fontSize: 13 }}>Soldan bir aday seçin.</div></div>}
+
+          {secili && !kd && (
+            <div style={kutu}>
+              <div style={{ color: THEME.textLight, fontWeight: 700, marginBottom: 6 }}>{secili.ad_soyad}</div>
+              <div style={{ color: THEME.textMuted, fontSize: 13 }}>
+                Bu aday için henüz karar dosyası üretilmemiş — değerlendirmeyi tamamlamamış olabilir.
+              </div>
+            </div>
+          )}
+
+          {kd && (
+            <>
+              <div style={kutu}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                  <div style={{ color: THEME.textLight, fontWeight: 700, fontSize: 15 }}>{secili.ad_soyad}</div>
+                  <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                    <span style={{ fontSize: 11, color: THEME.textMuted }}>politika {kd.politika_surumu}</span>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: SEVIYE_RENK[kd.analiz_guveni] }}>
+                      analiz güveni: {kd.analiz_guveni}
+                    </span>
+                  </div>
+                </div>
+                <div style={{
+                  padding: "8px 12px", borderRadius: 4, fontSize: 12.5,
+                  background: kd.paket_gosterilebilir ? "rgba(46,125,50,.12)" : "rgba(192,57,43,.12)",
+                  border: `1px solid ${kd.paket_gosterilebilir ? "rgba(46,125,50,.4)" : "rgba(192,57,43,.4)"}`,
+                  color: THEME.textLight,
+                }}>
+                  {kd.paket_gosterilebilir
+                    ? "Paket kapısı AÇIK — tüm göstergeler doğrulandı."
+                    : "Paket kapısı KAPALI — doğrulanmayan alanlar var, paket önerilmemeli."}
+                  <div style={{ color: THEME.textMuted, marginTop: 3 }}>{kd.guven_nedeni}</div>
+                </div>
+              </div>
+
+              {/* Göstergeler AYRI — tek rozet altında birleştirilmez */}
+              <div style={kutu}>
+                <div style={{ color: THEME.textLight, fontWeight: 700, fontSize: 13, marginBottom: 8 }}>Göstergeler</div>
+                {(dosya.gostergeler || []).map((g, i) => (
+                  <div key={i} style={{ padding: "7px 4px", borderTop: i ? `1px solid ${THEME.border}` : "none" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between" }}>
+                      <span style={{ fontSize: 13, color: THEME.textLight }}>{GOSTERGE_ADI[g.gosterge] || g.gosterge}</span>
+                      <span style={{ fontSize: 12.5, fontWeight: 700, color: SEVIYE_RENK[g.seviye] || THEME.textMuted }}>
+                        {g.seviye}{g.olasilik != null ? ` (${g.olasilik})` : ""}
+                      </span>
+                    </div>
+                    {g.gerekce_kodlari?.length > 0 && (
+                      <div style={{ fontSize: 11.5, color: THEME.textMuted, marginTop: 2 }}>{kodAcikla(g.gerekce_kodlari)}</div>
+                    )}
+                  </div>
+                ))}
+              </div>
+
+              <div style={kutu}>
+                <JBlok baslik="BİLDİKLERİMİZ (doğrulanmış)" veri={kd.bilinen} bos="Doğrulanmış gösterge yok." />
+                <JBlok baslik="TAHMİN ETTİKLERİMİZ (olasılıksal)" veri={kd.tahmin} bos="—" />
+                <JBlok baslik="BİLMEDİKLERİMİZ (karar boşlukları)" veri={kd.bilinmeyen} bos="Belirgin boşluk yok." />
+                <JBlok baslik="RİSKLER VE KAPILAR" veri={kd.riskler} bos="Risk sinyali yok." />
+                <JBlok baslik="ERTELENECEK HİZMETLER" veri={kd.ertelenecek_hizmetler} bos="—" />
+                <JBlok baslik="GÜVENLİ BAŞLANGIÇ" veri={kd.guvenli_baslangic} bos="—" />
+                <JBlok baslik="ALTERNATİF YOL" veri={kd.alternatif_yol} bos="—" />
+                <JBlok baslik="GÖRÜŞMEDE DOĞRULANACAK" veri={kd.insan_dogrulamasi_gereken} bos="—" />
+              </div>
+
+              <div style={{ ...kutu, borderColor: "rgba(192,57,43,.35)" }}>
+                <div style={{ fontSize: 11, letterSpacing: ".15em", color: "#C0392B", marginBottom: 6 }}>
+                  KAÇINILMASI GEREKEN YAKLAŞIM
+                </div>
+                <div style={{ fontSize: 12.5, color: THEME.textLight, lineHeight: 1.6 }}>
+                  · Satış, görünürlük veya yatırım geri dönüşü konusunda taahhüt vermeyin.<br />
+                  · Doğrulanmamış göstergeleri kesinmiş gibi anlatmayın.<br />
+                  · Eser hazırlığı doğrulanmadan reklam veya uluslararası hak kapsamı önermeyin.<br />
+                  · Fiyatı görüşmenin sonunda sürpriz olarak açmayın.
+                  {!kd.paket_gosterilebilir && <><br />· <b>Bu adaya paket sunmayın</b> — önce yukarıdaki alanları doğrulayın.</>}
+                </div>
+              </div>
+
+              {dosya.kanitlar?.length > 0 && (
+                <div style={kutu}>
+                  <div style={{ color: THEME.textLight, fontWeight: 700, fontSize: 13, marginBottom: 8 }}>Kanıtlar</div>
+                  {dosya.kanitlar.map(k => (
+                    <div key={k.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center",
+                                             padding: "7px 4px", borderTop: `1px solid ${THEME.border}` }}>
+                      <div>
+                        <div style={{ fontSize: 12.5, color: THEME.textLight }}>{k.tur}</div>
+                        {k.link && <a href={k.link} target="_blank" rel="noreferrer"
+                          style={{ fontSize: 11.5, color: THEME.cyan }}>{k.link.slice(0, 50)}</a>}
+                        <div style={{ fontSize: 11, color: THEME.textMuted }}>
+                          beyan: {JSON.stringify(k.beyan_edilen)} · durum: {k.durum}
+                        </div>
+                      </div>
+                      <div style={{ display: "flex", gap: 6 }}>
+                        <button disabled={calisiyor} onClick={() => kanitDogrula(k.id, "dogrulandi")}
+                          style={{ ...inputStyle, width: "auto", cursor: "pointer", fontSize: 12, color: "#2E7D32" }}>Doğrula</button>
+                        <button disabled={calisiyor} onClick={() => kanitDogrula(k.id, "reddedildi")}
+                          style={{ ...inputStyle, width: "auto", cursor: "pointer", fontSize: 12, color: "#C0392B" }}>Reddet</button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============ Model 2 Faz 18.10 — Aday Kazanım Öğrenmeleri ============
+// Kampanya kalite sıralaması, huni dönüşümleri, öğrenme defteri. Sistem yalnızca
+// önerir; bütçe/kampanya aksiyonları admin onayı olmadan uygulanmaz.
+function AdayKazanimOgrenmeleri({ authFetch }) {
+  const [kaynaklar, setKaynaklar] = useState([]);
+  const [defter, setDefter] = useState([]);
+  const [segmentler, setSegmentler] = useState(null);   // Faz 18.9
+  const [karar, setKarar] = useState(null);             // Faz 18.8
+  const [kalite, setKalite] = useState(null);           // Madde 11 — çok düzeyli kalite
+  const [duzey, setDuzey] = useState("kaynak");
+  const [outbox, setOutbox] = useState(null);           // Madde 13 — CAPI kuyruk durumu
+  const [maliyet, setMaliyet] = useState(null);         // Madde 14 — CPL / sözleşme maliyeti
+  const [saklama, setSaklama] = useState(null);         // Madde 6 — saklama süresi
+  const [harcamaForm, setHarcamaForm] = useState({ kampanya: "", harcama: "", donemBaslangic: "" });
+  const [disaAktarim, setDisaAktarim] = useState(null);
+  const [mesaj, setMesaj] = useState("");
+  const [defterFormAcik, setDefterFormAcik] = useState(false);
+  const [defterForm, setDefterForm] = useState({ hipotez: "", hedefKitle: "", mesajAcisi: "", kreatifTuru: "", guvenSeviyesi: "erken_sinyal", ogrenilenSonuc: "", sonrakiDeneyOnerisi: "" });
+  const [calisiyor, setCalisiyor] = useState(false);
+
+  const yukle = async () => {
+    try {
+      const r1 = await authFetch("/api/admin/aday-kaynak-analizi");
+      const d1 = await r1.json();
+      setKaynaklar((d1.kaynaklar || []).sort((a, b) => b.kaynak_kalite_puani - a.kaynak_kalite_puani));
+      const r2 = await authFetch("/api/admin/ogrenme-defteri");
+      const d2 = await r2.json();
+      setDefter(d2.kayitlar || []);
+      const r3 = await authFetch("/api/admin/yeniden-hedefleme-segmentleri");
+      setSegmentler(await r3.json());
+      const r4 = await authFetch("/api/admin/deney-karar-destegi");
+      setKarar(await r4.json());
+      const r5 = await authFetch(`/api/admin/kalite-analizi?duzey=${duzey}`);
+      setKalite(await r5.json());
+      const r6 = await authFetch("/api/admin/capi-outbox-durum");
+      setOutbox(await r6.json());
+      const r7 = await authFetch("/api/admin/maliyet-analizi");
+      setMaliyet(await r7.json());
+      const r8 = await authFetch("/api/admin/saklama-durumu");
+      setSaklama(await r8.json());
+    } catch { setMesaj("Sunucuya ulaşılamadı."); }
+  };
+  useEffect(() => { yukle(); }, [duzey]);
+
+  const kutu = { background: THEME.cardBg, border: `1px solid ${THEME.border}`, borderRadius: 8, padding: 16, marginBottom: 14 };
+  const inputStyle = { background: THEME.bg, color: THEME.textLight, border: `1px solid ${THEME.border}`, borderRadius: 4, padding: "8px 11px", fontSize: 13, fontFamily: "inherit", width: "100%", boxSizing: "border-box" };
+
+  const defterKaydet = async () => {
+    if (!defterForm.hipotez.trim()) { setMesaj("Hipotez boş olamaz."); return; }
+    if (calisiyor) return; setCalisiyor(true); setMesaj("");
+    try {
+      const r = await authFetch("/api/admin/ogrenme-defteri", { method: "POST", body: JSON.stringify(defterForm) });
+      const d = await r.json();
+      if (d.ok) { setMesaj("Öğrenme defterine kaydedildi."); setDefterFormAcik(false); yukle(); }
+      else setMesaj(d.error || "Kaydedilemedi.");
+    } catch { setMesaj("Sunucuya ulaşılamadı."); }
+    finally { setCalisiyor(false); }
+  };
+
+  const renkleKaliteRengi = (p) => p >= 60 ? "#2E7D32" : p >= 30 ? "#C9A227" : "#C0392B";
+
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+        <h2 style={{ color: THEME.textLight, fontFamily: FONT, fontSize: 20, margin: 0 }}>Aday Kazanım Öğrenmeleri</h2>
+        <button onClick={yukle} style={{ ...inputStyle, width: "auto", cursor: "pointer" }}>Yenile</button>
+      </div>
+      <div style={{ fontSize: 12, color: THEME.textMuted, marginBottom: 14 }}>
+        Ana ölçüt ucuz lead sayısı değil, nitelikli ve sözleşmeli yazar kazanma maliyetidir. Aşağıdaki sıralama huninin sonuna göredir.
+      </div>
+      {mesaj && <div style={{ ...kutu, color: THEME.cyan, fontSize: 13 }}>{mesaj}</div>}
+
+      <div style={kutu}>
+        <div style={{ color: THEME.textLight, fontWeight: 700, fontSize: 14, marginBottom: 10 }}>Kampanya / Kaynak Kalite Sıralaması</div>
+        <table style={{ width: "100%", fontSize: 12, color: THEME.textLight, borderCollapse: "collapse" }}>
+          <thead><tr style={{ color: THEME.textMuted, textAlign: "left" }}>
+            <th style={{ padding: 6 }}>Kaynak</th><th>Kayıt</th><th>Eser yükleyen</th><th>Rapor gören</th><th>Görüşmeye katılan</th><th>Sözleşme</th><th>Kalite Puanı</th>
+          </tr></thead>
+          <tbody>
+            {kaynaklar.map((k, i) => (
+              <tr key={i} style={{ borderTop: `1px solid ${THEME.border}` }}>
+                <td style={{ padding: 6, fontWeight: 600 }}>{k.kaynak}</td>
+                <td>{k.kayit}</td><td>{k.eser_yukleyen}</td><td>{k.rapor_goruntuleyen}</td>
+                <td>{k.gorusmeye_katilan}</td><td>{k.sozlesme_yapan}</td>
+                <td style={{ color: renkleKaliteRengi(k.kaynak_kalite_puani), fontWeight: 700 }}>{k.kaynak_kalite_puani}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <div style={{ marginTop: 10, fontSize: 11, color: THEME.textMuted }}>
+          Bütçe artırma, kampanya durdurma veya kreatif değiştirme kararlarını Reklam Merkezi ekranından, senin onayınla uygula — bu tablo yalnızca bilgi amaçlıdır.
+        </div>
+      </div>
+
+      {/* Madde 11 — Çok düzeyli kalite analizi */}
+      {kalite && (
+        <div style={kutu}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+            <div style={{ color: THEME.textLight, fontWeight: 700, fontSize: 14 }}>Kalite Analizi</div>
+            <div style={{ display: "flex", gap: 6 }}>
+              {[["kaynak","Kaynak"],["kampanya","Kampanya"],["reklam_seti","Reklam Seti"],["kreatif","Kreatif"],["mesaj_acisi","Mesaj Açısı"]].map(([k,ad]) => (
+                <button key={k} onClick={() => setDuzey(k)}
+                  style={{ ...inputStyle, width: "auto", cursor: "pointer", fontSize: 12,
+                    background: duzey === k ? THEME.cyan : THEME.bg,
+                    color: duzey === k ? THEME.onAccent : THEME.textLight }}>{ad}</button>
+              ))}
+            </div>
+          </div>
+          <div style={{ fontSize: 11.5, color: THEME.textMuted, marginBottom: 8 }}>
+            Sıralama sözleşme önceliklidir. Sözleşme verisi olmayan gruplarda görüşme/rapor/eser sinyallerine geri dönülür — form sayısına göre "en iyi" seçilmez.
+          </div>
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", fontSize: 11.5, color: THEME.textLight, borderCollapse: "collapse" }}>
+              <thead><tr style={{ color: THEME.textMuted, textAlign: "left" }}>
+                <th style={{ padding: 5 }}>Grup</th><th>Kayıt</th><th>Doğr.</th><th>Değ.</th><th>Eser</th>
+                <th>Rapor</th><th>Akad.</th><th>Görüşme</th><th>Katıldı</th><th>Sözl.</th><th>Nitel.sz</th><th>Puan</th>
+              </tr></thead>
+              <tbody>
+                {(kalite.gruplar || []).map((g, i) => (
+                  <tr key={i} style={{ borderTop: `1px solid ${THEME.border}` }}>
+                    <td style={{ padding: 5, fontWeight: 600 }}>{g.grup}</td>
+                    <td>{g.kayit}</td><td>{g.dogrulanan}</td><td>{g.degerlendirme_tamamlayan}</td>
+                    <td>{g.eser_yukleyen}</td><td>{g.rapor_goruntuleyen}</td><td>{g.akademiye_baslayan}</td>
+                    <td>{g.gorusme_talep_eden}</td><td>{g.gorusmeye_katilan}</td><td>{g.sozlesme}</td>
+                    <td style={{ color: g.niteliksiz_orani > 20 ? "#C0392B" : THEME.textMuted }}>%{g.niteliksiz_orani}</td>
+                    <td style={{ fontWeight: 700, color: g.kalite_puani >= 60 ? "#2E7D32" : g.kalite_puani >= 30 ? "#C9A227" : "#C0392B" }}>
+                      {g.kalite_puani}
+                      <span style={{ fontSize: 9, color: THEME.textMuted, marginLeft: 3 }}>
+                        {g.puan_temeli === "sozlesme_oncelikli" ? "S" : "~"}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div style={{ fontSize: 10.5, color: THEME.textMuted, marginTop: 6 }}>
+            S = sözleşme verisiyle hesaplandı · ~ = yeterli sözleşme yok, geri dönüş sinyalleriyle tahmin
+          </div>
+        </div>
+      )}
+
+      {/* Madde 14 — Maliyet analizi */}
+      {maliyet && (
+        <div style={kutu}>
+          <div style={{ color: THEME.textLight, fontWeight: 700, fontSize: 14, marginBottom: 4 }}>Maliyet Analizi</div>
+          <div style={{ fontSize: 11.5, color: THEME.textMuted, marginBottom: 10 }}>{maliyet.not}</div>
+          <table style={{ width: "100%", fontSize: 11.5, color: THEME.textLight, borderCollapse: "collapse" }}>
+            <thead><tr style={{ color: THEME.textMuted, textAlign: "left" }}>
+              <th style={{ padding: 5 }}>Kampanya</th><th>Harcama</th><th>Lead</th><th>CPL</th>
+              <th>Nitelikli</th><th>Nit. maliyet</th><th>Sözleşme</th><th>Sözl. maliyet</th>
+            </tr></thead>
+            <tbody>
+              {(maliyet.kampanyalar || []).map((k, i) => (
+                <tr key={i} style={{ borderTop: `1px solid ${THEME.border}` }}>
+                  <td style={{ padding: 5, fontWeight: 600 }}>{k.kampanya}</td>
+                  <td>{k.harcama != null ? `${k.harcama} ₺` : "—"}</td>
+                  <td>{k.lead}</td><td>{k.cpl != null ? `${k.cpl} ₺` : "—"}</td>
+                  <td>{k.nitelikli}</td><td>{k.nitelikli_aday_maliyeti != null ? `${k.nitelikli_aday_maliyeti} ₺` : "—"}</td>
+                  <td>{k.sozlesme}</td>
+                  <td style={{ fontWeight: 700, color: k.sozlesme_maliyeti != null ? "#2E7D32" : THEME.textMuted }}>
+                    {k.sozlesme_maliyeti != null ? `${k.sozlesme_maliyeti} ₺` : "—"}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <div style={{ marginTop: 12, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+            <input value={harcamaForm.kampanya} onChange={e => setHarcamaForm({ ...harcamaForm, kampanya: e.target.value })}
+              placeholder="Kampanya adı" style={{ ...inputStyle, width: 200 }} />
+            <input value={harcamaForm.harcama} onChange={e => setHarcamaForm({ ...harcamaForm, harcama: e.target.value })}
+              placeholder="Harcama (₺)" inputMode="decimal" style={{ ...inputStyle, width: 130 }} />
+            <input type="date" value={harcamaForm.donemBaslangic}
+              onChange={e => setHarcamaForm({ ...harcamaForm, donemBaslangic: e.target.value })} style={{ ...inputStyle, width: 160 }} />
+            <button onClick={async () => {
+              if (!harcamaForm.kampanya || !harcamaForm.harcama) { setMesaj("Kampanya ve harcama zorunlu."); return; }
+              try {
+                const r = await authFetch("/api/admin/kampanya-harcama", { method: "POST",
+                  body: JSON.stringify({ ...harcamaForm, harcama: Number(harcamaForm.harcama) }) });
+                const v = await r.json();
+                setMesaj(v.ok ? "Harcama kaydedildi." : (v.error || "Kaydedilemedi."));
+                if (v.ok) { setHarcamaForm({ kampanya: "", harcama: "", donemBaslangic: "" }); yukle(); }
+              } catch { setMesaj("Sunucuya ulaşılamadı."); }
+            }} style={{ ...inputStyle, width: "auto", cursor: "pointer" }}>Harcama Kaydet</button>
+          </div>
+        </div>
+      )}
+
+      {/* Madde 6 — Saklama süresi durumu */}
+      {saklama && (
+        <div style={kutu}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div>
+              <div style={{ color: THEME.textLight, fontWeight: 700, fontSize: 14 }}>Eser Metni Saklama Durumu</div>
+              <div style={{ fontSize: 11.5, color: THEME.textMuted, marginTop: 3 }}>
+                Saklama süresi: {saklama.saklama_gun} gün · Metni duran: {saklama.metni_duran} ·
+                Silinen: {saklama.metni_silinen} ·
+                <span style={{ color: saklama.suresi_dolmus_bekleyen > 0 ? "#C0392B" : THEME.textMuted }}>
+                  {" "}Süresi dolmuş bekleyen: {saklama.suresi_dolmus_bekleyen}
+                </span>
+              </div>
+            </div>
+            <button onClick={async () => {
+              setMesaj("Temizlik çalışıyor...");
+              try {
+                const r = await authFetch("/api/admin/saklama-temizligi", { method: "POST" });
+                const v = await r.json();
+                setMesaj(`Temizlik tamam: ${v.sonuc?.silinen ?? 0} eser metni silindi (rapor ve kararlar korundu).`);
+                yukle();
+              } catch { setMesaj("Sunucuya ulaşılamadı."); }
+            }} style={{ ...inputStyle, width: "auto", cursor: "pointer" }}>Temizliği Çalıştır</button>
+          </div>
+        </div>
+      )}
+
+      {/* Madde 13 — CAPI kuyruk durumu */}
+      {outbox && (
+        <div style={kutu}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div>
+              <div style={{ color: THEME.textLight, fontWeight: 700, fontSize: 14 }}>Meta CAPI Gönderim Kuyruğu</div>
+              <div style={{ fontSize: 11.5, color: THEME.textMuted, marginTop: 3 }}>
+                {(outbox.ozet || []).map(o => `${o.durum}: ${o.adet}`).join(" · ") || "kayıt yok"}
+              </div>
+            </div>
+            <button onClick={async () => {
+              setMesaj("Kuyruk işleniyor...");
+              try {
+                const r = await authFetch("/api/admin/capi-outbox-isle", { method: "POST" });
+                const s = await r.json();
+                setMesaj(s.ok ? `İşlendi: ${JSON.stringify(s.sonuc)}` : (s.error || "Hata"));
+                yukle();
+              } catch { setMesaj("Sunucuya ulaşılamadı."); }
+            }} style={{ ...inputStyle, width: "auto", cursor: "pointer" }}>Kuyruğu İşle</button>
+          </div>
+        </div>
+      )}
+
+      {/* Faz 18.8 — Deney karar desteği */}
+      {karar && (
+        <div style={kutu}>
+          <div style={{ color: THEME.textLight, fontWeight: 700, fontSize: 14, marginBottom: 4 }}>Deney Karar Desteği</div>
+          <div style={{ fontSize: 11.5, color: THEME.textMuted, marginBottom: 10 }}>{karar.not}</div>
+          {karar.onde && (
+            <div style={{ padding: "8px 12px", background: "rgba(46,125,50,.12)", border: "1px solid rgba(46,125,50,.4)", borderRadius: 4, marginBottom: 10, fontSize: 12.5, color: THEME.textLight }}>
+              Şu an önde: <b>{karar.onde.kampanya}</b> · nitelikli oran %{karar.onde.nitelikli_oran} · güven: {karar.onde.guven}
+            </div>
+          )}
+          {(karar.kampanyalar || []).map((k, i) => (
+            <div key={i} style={{ padding: "8px 6px", borderTop: `1px solid ${THEME.border}` }}>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, color: THEME.textLight }}>
+                <span style={{ fontWeight: 600 }}>{k.kampanya}</span>
+                <span style={{ color: k.guven === "yetersiz_veri" ? THEME.textMuted : k.guven === "yuksek" ? "#2E7D32" : "#C9A227" }}>
+                  {k.kayit} kayıt · %{k.nitelikli_oran} nitelikli · {k.sozlesme} sözleşme
+                </span>
+              </div>
+              <div style={{ fontSize: 11.5, color: THEME.textMuted, marginTop: 3 }}>{k.yorum}</div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Faz 18.9 — Yeniden hedefleme segmentleri */}
+      {segmentler && (
+        <div style={kutu}>
+          <div style={{ color: THEME.textLight, fontWeight: 700, fontSize: 14, marginBottom: 4 }}>Yeniden Hedefleme Segmentleri</div>
+          <div style={{ fontSize: 11.5, color: THEME.textMuted, marginBottom: 10 }}>
+            Segmentler Meta'ya otomatik gönderilmez. Dışa aktardığında hash'lenmiş liste alırsın, özel kitleye elle yüklersin — bütçe etkisi olan her adım senin onayınla.
+          </div>
+          {Object.entries(segmentler.ozet || {}).map(([k, v]) => (
+            <div key={k} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 6px", borderTop: `1px solid ${THEME.border}` }}>
+              <span style={{ fontSize: 12.5, color: THEME.textLight }}>{v.ad}</span>
+              <span style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <b style={{ color: "#C9A227", fontSize: 13 }}>{v.sayi}</b>
+                <button disabled={!v.sayi} onClick={async () => {
+                  setMesaj("");
+                  try {
+                    const r = await authFetch(`/api/admin/segment-disa-aktar/${k}`);
+                    const d = await r.json();
+                    if (d.satirlar) { setDisaAktarim(d); setMesaj(`${d.ad}: ${d.adet} kayıt hazırlandı.`); }
+                    else setMesaj(d.error || "Dışa aktarılamadı.");
+                  } catch { setMesaj("Sunucuya ulaşılamadı."); }
+                }} style={{ ...inputStyle, width: "auto", cursor: v.sayi ? "pointer" : "not-allowed", fontSize: 12, opacity: v.sayi ? 1 : .4 }}>Dışa aktar</button>
+              </span>
+            </div>
+          ))}
+          {disaAktarim && (
+            <div style={{ marginTop: 12 }}>
+              <div style={{ fontSize: 12, color: THEME.textLight, marginBottom: 6 }}>
+                {disaAktarim.ad} — {disaAktarim.adet} kayıt (SHA-256 hash, ham numara içermez)
+              </div>
+              <textarea readOnly rows={6} style={{ ...inputStyle, resize: "vertical", fontFamily: "monospace", fontSize: 11 }}
+                value={["ph,em", ...disaAktarim.satirlar.map(s => `${s.ph || ""},${s.em || ""}`)].join("\n")} />
+              <div style={{ fontSize: 11, color: THEME.textMuted, marginTop: 4 }}>Bu içeriği kopyalayıp .csv olarak kaydedin, Meta Etkinlik Yöneticisi'nde özel kitle olarak yükleyin.</div>
+            </div>
+          )}
+        </div>
+      )}
+
+      <div style={kutu}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+          <div style={{ color: THEME.textLight, fontWeight: 700, fontSize: 14 }}>Öğrenme Defteri</div>
+          <button onClick={() => setDefterFormAcik(!defterFormAcik)} style={{ ...inputStyle, width: "auto", cursor: "pointer" }}>
+            {defterFormAcik ? "Kapat" : "Yeni Deney Kaydı"}
+          </button>
+        </div>
+        {defterFormAcik && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 14 }}>
+            <textarea value={defterForm.hipotez} onChange={e => setDefterForm({ ...defterForm, hipotez: e.target.value })} rows={2} placeholder="Test edilen hipotez (zorunlu)" style={{ ...inputStyle, resize: "vertical" }} />
+            <input value={defterForm.hedefKitle} onChange={e => setDefterForm({ ...defterForm, hedefKitle: e.target.value })} placeholder="Hedef kitle" style={inputStyle} />
+            <input value={defterForm.mesajAcisi} onChange={e => setDefterForm({ ...defterForm, mesajAcisi: e.target.value })} placeholder="Reklam mesajı / açısı" style={inputStyle} />
+            <input value={defterForm.kreatifTuru} onChange={e => setDefterForm({ ...defterForm, kreatifTuru: e.target.value })} placeholder="Kreatif türü" style={inputStyle} />
+            <select value={defterForm.guvenSeviyesi} onChange={e => setDefterForm({ ...defterForm, guvenSeviyesi: e.target.value })} style={inputStyle}>
+              <option value="erken_sinyal">Erken sinyal (düşük veri)</option>
+              <option value="orta">Orta güven</option>
+              <option value="yuksek">Yüksek güven</option>
+            </select>
+            <textarea value={defterForm.ogrenilenSonuc} onChange={e => setDefterForm({ ...defterForm, ogrenilenSonuc: e.target.value })} rows={2} placeholder="Öğrenilen sonuç" style={{ ...inputStyle, resize: "vertical" }} />
+            <textarea value={defterForm.sonrakiDeneyOnerisi} onChange={e => setDefterForm({ ...defterForm, sonrakiDeneyOnerisi: e.target.value })} rows={2} placeholder="Sonraki deney önerisi" style={{ ...inputStyle, resize: "vertical" }} />
+            <button onClick={defterKaydet} disabled={calisiyor} style={{ background: THEME.cyan, color: THEME.onAccent, border: "none", borderRadius: 4, padding: "9px 18px", fontSize: 13, fontWeight: 700, cursor: "pointer", width: "fit-content" }}>Kaydet</button>
+          </div>
+        )}
+        {!defter.length && <div style={{ color: THEME.textMuted, fontSize: 13 }}>Henüz kayıt yok — geçmiş öğrenmeler burada birikir, silinmez.</div>}
+        {defter.map(d => (
+          <div key={d.id} style={{ padding: "10px 8px", borderBottom: `1px solid ${THEME.border}` }}>
+            <div style={{ color: THEME.textLight, fontSize: 13, fontWeight: 600 }}>{d.hipotez}</div>
+            <div style={{ color: THEME.textMuted, fontSize: 11.5, marginTop: 3 }}>
+              {d.hedef_kitle && `${d.hedef_kitle} · `}{d.mesaj_acisi} {d.guven_seviyesi && `· güven: ${d.guven_seviyesi}`}
+            </div>
+            {d.ogrenilen_sonuc && <div style={{ color: "rgba(201,162,75,.8)", fontSize: 12, marginTop: 4 }}>→ {d.ogrenilen_sonuc}</div>}
+          </div>
+        ))}
       </div>
     </div>
   );
@@ -6513,6 +8074,17 @@ export default function AdminPanel() {
     ["oyun", "Görev & Ödül"],
     ["demoHesap", "Demo Hesaplar"],
     ["yazarAdaylari", "Yazar Adayları"],
+    ["adayGorusmeleri", "Aday Görüşmeleri"],
+    ["adayTakip", "Aday Takip Önerileri"],
+    ["adayKazanimOgrenme", "Aday Kazanım Öğrenmeleri"],
+    ["danismanKokpit", "Danışman Kokpiti"],
+    ["vaatKatalogu", "Vaat Kataloğu"],
+    ["akademiUzman", "Akademi Uzman Kapısı"],
+    ["reklamLtv", "Reklam LTV Zinciri"],
+    ["gorusmePlani", "Görüşme Oyun Planı"],
+    ["teklifMerkezi", "Teklif Merkezi"],
+    ["fulfillment", "Vaat Teslimat Merkezi"],
+    ["labKuyrugu", "Laboratuvar Kuyruğu"],
     ["versiyonTest", "Versiyon Testi"],
     ["reklamMerkezi", "Reklam Merkezi"],
     ["yazarKampanya", "Yazar Kampanyaları"],
@@ -6649,6 +8221,17 @@ export default function AdminPanel() {
         {view === "oyun" && <OyunView authFetch={authFetch} authors={authors} />}
         {view === "demoHesap" && <DemoHesaplar authFetch={authFetch} />}
         {view === "yazarAdaylari" && <YazarAdaylari authFetch={authFetch} />}
+        {view === "adayGorusmeleri" && <AdayGorusmeleri authFetch={authFetch} />}
+        {view === "adayTakip" && <AdayTakipOnerileri authFetch={authFetch} />}
+        {view === "adayKazanimOgrenme" && <AdayKazanimOgrenmeleri authFetch={authFetch} />}
+        {view === "danismanKokpit" && <DanismanKokpiti authFetch={authFetch} />}
+        {view === "vaatKatalogu" && <VaatKatalogu authFetch={authFetch} />}
+        {view === "akademiUzman" && <AkademiUzmanKapisi authFetch={authFetch} />}
+        {view === "reklamLtv" && <ReklamLtv authFetch={authFetch} />}
+        {view === "gorusmePlani" && <GorusmeOyunPlani authFetch={authFetch} />}
+        {view === "teklifMerkezi" && <TeklifMerkezi authFetch={authFetch} />}
+        {view === "fulfillment" && <VaatTeslimatMerkezi authFetch={authFetch} />}
+        {view === "labKuyrugu" && <LaboratuvarKuyrugu authFetch={authFetch} />}
         {view === "reklamMerkezi" && <ReklamMerkezi authFetch={authFetch} />}
         {view === "yazarKampanya" && <YazarKampanyalari authFetch={authFetch} />}
         {view === "reklamTeklif" && <ReklamBasvurulari authFetch={authFetch} />}
