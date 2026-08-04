@@ -1569,6 +1569,135 @@ function AdayTakipOnerileri({ authFetch }) {
   );
 }
 
+// ============ SENKRON UYARILARI — ani stok düşüşü karantinası ============
+// Ürün pazaryerinde yayından kalkarsa API stok 0 döndürür ve sistem bunu
+// "hepsi satıldı" sanır. Bu ekran o kayıtları yazmadan önce insana sorar.
+function SenkronUyarilari({ authFetch }) {
+  const [veri, setVeri] = useState(null);
+  const [gecmis, setGecmis] = useState([]);
+  const [mesaj, setMesaj] = useState("");
+  const [notlar, setNotlar] = useState({});
+  const [calisiyor, setCalisiyor] = useState(false);
+  const [gecmisAcik, setGecmisAcik] = useState(false);
+
+  const kutu = { background: THEME.cardBg, border: `1px solid ${THEME.border}`, borderRadius: 8, padding: 16, marginBottom: 14 };
+  const inputStyle = { background: THEME.bg, color: THEME.textLight, border: `1px solid ${THEME.border}`, borderRadius: 4, padding: "8px 11px", fontSize: 13, fontFamily: "inherit", width: "100%", boxSizing: "border-box" };
+
+  const yukle = async () => {
+    try {
+      const r = await authFetch("/api/admin/senkron-uyarilari");
+      setVeri(await r.json());
+      const g = await authFetch("/api/admin/senkron-uyari-gecmisi");
+      setGecmis((await g.json()).gecmis || []);
+    } catch { setMesaj("Sunucuya ulaşılamadı."); }
+  };
+  useEffect(() => { yukle(); }, []);
+
+  const karar = async (id, tip) => {
+    if (calisiyor) return; setCalisiyor(true); setMesaj("");
+    try {
+      const r = await authFetch(`/api/admin/senkron-uyarilari/${id}/${tip}`, {
+        method: "POST", body: JSON.stringify({ not: notlar[id] || "" }) });
+      const v = await r.json();
+      setMesaj(v.ok
+        ? (tip === "onayla"
+            ? `Onaylandı — stok ${v.yazilanStok} yazıldı, ${v.hesaplananSatis} satış hesaplandı.`
+            : `Reddedildi — stok ${v.korunanStok} olarak korundu.`)
+        : (v.error || "İşlem yapılamadı."));
+      if (v.ok) yukle();
+    } catch { setMesaj("Sunucuya ulaşılamadı."); }
+    finally { setCalisiyor(false); }
+  };
+
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+        <h2 style={{ color: THEME.textLight, fontFamily: FONT, fontSize: 20, margin: 0 }}>Senkron Uyarıları</h2>
+        <button onClick={yukle} style={{ ...inputStyle, width: "auto", cursor: "pointer" }}>Yenile</button>
+      </div>
+      <div style={{ fontSize: 12, color: THEME.textMuted, marginBottom: 14 }}>
+        Bir pazaryerinde stok aniden düşerse sistem <b>yazmayı bekletir</b>. Bu genellikle ürünün
+        yayından kalktığı veya listeden düştüğü anlamına gelir — satış değil. Onaylayana kadar
+        mevcut stok korunur.
+      </div>
+      {mesaj && <div style={{ ...kutu, color: THEME.cyan, fontSize: 13 }}>{mesaj}</div>}
+
+      <div style={kutu}>
+        <div style={{ color: THEME.textLight, fontWeight: 700, fontSize: 13, marginBottom: 8 }}>
+          Onay bekleyen ({veri?.toplam ?? 0})
+        </div>
+        {!veri?.uyarilar?.length && (
+          <div style={{ color: THEME.textMuted, fontSize: 13 }}>Bekleyen uyarı yok — senkron temiz.</div>
+        )}
+        {(veri?.uyarilar || []).map(u => (
+          <div key={u.id} style={{ padding: "11px 6px", borderTop: `1px solid ${THEME.border}` }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+              <div>
+                <div style={{ color: THEME.textLight, fontSize: 13.5, fontWeight: 600 }}>{u.title}</div>
+                <div style={{ fontSize: 12, color: THEME.textMuted, marginTop: 2 }}>
+                  {u.platform} · stok <b style={{ color: THEME.textLight }}>{u.onceki_stok}</b>
+                  {" → "}<b style={{ color: "#C0392B" }}>{u.gelen_stok}</b>
+                  {u.baslangic_stok != null && ` · başlangıç ${u.baslangic_stok}`}
+                  {u.isbn && ` · ISBN ${u.isbn}`}
+                </div>
+                <div style={{ fontSize: 11.5, color: "#C0392B", marginTop: 3 }}>
+                  {u.sebep === "sifira_dustu"
+                    ? "Stok sıfıra düştü — ürün yayından kalkmış olabilir"
+                    : `Ani düşüş (%${u.dusus_orani}) — olağandışı`}
+                </div>
+                {u.baslangic_stok != null && (
+                  <div style={{ fontSize: 11.5, color: THEME.textMuted, marginTop: 3 }}>
+                    Onaylarsanız <b>{Math.max(0, u.baslangic_stok - u.gelen_stok)}</b> satış hesaplanacak.
+                  </div>
+                )}
+              </div>
+            </div>
+            <input value={notlar[u.id] || ""} onChange={e => setNotlar({ ...notlar, [u.id]: e.target.value })}
+              placeholder="Not (ör. pazaryerinde kontrol edildi, ürün pasif)" style={{ ...inputStyle, marginTop: 8, marginBottom: 6 }} />
+            <div style={{ display: "flex", gap: 8 }}>
+              <button disabled={calisiyor} onClick={() => karar(u.id, "reddet")}
+                style={{ background: "#2E7D32", color: "#fff", border: "none", borderRadius: 4,
+                         padding: "8px 16px", fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}>
+                Reddet — stoğu koru
+              </button>
+              <button disabled={calisiyor} onClick={() => karar(u.id, "onayla")}
+                style={{ background: "transparent", color: "#C0392B", border: "1px solid #C0392B", borderRadius: 4,
+                         padding: "8px 16px", fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}>
+                Onayla — gerçek satış
+              </button>
+            </div>
+          </div>
+        ))}
+        {veri?.uyarilar?.length > 0 && (
+          <div style={{ fontSize: 11.5, color: THEME.textMuted, marginTop: 10, paddingTop: 8, borderTop: `1px solid ${THEME.border}` }}>
+            Emin değilseniz <b>Reddet</b> seçin — stok korunur, bir sonraki senkronda tekrar sorulur.
+            Onaylamak hayali satış ve telif üretebilir.
+          </div>
+        )}
+      </div>
+
+      <div style={kutu}>
+        <div onClick={() => setGecmisAcik(!gecmisAcik)}
+          style={{ display: "flex", justifyContent: "space-between", cursor: "pointer" }}>
+          <span style={{ color: THEME.textLight, fontWeight: 700, fontSize: 13 }}>Karar geçmişi ({gecmis.length})</span>
+          <span style={{ color: THEME.textMuted }}>{gecmisAcik ? "▾" : "▸"}</span>
+        </div>
+        {gecmisAcik && (gecmis.length ? gecmis.map(g => (
+          <div key={g.id} style={{ padding: "7px 4px", borderTop: `1px solid ${THEME.border}`, fontSize: 12 }}>
+            <span style={{ color: THEME.textLight }}>{g.title}</span>
+            <span style={{ color: THEME.textMuted }}> · {g.platform} · {g.onceki_stok} → {g.gelen_stok} · </span>
+            <span style={{ color: g.durum === "onaylandi" ? "#C9A227" : "#2E7D32", fontWeight: 700 }}>
+              {g.durum === "onaylandi" ? "onaylandı" : "reddedildi"}
+            </span>
+            <span style={{ color: THEME.textMuted }}> · {g.karar_veren}</span>
+            {g.karar_notu && <div style={{ color: THEME.textMuted, fontSize: 11.5 }}>{g.karar_notu}</div>}
+          </div>
+        )) : <div style={{ color: THEME.textMuted, fontSize: 12.5, marginTop: 6 }}>Henüz karar verilmemiş.</div>)}
+      </div>
+    </div>
+  );
+}
+
 // ============ Ortak: aday seçici + stil yardımcıları ============
 const P_KUTU = { borderRadius: 8, padding: 16, marginBottom: 14 };
 function pKutu() { return { ...P_KUTU, background: THEME.cardBg, border: `1px solid ${THEME.border}` }; }
@@ -8085,6 +8214,7 @@ export default function AdminPanel() {
     ["teklifMerkezi", "Teklif Merkezi"],
     ["fulfillment", "Vaat Teslimat Merkezi"],
     ["labKuyrugu", "Laboratuvar Kuyruğu"],
+    ["senkronUyarilari", "Senkron Uyarıları"],
     ["versiyonTest", "Versiyon Testi"],
     ["reklamMerkezi", "Reklam Merkezi"],
     ["yazarKampanya", "Yazar Kampanyaları"],
@@ -8232,6 +8362,7 @@ export default function AdminPanel() {
         {view === "teklifMerkezi" && <TeklifMerkezi authFetch={authFetch} />}
         {view === "fulfillment" && <VaatTeslimatMerkezi authFetch={authFetch} />}
         {view === "labKuyrugu" && <LaboratuvarKuyrugu authFetch={authFetch} />}
+        {view === "senkronUyarilari" && <SenkronUyarilari authFetch={authFetch} />}
         {view === "reklamMerkezi" && <ReklamMerkezi authFetch={authFetch} />}
         {view === "yazarKampanya" && <YazarKampanyalari authFetch={authFetch} />}
         {view === "reklamTeklif" && <ReklamBasvurulari authFetch={authFetch} />}
