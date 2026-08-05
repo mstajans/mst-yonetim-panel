@@ -5366,6 +5366,61 @@ function TranslationRequestsView({ requests, loading, onUpdateStatus }) {
 
 
 // ============ Destek / Şikayet Talepleri (AI'dan gelen) ============
+// EKLENDİ (5 Ağu 2026, kullanıcı isteği: "sadece çözüldü işaretleyebiliyorum,
+// aynı zamanda cevap da yazabilmeliyim"): backend zaten yanıt alanını kabul
+// ediyordu (PATCH .../status → yanit), panelde hiç arayüzü yoktu.
+function DestekYanitKutusu({ talep, onKaydet }) {
+  const [acik, setAcik] = useState(false);
+  const [metin, setMetin] = useState(talep.yanit || "");
+  const [gonderiliyor, setGonderiliyor] = useState(false);
+
+  const kaydet = async (yeniStatus) => {
+    if (!metin.trim()) return;
+    setGonderiliyor(true);
+    await onKaydet(talep.id, yeniStatus, metin.trim());
+    setGonderiliyor(false);
+    setAcik(false);
+  };
+
+  if (!acik) {
+    return (
+      <div style={{ marginTop: 10 }}>
+        {talep.yanit && (
+          <div style={{ background: "rgba(93,214,163,.06)", border: `1px solid rgba(93,214,163,.25)`,
+                        borderRadius: 6, padding: "10px 12px", marginBottom: 8 }}>
+            <div style={{ fontSize: 10.5, color: THEME.success, marginBottom: 4, fontWeight: 600 }}>YANITINIZ</div>
+            <div style={{ fontSize: 12.5, color: THEME.textMuted, lineHeight: 1.55 }}>{talep.yanit}</div>
+          </div>
+        )}
+        <Btn small onClick={() => setAcik(true)}>{talep.yanit ? "Yanıtı düzenle" : "Yanıt yaz"}</Btn>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ marginTop: 10 }}>
+      <textarea
+        value={metin}
+        onChange={(e) => setMetin(e.target.value)}
+        placeholder="Yazara iletilecek yanıtı yazın…"
+        style={{ width: "100%", minHeight: 90, background: THEME.bg, color: THEME.textLight,
+                 border: `1px solid ${THEME.border}`, borderRadius: 6, padding: 10,
+                 fontSize: 13, fontFamily: FONT, lineHeight: 1.55, resize: "vertical" }} />
+      <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
+        <Btn small variant="success" disabled={!metin.trim() || gonderiliyor}
+          onClick={() => kaydet("cozuldu")}>
+          {gonderiliyor ? "Kaydediliyor…" : "Yanıtla ve çözüldü işaretle"}
+        </Btn>
+        <Btn small disabled={!metin.trim() || gonderiliyor}
+          onClick={() => kaydet(talep.status || "bekliyor")}>
+          Yalnızca kaydet
+        </Btn>
+        <Btn small variant="ghost" onClick={() => { setMetin(talep.yanit || ""); setAcik(false); }}>Vazgeç</Btn>
+      </div>
+    </div>
+  );
+}
+
 function DestekTalepleriView({ requests, loading, onUpdateStatus }) {
   const KAT = { sikayet: "Şikayet", destek: "Destek" };
   return (
@@ -5387,6 +5442,7 @@ function DestekTalepleriView({ requests, loading, onUpdateStatus }) {
             {r.konu && <div style={{ color: THEME.textLight, fontSize: 13, marginTop: 4, fontWeight: 600 }}>{r.konu}</div>}
             <div style={{ color: THEME.textMuted, fontSize: 12.5, marginTop: 4, lineHeight: 1.5 }}>{r.mesaj}</div>
             <div style={{ color: THEME.textFaint, fontSize: 10.5, marginTop: 6 }}>{r.created_at ? new Date(r.created_at).toLocaleDateString("tr-TR") : ""}</div>
+            <DestekYanitKutusu talep={r} onKaydet={onUpdateStatus} />
           </div>
           <div style={{ display: "flex", gap: 8, alignItems: "center", flexShrink: 0 }}>
             <Badge fg={r.status === "bekliyor" ? THEME.warn : THEME.success} bg={r.status === "bekliyor" ? THEME.warnBg : "rgba(93,214,163,.1)"}>{r.status === "bekliyor" ? "Bekliyor" : "Çözüldü"}</Badge>
@@ -8088,8 +8144,11 @@ export default function AdminPanel() {
       .catch(() => {})
       .finally(() => setLoadingDestek(false));
   };
-  const updateDestekStatus = (id, status) => {
-    authFetch(`/api/admin/destek-talepleri/${id}/status`, { method: "PATCH", body: JSON.stringify({ status }) })
+  // GÜNCELLEME (5 Ağu 2026): artık yanıt metni de gönderiliyor. Backend
+  // bu alanı zaten kabul ediyordu (COALESCE ile), panel hiç göndermiyordu.
+  const updateDestekStatus = (id, status, yanit) => {
+    const govde = yanit != null ? { status, yanit } : { status };
+    return authFetch(`/api/admin/destek-talepleri/${id}/status`, { method: "PATCH", body: JSON.stringify(govde) })
       .then((r) => r.json())
       .then(() => loadDestekTalepleri())
       .catch(() => {});
