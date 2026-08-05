@@ -8078,7 +8078,13 @@ export default function AdminPanel() {
     setLoadingDestek(true);
     authFetch("/api/admin/destek-talepleri")
       .then((r) => r.json())
-      .then((data) => setDestekTalepleri(data.talepler || []))
+      // GERÇEK HATA (5 Ağu 2026, kullanıcı raporu — "destek bildirimi
+      // geliyor ama Destek & Şikayet ekranında hiçbir şey görünmüyor"):
+      // backend bu ucu { requests: [...] } olarak döndürüyor, burada ise
+      // data.talepler okunuyordu. İsim uyuşmadığı için liste HER ZAMAN
+      // boş kalıyordu — "Henüz destek talebi yok" yazıyordu, oysa talep
+      // vardı. Her iki adı da kabul ediyoruz (ileride uç değişse de bozulmasın).
+      .then((data) => setDestekTalepleri(data.requests || data.talepler || []))
       .catch(() => {})
       .finally(() => setLoadingDestek(false));
   };
