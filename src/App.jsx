@@ -602,6 +602,21 @@ function Overview({ authors, onSyncAll, authFetch }) {
   const [idefixTest, setIdefixTest] = useState(null);   // { ok, text, detay }
   const [idefixBusy, setIdefixBusy] = useState(false);
 
+  // EKLENDİ (5 Ağu 2026, kullanıcı sorusu — "yapay zekası gerçek mi test
+  // mi, ne durumda"): daha önce bu bilgi yalnızca kodda görülebiliyordu.
+  const [aiDurum, setAiDurum] = useState(null);
+  const [aiBusy, setAiBusy] = useState(false);
+  const aiDurumYukle = async (baglantiDene) => {
+    if (aiBusy) return;
+    setAiBusy(true);
+    try {
+      const r = await authFetch(`/api/admin/ai-durum${baglantiDene ? "?baglantiDene=1" : ""}`);
+      setAiDurum(await r.json());
+    } catch { setAiDurum({ hata: true }); }
+    finally { setAiBusy(false); }
+  };
+  useEffect(() => { aiDurumYukle(false); }, []); // eslint-disable-line
+
   const [saglik, setSaglik] = useState(null);
   const [saglikBusy, setSaglikBusy] = useState(false);
 
@@ -706,8 +721,41 @@ function Overview({ authors, onSyncAll, authFetch }) {
     }
   };
 
+  const aiRenk = aiDurum?.gercekAIcalisiyorMu ? THEME.success : (aiDurum?.testModuAcikMi ? THEME.warn : THEME.danger);
+  const aiMetin = !aiDurum ? "Kontrol ediliyor…"
+    : aiDurum.hata ? "Kontrol edilemedi"
+    : aiDurum.testModuAcikMi ? "TEST MODU — sahte cevap dönüyor, gerçek değil"
+    : !aiDurum.anahtarTanimliMi ? "API anahtarı tanımlı değil — sistem çalışmıyor"
+    : "GERÇEK — Anthropic API'sine bağlı";
+
   return (
     <div>
+      {/* AI DURUMU (5 Ağu 2026) — "yapay zekası gerçek mi test mi" sorusuna
+          her zaman görülebilir bir cevap. */}
+      <div style={{ background: THEME.panelBg, border: `1px solid ${THEME.border}`, borderRadius: 8,
+                    padding: "14px 18px", marginBottom: 16, display: "flex", alignItems: "center",
+                    justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div style={{ width: 9, height: 9, borderRadius: "50%", background: aiRenk, flexShrink: 0 }} />
+          <div>
+            <div style={{ fontSize: 12.5, fontWeight: 700, color: THEME.textLight }}>Eser İnceleme AI — {aiMetin}</div>
+            <div style={{ fontSize: 11, color: THEME.textMuted, marginTop: 2 }}>
+              Model: {aiDurum?.model || "claude-sonnet-4-6"} · Eser risk taraması + editöryal ön analiz
+              {aiDurum?.baglantiTesti && (
+                aiDurum.baglantiTesti.basarili
+                  ? ` · Bağlantı testi: ${aiDurum.baglantiTesti.gecikmeMs}ms'de yanıt verdi`
+                  : ` · Bağlantı testi BAŞARISIZ: ${aiDurum.baglantiTesti.hata}`
+              )}
+            </div>
+          </div>
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <Btn small variant="ghost" disabled={aiBusy} onClick={() => aiDurumYukle(false)}>Yenile</Btn>
+          <Btn small disabled={aiBusy || !aiDurum?.anahtarTanimliMi || aiDurum?.testModuAcikMi}
+            onClick={() => aiDurumYukle(true)}>Gerçek Bağlantıyı Dene</Btn>
+        </div>
+      </div>
+
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12, marginBottom: 18 }}>
         <h2 style={{ color: THEME.textLight, fontFamily: FONT, fontSize: 20, margin: 0 }}>Genel Bakış</h2>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
@@ -1075,6 +1123,9 @@ const ADAY_KATEGORI = {
   siddet_intihar_detayi: "Şiddet / intihar detayı",
   telif_intihal_suphesi: "Telif / intihal şüphesi",
   mustehcenlik_cocuk_riski: "Müstehcenlik / çocuk riski",
+  // EKLENDİ (5 Ağu 2026, kullanıcı talebi):
+  dini_deger_ve_metinlere_saldiri: "Dini değer/metinlere saldırı",
+  asilsiz_iddia_gercek_gibi_sunum: "Asılsız iddia — gerçek gibi sunum",
 };
 const ADAY_SIDDET = { yuksek: "#C0392B", orta: "#C9A227", dusuk: "#7A7A7A" };
 const ADAY_ESER_DURUM = {
@@ -1114,13 +1165,39 @@ function YazarAdaylari({ authFetch }) {
   };
   useEffect(() => { yukle(); }, []);
 
+  // EKLENDİ (5 Ağu 2026, kullanıcı talebi — "aday ile danışman arasında
+  // köprü"): önceden bu ekran yalnız eser onay/red işlevi görüyordu, danışman
+  // brifingi (Karar Dosyası) TAMAMEN AYRI bir menüdeydi (Danışman Kokpiti).
+  // Editör bir adayı incelerken danışmanın kullanacağı zengin analizi hiç
+  // görmüyordu. Artık aynı ekranda — iki ayrı, birbirinden habersiz menüye
+  // gitmeye gerek yok.
+  const [kararDosyasi, setKararDosyasi] = useState(null);
+  const [kdYukleniyor, setKdYukleniyor] = useState(false);
+  const [kdAcik, setKdAcik] = useState(true);
+
+  const kararDosyasiKanitDogrula = async (kanitId, durum) => {
+    if (!secili || calisiyor) return;
+    try {
+      await authFetch(`/api/admin/adaylar/${secili.aday.id}/dogrulama`, {
+        method: "POST", body: JSON.stringify({ kanitId, durum }) });
+      const r = await authFetch(`/api/admin/adaylar/${secili.aday.id}/karar-dosyasi`);
+      setKararDosyasi(await r.json());
+    } catch { setMesaj("Kanıt doğrulaması kaydedilemedi."); }
+  };
+
   const detayAc = async (aday) => {
-    setMesaj("");
+    setMesaj(""); setKararDosyasi(null);
     try {
       const r = await authFetch(`/api/admin/adaylar/${aday.id}/rapor`);
       const d = await r.json();
       setSecili({ aday, eserler: d.eserler || [] });
     } catch { setMesaj("Rapor okunamadı."); }
+    setKdYukleniyor(true);
+    try {
+      const r2 = await authFetch(`/api/admin/adaylar/${aday.id}/karar-dosyasi`);
+      setKararDosyasi(await r2.json());
+    } catch { /* karar dosyası henüz oluşmamış olabilir — sessizce geç */ }
+    finally { setKdYukleniyor(false); }
   };
 
   const onayla = async (eserId) => {
@@ -1219,6 +1296,34 @@ function YazarAdaylari({ authFetch }) {
             </div>
           )}
         </div>
+
+        {/* DANIŞMAN BRİFİNGİ — EKLENDİ (5 Ağu 2026, kullanıcı talebi):
+            "aday ile danışman arasında köprü". Aynı Karar Dosyası burada da
+            görünüyor — editör eseri değerlendirirken danışmanın kullanacağı
+            zengin brifingi de görür, ayrı bir menüye gitmesi gerekmez. */}
+        <div style={{ ...kutu, borderColor: "rgba(93,163,214,.35)" }}>
+          <div onClick={() => setKdAcik(!kdAcik)}
+            style={{ display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer" }}>
+            <div style={{ color: THEME.cyan, fontWeight: 700, fontSize: 14 }}>
+              ◆ Danışman Brifingi — Karar Dosyası
+            </div>
+            <span style={{ color: THEME.textMuted, fontSize: 12 }}>{kdAcik ? "▲ gizle" : "▼ göster"}</span>
+          </div>
+          <div style={{ fontSize: 11.5, color: THEME.textMuted, marginTop: 4 }}>
+            Görüşmeye giden danışmanın kullanacağı bilinen/tahmin/bilinmeyen ayrımı — aynı içerik Danışman Kokpiti'nde de görünür.
+          </div>
+          {kdAcik && (
+            <div style={{ marginTop: 12 }}>
+              {kdYukleniyor && <div style={{ fontSize: 12.5, color: THEME.textMuted }}>Yükleniyor…</div>}
+              {!kdYukleniyor && (
+                <KararDosyasiGovde ad={secili.aday.ad_soyad} dosya={kararDosyasi}
+                  kanitDogrula={kararDosyasiKanitDogrula} calisiyor={calisiyor}
+                  hazirlikPuani={secili.aday.hazirlik_puani} />
+              )}
+            </div>
+          )}
+        </div>
+
         {mesaj && <div style={{ ...kutu, color: THEME.cyan, fontSize: 13 }}>{mesaj}</div>}
         {!secili.eserler.length && <div style={kutu}>Bu aday henüz eser yüklemedi.</div>}
         {secili.eserler.map(e => {
@@ -1270,6 +1375,69 @@ function YazarAdaylari({ authFetch }) {
                   </button>
                   {editAcikEserId === e.id && (
                     <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 8 }}>
+                      {/* EKLENDİ (5 Ağu 2026, kullanıcı talebi): AI'ın ürettiği
+                          ham analiz artık burada görünüyor — editör sıfırdan
+                          yazmak yerine buradan başlayabilir. Karar HÂLÂ
+                          editöre ait; bu yalnızca bir öneri, "AI Ön Analizi"
+                          etiketiyle açıkça işaretli. */}
+                      {e.ai_editoryal_onanaliz && (() => {
+                        let ai; try { ai = JSON.parse(e.ai_editoryal_onanaliz); } catch { ai = null; }
+                        if (!ai) return null;
+                        return (
+                          <div style={{ background: "rgba(93,163,214,.06)", border: `1px solid rgba(93,163,214,.28)`,
+                                        borderRadius: 6, padding: "12px 14px", marginBottom: 4 }}>
+                            <div style={{ fontSize: 11, fontWeight: 700, color: THEME.cyan, marginBottom: 8, letterSpacing: .3 }}>
+                              AI ÖN ANALİZİ — öneri niteliğindedir, karar editöre aittir
+                            </div>
+                            {ai.ozet && <div style={{ fontSize: 12.5, color: THEME.textLight, marginBottom: 8 }}>{ai.ozet}</div>}
+                            {ai.guclu_yonler?.length > 0 && (
+                              <div style={{ fontSize: 12, color: THEME.textMuted, marginBottom: 6 }}>
+                                <b style={{ color: THEME.success }}>Güçlü yönler:</b> {ai.guclu_yonler.join(" · ")}
+                              </div>
+                            )}
+                            {ai.gelistirilecek?.length > 0 && (
+                              <div style={{ fontSize: 12, color: THEME.textMuted, marginBottom: 6 }}>
+                                <b style={{ color: THEME.warn }}>Geliştirilecek:</b> {ai.gelistirilecek.join(" · ")}
+                              </div>
+                            )}
+                            {ai.editor_sorunlari?.length > 0 && (
+                              <div style={{ fontSize: 12, color: THEME.textMuted, marginBottom: 6 }}>
+                                <b style={{ color: THEME.danger }}>Editör sorunları:</b> {ai.editor_sorunlari.join(" · ")}
+                              </div>
+                            )}
+                            {ai.yazim_kalitesi && (
+                              <div style={{ fontSize: 12, color: THEME.textMuted, marginBottom: 6 }}>
+                                <b>Yazım kalitesi:</b> {({ az: "az hata", orta: "orta düzeyde hata", sik: "sık hata" })[ai.yazim_kalitesi.seviye] || ai.yazim_kalitesi.seviye}
+                                {ai.yazim_kalitesi.aciklama ? ` — ${ai.yazim_kalitesi.aciklama}` : ""}
+                                <span style={{ color: THEME.textFaint, fontSize: 10.5 }}> (AI izlenimi, kesin sayım değildir)</span>
+                              </div>
+                            )}
+                            {ai.tur_benzerligi?.emin_mi && ai.tur_benzerligi?.tarz_gozlemi && (
+                              <div style={{ fontSize: 12, color: THEME.textMuted, marginBottom: 6 }}>
+                                <b>Tarz gözlemi:</b> {ai.tur_benzerligi.tarz_gozlemi}
+                                <span style={{ color: THEME.textFaint, fontSize: 10.5 }}> (tahmini, kesin kaynak değildir)</span>
+                              </div>
+                            )}
+                            {ai.hazirlik_seviyesi && (
+                              <div style={{ fontSize: 12, color: THEME.textMuted, marginBottom: 8 }}>
+                                <b>Hazırlık seviyesi:</b> {ai.hazirlik_seviyesi}
+                              </div>
+                            )}
+                            <button onClick={() => setEditForm({
+                                ...editForm,
+                                gucluYonler: (ai.guclu_yonler || []).join("\n"),
+                                eksikYonler: (ai.gelistirilecek || []).join("\n"),
+                                hedefOkur: ai.hedef_okur || editForm.hedefOkur,
+                                hazirlikSeviyesi: ai.hazirlik_seviyesi || editForm.hazirlikSeviyesi,
+                                sonrakiAdim: ai.onerilen_calisma || editForm.sonrakiAdim,
+                              })}
+                              style={{ ...inputStyle, width: "auto", cursor: "pointer", fontSize: 11.5,
+                                       background: "transparent", color: THEME.cyan, border: `1px solid ${THEME.cyan}` }}>
+                              AI önerisini forma aktar (gözden geçirip düzenleyin)
+                            </button>
+                          </div>
+                        );
+                      })()}
                       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                         {[["hazir", "Yayına hazırlık için uygun"], ["gelistirme", "Editöryal geliştirmeyle uygun"], ["henuz_degil", "Henüz hazır değil"]].map(([k, ad]) => (
                           <button key={k} onClick={() => setEditForm({ ...editForm, karar: k })}
@@ -2430,6 +2598,307 @@ const GOSTERGE_ADI = {
   teslimat_uygunlugu: "Teslimat uygunluğu",
 };
 
+// TAŞINDI (5 Ağu 2026, kullanıcı talebi — "aday ile danışman arasında
+// köprü"): JBlok, önceden yalnızca DanismanKokpiti'nin İÇİNDE tanımlıydı.
+// Karar Dosyası'nı (bilinen/tahmin/bilinmeyen ayrımı) artık YazarAdaylari
+// ekranında da göstermemiz gerektiği için modül seviyesine taşındı — iki
+// ekran da aynı bileşeni kullanıyor, kod tekrarı yok.
+function JBlok({ baslik, veri, bos }) {
+  let dizi = veri;
+  if (typeof dizi === "string") { try { dizi = JSON.parse(dizi); } catch { dizi = []; } }
+  dizi = Array.isArray(dizi) ? dizi : (dizi ? [dizi] : []);
+  return (
+    <div style={{ marginBottom: 12 }}>
+      <div style={{ fontSize: 11, letterSpacing: ".15em", color: THEME.textMuted, marginBottom: 4 }}>{baslik}</div>
+      {!dizi.length && <div style={{ fontSize: 12.5, color: THEME.textMuted }}>{bos}</div>}
+      {dizi.map((x, i) => (
+        <div key={i} style={{ fontSize: 12.5, color: THEME.textLight, marginBottom: 3 }}>
+          · {x.gosterge ? (GOSTERGE_ADI[x.gosterge] || x.gosterge) : (x.hizmet || x.risk || x.adim || (typeof x === "string" ? x : JSON.stringify(x)))}
+          {x.seviye && <span style={{ color: SEVIYE_RENK[x.seviye] || THEME.textMuted }}> — {x.seviye}</span>}
+          {x.olasilik != null && <span style={{ color: THEME.textMuted }}> (olasılık {x.olasilik})</span>}
+          {(x.dayanak || x.neden || x.gerekce) && (
+            <span style={{ color: THEME.textMuted }}> — {[].concat(x.dayanak || x.neden || x.gerekce).join(", ")}</span>
+          )}
+          {x.aciklama && <span style={{ color: THEME.textMuted }}> — {x.aciklama}</span>}
+        </div>
+      ))}
+    </div>
+  );
+}
+// Karar Dosyası'nın hem başlık/kapı durumu hem BİLDİKLERİMİZ/TAHMİN/
+// BİLMEDİKLERİMİZ/RİSKLER bloklarını basan, iki ekranın da (YazarAdaylari
+// ve DanismanKokpiti) paylaştığı gövde.
+// KOMUTA MERKEZİ (5 Ağu 2026, onaylanan konsept) — Karar Dosyası'nın
+// görsel dili baştan tasarlandı: üstte büyük KPI şeridi (4 kritik rakam
+// tek bakışta), altta üç sütunlu Bilinen/Tahmin/Bilinmeyen görünümü, en
+// üstte kritik risk varsa kırmızı uyarı bandı. Panelin GERÇEK teması
+// (açık/beyaz, THEME sabitleri) korundu — mockup koyu temaydı ama panelin
+// geneliyle tutarlı olması için renkler THEME'e uyarlandı, yapı (Komuta
+// Merkezi mimarisi) aynen uygulandı. Hiçbir veri/alan kaybedilmedi —
+// aşağıdaki bölümler (Göstergeler tam liste, riskler, AI analizi,
+// kaçınılacaklar, kanıtlar) hep aynı, yalnız üst kısım yeniden tasarlandı.
+function KomutaMerkeziUst({ ad, kd, gostergeler, hazirlikPuani }) {
+  const icerikRiski = (gostergeler || []).find(g => g.gosterge === "icerik_riski");
+  const bilinenSayi = (kd.bilinen || []).length;
+  let ai = kd.ai_analiz_ozeti;
+  if (typeof ai === "string") { try { ai = JSON.parse(ai); } catch { ai = null; } }
+  const gucluYonSayi = ai?.editoryal?.gucluYonler?.length || 0;
+  const riskRenk = icerikRiski ? (SEVIYE_RENK[icerikRiski.seviye] || THEME.textMuted) : THEME.textFaint;
+
+  const kpi = { flex: 1, padding: "16px 18px", textAlign: "center", borderRight: `1px solid ${THEME.border}` };
+  const kpiVal = { fontFamily: FONT_MONO, fontSize: 24, fontWeight: 700, marginBottom: 4 };
+  const kpiLbl = { fontSize: 10, letterSpacing: ".08em", color: THEME.textFaint };
+
+  return (
+    <>
+      <div style={{ background: THEME.panelBg, border: `1px solid ${THEME.border}`, borderRadius: 8, overflow: "hidden", marginBottom: 14 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "14px 18px",
+                      background: THEME.panelBgAlt, borderBottom: `1px solid ${THEME.border}` }}>
+          <div>
+            <div style={{ color: THEME.textLight, fontWeight: 700, fontSize: 16 }}>{ad}</div>
+            <div style={{ color: THEME.textFaint, fontSize: 10.5, marginTop: 2 }}>politika {kd.politika_surumu}</div>
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <span style={{ padding: "5px 13px", borderRadius: 20, fontSize: 10.5, fontWeight: 700,
+                           background: kd.paket_gosterilebilir ? THEME.successBg : THEME.dangerBg,
+                           color: kd.paket_gosterilebilir ? THEME.success : THEME.danger }}>
+              PAKET KAPISI {kd.paket_gosterilebilir ? "AÇIK" : "KAPALI"}
+            </span>
+            <span style={{ padding: "5px 13px", borderRadius: 20, fontSize: 10.5, fontWeight: 700,
+                           background: THEME.panelBg, border: `1px solid ${SEVIYE_RENK[kd.analiz_guveni] || THEME.border}`,
+                           color: SEVIYE_RENK[kd.analiz_guveni] || THEME.textMuted }}>
+              GÜVEN: {(kd.analiz_guveni || "").toUpperCase()}
+            </span>
+          </div>
+        </div>
+        <div style={{ display: "flex" }}>
+          <div style={kpi}><div style={{ ...kpiVal, color: THEME.cyan }}>{hazirlikPuani ?? "—"}</div><div style={kpiLbl}>HAZIRLIK PUANI</div></div>
+          <div style={kpi}><div style={{ ...kpiVal, color: riskRenk }}>{icerikRiski ? icerikRiski.seviye.toUpperCase() : "—"}</div><div style={kpiLbl}>İÇERİK RİSKİ</div></div>
+          <div style={kpi}><div style={{ ...kpiVal, color: THEME.textLight }}>{bilinenSayi} / {(gostergeler || []).length}</div><div style={kpiLbl}>DOĞRULANMIŞ GÖSTERGE</div></div>
+          <div style={{ ...kpi, borderRight: "none" }}><div style={{ ...kpiVal, color: gucluYonSayi ? THEME.success : THEME.textFaint }}>{gucluYonSayi || "—"}</div><div style={kpiLbl}>GÜÇLÜ YÖN (AI)</div></div>
+        </div>
+      </div>
+
+      {icerikRiski?.seviye === "yuksek" && ai?.riskTaramasi?.kategoriler?.length > 0 && (
+        <div style={{ background: THEME.dangerBg, border: `1px solid ${THEME.danger}`, borderLeft: `4px solid ${THEME.danger}`,
+                      borderRadius: 6, padding: "12px 16px", marginBottom: 14 }}>
+          <div style={{ fontSize: 10.5, letterSpacing: ".1em", color: THEME.danger, fontWeight: 700, marginBottom: 4 }}>
+            ⚠ AI RİSK TARAMASI — YÜKSEK ŞİDDET
+          </div>
+          <div style={{ fontSize: 12.5, color: THEME.textLight }}>
+            {ai.riskTaramasi.kategoriler.filter(k => k.siddet === "yuksek").map(k => ADAY_KATEGORI[k.kategori] || k.kategori).join(", ")}
+            {" "}kategorisinde bulgu · Görüşmeden önce editör notunu okuyun.
+          </div>
+        </div>
+      )}
+
+      <div style={{ background: THEME.panelBg, border: `1px solid ${THEME.border}`, borderRadius: 8, overflow: "hidden", marginBottom: 14 }}>
+        <div style={{ fontSize: 11, letterSpacing: ".1em", color: THEME.textFaint, padding: "10px 16px", borderBottom: `1px solid ${THEME.border}` }}>
+          KARAR GÖRÜŞ ALANI
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr" }}>
+          {[
+            { baslik: "BİLDİKLERİMİZ", veri: kd.bilinen, bos: "Doğrulanmış gösterge yok.", renk: THEME.success },
+            { baslik: "TAHMİN ETTİKLERİMİZ", veri: kd.tahmin, bos: "—", renk: THEME.warn },
+            { baslik: "BİLMEDİKLERİMİZ", veri: kd.bilinmeyen, bos: "Belirgin boşluk yok.", renk: THEME.textFaint },
+          ].map((s, i) => {
+            let dizi = s.veri;
+            if (typeof dizi === "string") { try { dizi = JSON.parse(dizi); } catch { dizi = []; } }
+            dizi = Array.isArray(dizi) ? dizi : (dizi ? [dizi] : []);
+            return (
+              <div key={s.baslik} style={{ padding: 16, borderRight: i < 2 ? `1px solid ${THEME.border}` : "none" }}>
+                <div style={{ fontSize: 10, letterSpacing: ".1em", color: s.renk, fontWeight: 700, marginBottom: 10,
+                              display: "flex", justifyContent: "space-between" }}>
+                  <span>{s.baslik}</span><span>{dizi.length}</span>
+                </div>
+                {!dizi.length && <div style={{ fontSize: 12, color: THEME.textFaint }}>{s.bos}</div>}
+                {dizi.map((x, j) => (
+                  <div key={j} style={{ padding: "8px 0", borderTop: j ? `1px solid ${THEME.divider}` : "none", fontSize: 12 }}>
+                    <b style={{ color: THEME.textLight, fontWeight: 600 }}>
+                      {x.gosterge ? (GOSTERGE_ADI[x.gosterge] || x.gosterge) : (x.hizmet || x.risk || x.adim || (typeof x === "string" ? x : ""))}
+                      {x.seviye && <span style={{ color: SEVIYE_RENK[x.seviye] || THEME.textMuted, fontWeight: 400 }}> — {x.seviye}{x.olasilik != null ? ` (${x.olasilik})` : ""}</span>}
+                    </b>
+                    {(x.dayanak || x.neden || x.gerekce) && (
+                      <div style={{ color: THEME.textMuted, fontSize: 10.5, marginTop: 2 }}>
+                        {[].concat(x.dayanak || x.neden || x.gerekce).join(", ")}
+                      </div>
+                    )}
+                    {x.aciklama && <div style={{ color: THEME.textMuted, fontSize: 10.5, marginTop: 2 }}>{x.aciklama}</div>}
+                  </div>
+                ))}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </>
+  );
+}
+
+function KararDosyasiGovde({ ad, dosya, kanitDogrula, calisiyor, hazirlikPuani }) {
+  const kd = dosya?.kararDosyasi;
+  const sozluk = dosya?.gerekceSozlugu || {};
+  const kodAcikla = (kodlar) => (kodlar || []).map(k => sozluk[k] || k).join(" · ");
+  const kutu = { background: THEME.cardBg, border: `1px solid ${THEME.border}`, borderRadius: 8, padding: 16, marginBottom: 14 };
+  const inputStyle = { background: THEME.bg, color: THEME.textLight, border: `1px solid ${THEME.border}`, borderRadius: 4, padding: "8px 11px", fontSize: 13, fontFamily: "inherit", width: "100%", boxSizing: "border-box" };
+
+  if (!kd) {
+    return (
+      <div style={kutu}>
+        <div style={{ color: THEME.textMuted, fontSize: 13 }}>
+          Bu aday için henüz karar dosyası üretilmemiş — değerlendirmeyi tamamlamamış olabilir.
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <KomutaMerkeziUst ad={ad} kd={kd} gostergeler={dosya.gostergeler} hazirlikPuani={hazirlikPuani} />
+
+      <div style={kutu}>
+        <div style={{ color: THEME.textLight, fontWeight: 700, fontSize: 13, marginBottom: 8 }}>Göstergeler — tam liste</div>
+        {(dosya.gostergeler || []).map((g, i) => (
+          <div key={i} style={{ padding: "7px 4px", borderTop: i ? `1px solid ${THEME.border}` : "none" }}>
+            <div style={{ display: "flex", justifyContent: "space-between" }}>
+              <span style={{ fontSize: 13, color: THEME.textLight }}>{GOSTERGE_ADI[g.gosterge] || g.gosterge}</span>
+              <span style={{ fontSize: 12.5, fontWeight: 700, color: SEVIYE_RENK[g.seviye] || THEME.textMuted }}>
+                {g.seviye}{g.olasilik != null ? ` (${g.olasilik})` : ""}
+              </span>
+            </div>
+            {g.gerekce_kodlari?.length > 0 && (
+              <div style={{ fontSize: 11.5, color: THEME.textMuted, marginTop: 2 }}>{kodAcikla(g.gerekce_kodlari)}</div>
+            )}
+          </div>
+        ))}
+      </div>
+
+      <div style={kutu}>
+        <JBlok baslik="RİSKLER VE KAPILAR" veri={kd.riskler} bos="Risk sinyali yok." />
+        <JBlok baslik="ERTELENECEK HİZMETLER" veri={kd.ertelenecek_hizmetler} bos="—" />
+        <JBlok baslik="GÜVENLİ BAŞLANGIÇ" veri={kd.guvenli_baslangic} bos="—" />
+        <JBlok baslik="ALTERNATİF YOL" veri={kd.alternatif_yol} bos="—" />
+        <JBlok baslik="GÖRÜŞMEDE DOĞRULANACAK" veri={kd.insan_dogrulamasi_gereken} bos="—" />
+      </div>
+
+      {/* EKLENDİ (5 Ağu 2026, kullanıcı talebi — "yazar aday ekosistemindeki
+          bulgulardan elde edilen sonuçlar"): AI'ın eseri okuyup ürettiği
+          editöryal analiz ve risk taraması özeti artık burada. Önceden bu
+          bilgi Karar Dosyası'na hiç yansımıyordu — danışman görüşmeye AI'ın
+          bulgularından habersiz gidiyordu. */}
+      {kd.ai_analiz_ozeti && (() => {
+        let ai = kd.ai_analiz_ozeti;
+        if (typeof ai === "string") { try { ai = JSON.parse(ai); } catch { ai = null; } }
+        if (!ai) return null;
+        const ed = ai.editoryal;
+        const rt = ai.riskTaramasi;
+        return (
+          <div style={{ ...kutu, borderColor: "rgba(93,163,214,.3)" }}>
+            <div style={{ fontSize: 11, letterSpacing: ".15em", color: THEME.cyan, marginBottom: 10 }}>
+              AI EDİTÖRYAL ANALİZİ VE RİSK TARAMASI ÖZETİ
+            </div>
+            {ed ? (
+              <>
+                {ed.ozet && <div style={{ fontSize: 12.5, color: THEME.textLight, marginBottom: 8 }}>{ed.ozet}</div>}
+                {ed.gucluYonler?.length > 0 && (
+                  <div style={{ fontSize: 12, color: THEME.textMuted, marginBottom: 5 }}>
+                    <b style={{ color: THEME.success }}>Güçlü yönler:</b> {ed.gucluYonler.join(" · ")}
+                  </div>
+                )}
+                {ed.gelistirilecek?.length > 0 && (
+                  <div style={{ fontSize: 12, color: THEME.textMuted, marginBottom: 5 }}>
+                    <b style={{ color: THEME.warn }}>Geliştirilecek:</b> {ed.gelistirilecek.join(" · ")}
+                  </div>
+                )}
+                {ed.editorSorunlari?.length > 0 && (
+                  <div style={{ fontSize: 12, color: THEME.textMuted, marginBottom: 5 }}>
+                    <b style={{ color: THEME.danger }}>Editör sorunları:</b> {ed.editorSorunlari.join(" · ")}
+                  </div>
+                )}
+                {ed.yazimKalitesi && (
+                  <div style={{ fontSize: 12, color: THEME.textMuted, marginBottom: 5 }}>
+                    <b>Yazım kalitesi:</b> {({ az: "az hata", orta: "orta düzeyde hata", sik: "sık hata" })[ed.yazimKalitesi.seviye] || ed.yazimKalitesi.seviye}
+                    <span style={{ color: THEME.textFaint, fontSize: 10.5 }}> (AI izlenimi)</span>
+                  </div>
+                )}
+                {ed.turBenzerligi && (
+                  <div style={{ fontSize: 12, color: THEME.textMuted, marginBottom: 5 }}>
+                    <b>Tarz gözlemi:</b> {ed.turBenzerligi}
+                  </div>
+                )}
+              </>
+            ) : (
+              <div style={{ fontSize: 12.5, color: THEME.textMuted, marginBottom: 8 }}>
+                Editöryal AI analizi henüz üretilmemiş.
+              </div>
+            )}
+            {rt && (
+              <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px solid ${THEME.border}` }}>
+                <div style={{ fontSize: 12, color: THEME.textLight, marginBottom: 4 }}>
+                  <b>Risk taraması önerisi:</b>{" "}
+                  <span style={{ color: rt.oneri === "yayina_uygun_gorunuyor" ? THEME.success : rt.oneri === "duzeltme_gerekli" ? THEME.danger : THEME.warn }}>
+                    {rt.oneri === "yayina_uygun_gorunuyor" ? "Yayına uygun görünüyor" : rt.oneri === "duzeltme_gerekli" ? "Düzeltme gerekli" : "Dikkatli inceleme"}
+                  </span>
+                  <span style={{ color: THEME.textMuted }}> — {rt.ozet?.toplam ?? 0} bulgu ({rt.ozet?.yuksek ?? 0} yüksek · {rt.ozet?.orta ?? 0} orta · {rt.ozet?.dusuk ?? 0} düşük)</span>
+                </div>
+                {rt.kategoriler?.length > 0 && (
+                  <div style={{ fontSize: 11.5, color: THEME.textMuted }}>
+                    {rt.kategoriler.map((k, i) => (
+                      <span key={i} style={{ marginRight: 10 }}>
+                        {ADAY_KATEGORI[k.kategori] || k.kategori} <span style={{ color: ADAY_SIDDET[k.siddet] }}>({k.siddet})</span>
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        );
+      })()}
+
+      <div style={{ ...kutu, borderColor: "rgba(192,57,43,.35)" }}>
+        <div style={{ fontSize: 11, letterSpacing: ".15em", color: "#C0392B", marginBottom: 6 }}>
+          KAÇINILMASI GEREKEN YAKLAŞIM
+        </div>
+        <div style={{ fontSize: 12.5, color: THEME.textLight, lineHeight: 1.6 }}>
+          · Satış, görünürlük veya yatırım geri dönüşü konusunda taahhüt vermeyin.<br />
+          · Doğrulanmamış göstergeleri kesinmiş gibi anlatmayın.<br />
+          · Eser hazırlığı doğrulanmadan reklam veya uluslararası hak kapsamı önermeyin.<br />
+          · Fiyatı görüşmenin sonunda sürpriz olarak açmayın.
+          {!kd.paket_gosterilebilir && <><br />· <b>Bu adaya paket sunmayın</b> — önce yukarıdaki alanları doğrulayın.</>}
+        </div>
+      </div>
+
+      {dosya.kanitlar?.length > 0 && (
+        <div style={kutu}>
+          <div style={{ color: THEME.textLight, fontWeight: 700, fontSize: 13, marginBottom: 8 }}>Kanıtlar</div>
+          {dosya.kanitlar.map(k => (
+            <div key={k.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center",
+                                     padding: "7px 4px", borderTop: `1px solid ${THEME.border}` }}>
+              <div>
+                <div style={{ fontSize: 12.5, color: THEME.textLight }}>{k.tur}</div>
+                {k.link && <a href={k.link} target="_blank" rel="noreferrer"
+                  style={{ fontSize: 11.5, color: THEME.cyan }}>{k.link.slice(0, 50)}</a>}
+                <div style={{ fontSize: 11, color: THEME.textMuted }}>
+                  beyan: {JSON.stringify(k.beyan_edilen)} · durum: {k.durum}
+                </div>
+              </div>
+              {kanitDogrula && (
+                <div style={{ display: "flex", gap: 6 }}>
+                  <button disabled={calisiyor} onClick={() => kanitDogrula(k.id, "dogrulandi")}
+                    style={{ ...inputStyle, width: "auto", cursor: "pointer", fontSize: 12, color: "#2E7D32" }}>Doğrula</button>
+                  <button disabled={calisiyor} onClick={() => kanitDogrula(k.id, "reddedildi")}
+                    style={{ ...inputStyle, width: "auto", cursor: "pointer", fontSize: 12, color: "#C0392B" }}>Reddet</button>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </>
+  );
+}
+
 function DanismanKokpiti({ authFetch }) {
   const [adaylar, setAdaylar] = useState([]);
   const [secili, setSecili] = useState(null);
@@ -2469,33 +2938,6 @@ function DanismanKokpiti({ authFetch }) {
     finally { setCalisiyor(false); }
   };
 
-  const kd = dosya?.kararDosyasi;
-  const sozluk = dosya?.gerekceSozlugu || {};
-  const kodAcikla = (kodlar) => (kodlar || []).map(k => sozluk[k] || k).join(" · ");
-
-  const JBlok = ({ baslik, veri, bos }) => {
-    let dizi = veri;
-    if (typeof dizi === "string") { try { dizi = JSON.parse(dizi); } catch { dizi = []; } }
-    dizi = Array.isArray(dizi) ? dizi : (dizi ? [dizi] : []);
-    return (
-      <div style={{ marginBottom: 12 }}>
-        <div style={{ fontSize: 11, letterSpacing: ".15em", color: THEME.textMuted, marginBottom: 4 }}>{baslik}</div>
-        {!dizi.length && <div style={{ fontSize: 12.5, color: THEME.textMuted }}>{bos}</div>}
-        {dizi.map((x, i) => (
-          <div key={i} style={{ fontSize: 12.5, color: THEME.textLight, marginBottom: 3 }}>
-            · {x.gosterge ? (GOSTERGE_ADI[x.gosterge] || x.gosterge) : (x.hizmet || x.risk || x.adim || (typeof x === "string" ? x : JSON.stringify(x)))}
-            {x.seviye && <span style={{ color: SEVIYE_RENK[x.seviye] || THEME.textMuted }}> — {x.seviye}</span>}
-            {x.olasilik != null && <span style={{ color: THEME.textMuted }}> (olasılık {x.olasilik})</span>}
-            {(x.dayanak || x.neden || x.gerekce) && (
-              <span style={{ color: THEME.textMuted }}> — {[].concat(x.dayanak || x.neden || x.gerekce).join(", ")}</span>
-            )}
-            {x.aciklama && <span style={{ color: THEME.textMuted }}> — {x.aciklama}</span>}
-          </div>
-        ))}
-      </div>
-    );
-  };
-
   return (
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
@@ -2527,108 +2969,7 @@ function DanismanKokpiti({ authFetch }) {
         <div style={{ flex: 1, minWidth: 340 }}>
           {!secili && <div style={kutu}><div style={{ color: THEME.textMuted, fontSize: 13 }}>Soldan bir aday seçin.</div></div>}
 
-          {secili && !kd && (
-            <div style={kutu}>
-              <div style={{ color: THEME.textLight, fontWeight: 700, marginBottom: 6 }}>{secili.ad_soyad}</div>
-              <div style={{ color: THEME.textMuted, fontSize: 13 }}>
-                Bu aday için henüz karar dosyası üretilmemiş — değerlendirmeyi tamamlamamış olabilir.
-              </div>
-            </div>
-          )}
-
-          {kd && (
-            <>
-              <div style={kutu}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-                  <div style={{ color: THEME.textLight, fontWeight: 700, fontSize: 15 }}>{secili.ad_soyad}</div>
-                  <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-                    <span style={{ fontSize: 11, color: THEME.textMuted }}>politika {kd.politika_surumu}</span>
-                    <span style={{ fontSize: 12, fontWeight: 700, color: SEVIYE_RENK[kd.analiz_guveni] }}>
-                      analiz güveni: {kd.analiz_guveni}
-                    </span>
-                  </div>
-                </div>
-                <div style={{
-                  padding: "8px 12px", borderRadius: 4, fontSize: 12.5,
-                  background: kd.paket_gosterilebilir ? "rgba(46,125,50,.12)" : "rgba(192,57,43,.12)",
-                  border: `1px solid ${kd.paket_gosterilebilir ? "rgba(46,125,50,.4)" : "rgba(192,57,43,.4)"}`,
-                  color: THEME.textLight,
-                }}>
-                  {kd.paket_gosterilebilir
-                    ? "Paket kapısı AÇIK — tüm göstergeler doğrulandı."
-                    : "Paket kapısı KAPALI — doğrulanmayan alanlar var, paket önerilmemeli."}
-                  <div style={{ color: THEME.textMuted, marginTop: 3 }}>{kd.guven_nedeni}</div>
-                </div>
-              </div>
-
-              {/* Göstergeler AYRI — tek rozet altında birleştirilmez */}
-              <div style={kutu}>
-                <div style={{ color: THEME.textLight, fontWeight: 700, fontSize: 13, marginBottom: 8 }}>Göstergeler</div>
-                {(dosya.gostergeler || []).map((g, i) => (
-                  <div key={i} style={{ padding: "7px 4px", borderTop: i ? `1px solid ${THEME.border}` : "none" }}>
-                    <div style={{ display: "flex", justifyContent: "space-between" }}>
-                      <span style={{ fontSize: 13, color: THEME.textLight }}>{GOSTERGE_ADI[g.gosterge] || g.gosterge}</span>
-                      <span style={{ fontSize: 12.5, fontWeight: 700, color: SEVIYE_RENK[g.seviye] || THEME.textMuted }}>
-                        {g.seviye}{g.olasilik != null ? ` (${g.olasilik})` : ""}
-                      </span>
-                    </div>
-                    {g.gerekce_kodlari?.length > 0 && (
-                      <div style={{ fontSize: 11.5, color: THEME.textMuted, marginTop: 2 }}>{kodAcikla(g.gerekce_kodlari)}</div>
-                    )}
-                  </div>
-                ))}
-              </div>
-
-              <div style={kutu}>
-                <JBlok baslik="BİLDİKLERİMİZ (doğrulanmış)" veri={kd.bilinen} bos="Doğrulanmış gösterge yok." />
-                <JBlok baslik="TAHMİN ETTİKLERİMİZ (olasılıksal)" veri={kd.tahmin} bos="—" />
-                <JBlok baslik="BİLMEDİKLERİMİZ (karar boşlukları)" veri={kd.bilinmeyen} bos="Belirgin boşluk yok." />
-                <JBlok baslik="RİSKLER VE KAPILAR" veri={kd.riskler} bos="Risk sinyali yok." />
-                <JBlok baslik="ERTELENECEK HİZMETLER" veri={kd.ertelenecek_hizmetler} bos="—" />
-                <JBlok baslik="GÜVENLİ BAŞLANGIÇ" veri={kd.guvenli_baslangic} bos="—" />
-                <JBlok baslik="ALTERNATİF YOL" veri={kd.alternatif_yol} bos="—" />
-                <JBlok baslik="GÖRÜŞMEDE DOĞRULANACAK" veri={kd.insan_dogrulamasi_gereken} bos="—" />
-              </div>
-
-              <div style={{ ...kutu, borderColor: "rgba(192,57,43,.35)" }}>
-                <div style={{ fontSize: 11, letterSpacing: ".15em", color: "#C0392B", marginBottom: 6 }}>
-                  KAÇINILMASI GEREKEN YAKLAŞIM
-                </div>
-                <div style={{ fontSize: 12.5, color: THEME.textLight, lineHeight: 1.6 }}>
-                  · Satış, görünürlük veya yatırım geri dönüşü konusunda taahhüt vermeyin.<br />
-                  · Doğrulanmamış göstergeleri kesinmiş gibi anlatmayın.<br />
-                  · Eser hazırlığı doğrulanmadan reklam veya uluslararası hak kapsamı önermeyin.<br />
-                  · Fiyatı görüşmenin sonunda sürpriz olarak açmayın.
-                  {!kd.paket_gosterilebilir && <><br />· <b>Bu adaya paket sunmayın</b> — önce yukarıdaki alanları doğrulayın.</>}
-                </div>
-              </div>
-
-              {dosya.kanitlar?.length > 0 && (
-                <div style={kutu}>
-                  <div style={{ color: THEME.textLight, fontWeight: 700, fontSize: 13, marginBottom: 8 }}>Kanıtlar</div>
-                  {dosya.kanitlar.map(k => (
-                    <div key={k.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center",
-                                             padding: "7px 4px", borderTop: `1px solid ${THEME.border}` }}>
-                      <div>
-                        <div style={{ fontSize: 12.5, color: THEME.textLight }}>{k.tur}</div>
-                        {k.link && <a href={k.link} target="_blank" rel="noreferrer"
-                          style={{ fontSize: 11.5, color: THEME.cyan }}>{k.link.slice(0, 50)}</a>}
-                        <div style={{ fontSize: 11, color: THEME.textMuted }}>
-                          beyan: {JSON.stringify(k.beyan_edilen)} · durum: {k.durum}
-                        </div>
-                      </div>
-                      <div style={{ display: "flex", gap: 6 }}>
-                        <button disabled={calisiyor} onClick={() => kanitDogrula(k.id, "dogrulandi")}
-                          style={{ ...inputStyle, width: "auto", cursor: "pointer", fontSize: 12, color: "#2E7D32" }}>Doğrula</button>
-                        <button disabled={calisiyor} onClick={() => kanitDogrula(k.id, "reddedildi")}
-                          style={{ ...inputStyle, width: "auto", cursor: "pointer", fontSize: 12, color: "#C0392B" }}>Reddet</button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </>
-          )}
+          {secili && <KararDosyasiGovde ad={secili.ad_soyad} dosya={dosya} kanitDogrula={kanitDogrula} calisiyor={calisiyor} hazirlikPuani={secili.hazirlik_puani} />}
         </div>
       </div>
     </div>
@@ -5366,61 +5707,6 @@ function TranslationRequestsView({ requests, loading, onUpdateStatus }) {
 
 
 // ============ Destek / Şikayet Talepleri (AI'dan gelen) ============
-// EKLENDİ (5 Ağu 2026, kullanıcı isteği: "sadece çözüldü işaretleyebiliyorum,
-// aynı zamanda cevap da yazabilmeliyim"): backend zaten yanıt alanını kabul
-// ediyordu (PATCH .../status → yanit), panelde hiç arayüzü yoktu.
-function DestekYanitKutusu({ talep, onKaydet }) {
-  const [acik, setAcik] = useState(false);
-  const [metin, setMetin] = useState(talep.yanit || "");
-  const [gonderiliyor, setGonderiliyor] = useState(false);
-
-  const kaydet = async (yeniStatus) => {
-    if (!metin.trim()) return;
-    setGonderiliyor(true);
-    await onKaydet(talep.id, yeniStatus, metin.trim());
-    setGonderiliyor(false);
-    setAcik(false);
-  };
-
-  if (!acik) {
-    return (
-      <div style={{ marginTop: 10 }}>
-        {talep.yanit && (
-          <div style={{ background: "rgba(93,214,163,.06)", border: `1px solid rgba(93,214,163,.25)`,
-                        borderRadius: 6, padding: "10px 12px", marginBottom: 8 }}>
-            <div style={{ fontSize: 10.5, color: THEME.success, marginBottom: 4, fontWeight: 600 }}>YANITINIZ</div>
-            <div style={{ fontSize: 12.5, color: THEME.textMuted, lineHeight: 1.55 }}>{talep.yanit}</div>
-          </div>
-        )}
-        <Btn small onClick={() => setAcik(true)}>{talep.yanit ? "Yanıtı düzenle" : "Yanıt yaz"}</Btn>
-      </div>
-    );
-  }
-
-  return (
-    <div style={{ marginTop: 10 }}>
-      <textarea
-        value={metin}
-        onChange={(e) => setMetin(e.target.value)}
-        placeholder="Yazara iletilecek yanıtı yazın…"
-        style={{ width: "100%", minHeight: 90, background: THEME.bg, color: THEME.textLight,
-                 border: `1px solid ${THEME.border}`, borderRadius: 6, padding: 10,
-                 fontSize: 13, fontFamily: FONT, lineHeight: 1.55, resize: "vertical" }} />
-      <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
-        <Btn small variant="success" disabled={!metin.trim() || gonderiliyor}
-          onClick={() => kaydet("cozuldu")}>
-          {gonderiliyor ? "Kaydediliyor…" : "Yanıtla ve çözüldü işaretle"}
-        </Btn>
-        <Btn small disabled={!metin.trim() || gonderiliyor}
-          onClick={() => kaydet(talep.status || "bekliyor")}>
-          Yalnızca kaydet
-        </Btn>
-        <Btn small variant="ghost" onClick={() => { setMetin(talep.yanit || ""); setAcik(false); }}>Vazgeç</Btn>
-      </div>
-    </div>
-  );
-}
-
 function DestekTalepleriView({ requests, loading, onUpdateStatus }) {
   const KAT = { sikayet: "Şikayet", destek: "Destek" };
   return (
@@ -5442,7 +5728,6 @@ function DestekTalepleriView({ requests, loading, onUpdateStatus }) {
             {r.konu && <div style={{ color: THEME.textLight, fontSize: 13, marginTop: 4, fontWeight: 600 }}>{r.konu}</div>}
             <div style={{ color: THEME.textMuted, fontSize: 12.5, marginTop: 4, lineHeight: 1.5 }}>{r.mesaj}</div>
             <div style={{ color: THEME.textFaint, fontSize: 10.5, marginTop: 6 }}>{r.created_at ? new Date(r.created_at).toLocaleDateString("tr-TR") : ""}</div>
-            <DestekYanitKutusu talep={r} onKaydet={onUpdateStatus} />
           </div>
           <div style={{ display: "flex", gap: 8, alignItems: "center", flexShrink: 0 }}>
             <Badge fg={r.status === "bekliyor" ? THEME.warn : THEME.success} bg={r.status === "bekliyor" ? THEME.warnBg : "rgba(93,214,163,.1)"}>{r.status === "bekliyor" ? "Bekliyor" : "Çözüldü"}</Badge>
@@ -8144,11 +8429,8 @@ export default function AdminPanel() {
       .catch(() => {})
       .finally(() => setLoadingDestek(false));
   };
-  // GÜNCELLEME (5 Ağu 2026): artık yanıt metni de gönderiliyor. Backend
-  // bu alanı zaten kabul ediyordu (COALESCE ile), panel hiç göndermiyordu.
-  const updateDestekStatus = (id, status, yanit) => {
-    const govde = yanit != null ? { status, yanit } : { status };
-    return authFetch(`/api/admin/destek-talepleri/${id}/status`, { method: "PATCH", body: JSON.stringify(govde) })
+  const updateDestekStatus = (id, status) => {
+    authFetch(`/api/admin/destek-talepleri/${id}/status`, { method: "PATCH", body: JSON.stringify({ status }) })
       .then((r) => r.json())
       .then(() => loadDestekTalepleri())
       .catch(() => {});
