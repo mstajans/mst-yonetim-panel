@@ -6196,8 +6196,15 @@ function DuyurularView({ authFetch, authors }) {
     } catch { setMsg({ ok: false, text: "Sunucuya bağlanılamadı." }); } finally { setBusy(false); }
   };
   const sil = async (id) => {
-    if (!window.confirm("Bu duyuru silinsin mi?")) return;
+    if (!window.confirm("Bu duyuru KALICI olarak silinsin mi? (Geçmiş kaydı da gider — genelde 'Durdur' daha güvenlidir.)")) return;
     await authFetch(`/api/admin/announcements/${id}`, { method: "DELETE" });
+    load();
+  };
+  // EKLENDİ (6 Ağu 2026, kullanıcı talebi — "iptal edebilmeli,
+  // durdurabilmeliyiz"): Sil'in aksine geçmiş kaydı korunur, sadece
+  // yazarlara artık gösterilmez.
+  const durdurAcVeyaKapat = async (id, yeniAktif) => {
+    await authFetch(`/api/admin/announcements/${id}/durdur`, { method: "POST", body: JSON.stringify({ aktif: yeniAktif }) });
     load();
   };
 
@@ -6234,16 +6241,22 @@ function DuyurularView({ authFetch, authors }) {
       {loading && <div style={{ color: THEME.textMuted, fontSize: 13 }}>Yükleniyor...</div>}
       {!loading && list.length === 0 && <div style={{ color: THEME.textMuted, fontSize: 13 }}>Henüz duyuru yok.</div>}
       {list.map((a) => (
-        <div key={a.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", background: THEME.panelBg, border: `1px solid ${THEME.border}`, borderRadius: 8, padding: "14px 18px", marginBottom: 10, gap: 14 }}>
+        <div key={a.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", background: THEME.panelBg, border: `1px solid ${a.aktif === false ? THEME.border : THEME.border}`, borderRadius: 8, padding: "14px 18px", marginBottom: 10, gap: 14, opacity: a.aktif === false ? 0.6 : 1 }}>
           <div style={{ flex: 1 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
               <div style={{ color: THEME.textLight, fontWeight: 700, fontSize: 14 }}>{a.baslik}</div>
               <Badge fg={a.hedef === "all" ? THEME.cyan : THEME.warn} bg={a.hedef === "all" ? "rgba(27,95,168,0.08)" : THEME.warnBg}>{a.hedef === "all" ? "Herkes" : (a.author_name || "Yazar")}</Badge>
+              {a.aktif === false && <Badge fg={THEME.textFaint} bg={THEME.panelBgAlt || "rgba(0,0,0,.04)"}>Durduruldu</Badge>}
             </div>
             <div style={{ color: THEME.textMuted, fontSize: 12.5, marginTop: 4, lineHeight: 1.5 }}>{a.icerik}</div>
             <div style={{ color: THEME.textFaint, fontSize: 10.5, marginTop: 4 }}>{new Date(a.created_at).toLocaleDateString("tr-TR")}</div>
           </div>
-          <Btn small variant="danger" onClick={() => sil(a.id)}>Sil</Btn>
+          <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
+            {a.aktif === false
+              ? <Btn small variant="ghost" onClick={() => durdurAcVeyaKapat(a.id, true)}>Tekrar Aç</Btn>
+              : <Btn small variant="ghost" onClick={() => durdurAcVeyaKapat(a.id, false)}>Durdur</Btn>}
+            <Btn small variant="danger" onClick={() => sil(a.id)}>Sil</Btn>
+          </div>
         </div>
       ))}
     </div>
