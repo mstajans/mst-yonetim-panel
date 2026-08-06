@@ -745,32 +745,49 @@ function Overview({ authors, onSyncAll, authFetch }) {
     }
   };
 
-  const aiRenk = aiDurum?.gercekAIcalisiyorMu ? THEME.success : (aiDurum?.testModuAcikMi ? THEME.warn : THEME.danger);
+  const aiRenk = aiDurum?.baglantiTesti?.krediYetersizMi ? THEME.danger
+    : aiDurum?.gercekAIcalisiyorMu ? THEME.success : (aiDurum?.testModuAcikMi ? THEME.warn : THEME.danger);
   const aiMetin = !aiDurum ? "Kontrol ediliyor…"
     : aiDurum.hata ? "Kontrol edilemedi"
+    : aiDurum.baglantiTesti?.krediYetersizMi ? "KREDİ TÜKENDİ — hemen yükleme gerekiyor"
     : aiDurum.testModuAcikMi ? "TEST MODU — sahte cevap dönüyor, gerçek değil"
     : !aiDurum.anahtarTanimliMi ? "API anahtarı tanımlı değil — sistem çalışmıyor"
     : "GERÇEK — Anthropic API'sine bağlı";
 
   return (
     <div>
-      {/* AI DURUMU (5 Ağu 2026) — "yapay zekası gerçek mi test mi" sorusuna
-          her zaman görülebilir bir cevap. */}
+      {/* AI DURUMU (5 Ağu 2026, genişletildi 6 Ağu 2026 — "kredi ne durumda
+          onu nasıl kontrol edeceğiz" sorusuna cevap) — "yapay zekası gerçek
+          mi test mi, kredisi bitti mi" sorusuna her zaman görülebilir bir
+          cevap. NOT: Anthropic'in kalan bakiyeyi (₺ tutarı) sorgulayan bir
+          public API'si yok — o rakam yalnızca console.anthropic.com'da,
+          giriş yaparak görülebilir. Burada gösterilen "kredi tükendi" tespiti,
+          GERÇEK bir istek atıp Anthropic'in döndürdüğü spesifik hatayı
+          okumaya dayanır — tahmini bir rakam değildir. Eser inceleme, AI
+          Menajer ve AI takip sorusu AYNI anahtarı paylaştığı için tek kontrol
+          üçünü de kapsar. */}
       <div style={{ background: THEME.panelBg, border: `1px solid ${THEME.border}`, borderRadius: 8,
                     padding: "14px 18px", marginBottom: 16, display: "flex", alignItems: "center",
                     justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <div style={{ width: 9, height: 9, borderRadius: "50%", background: aiRenk, flexShrink: 0 }} />
           <div>
-            <div style={{ fontSize: 12.5, fontWeight: 700, color: THEME.textLight }}>Eser İnceleme AI — {aiMetin}</div>
+            <div style={{ fontSize: 12.5, fontWeight: 700, color: THEME.textLight }}>AI Sistemleri — {aiMetin}</div>
             <div style={{ fontSize: 11, color: THEME.textMuted, marginTop: 2 }}>
-              Model: {aiDurum?.model || "claude-sonnet-4-6"} · Eser risk taraması + editöryal ön analiz
+              Model: {aiDurum?.model || "claude-sonnet-4-6"} · Eser inceleme, AI Menajer, AI takip sorusu (tek anahtar)
               {aiDurum?.baglantiTesti && (
                 aiDurum.baglantiTesti.basarili
                   ? ` · Bağlantı testi: ${aiDurum.baglantiTesti.gecikmeMs}ms'de yanıt verdi`
-                  : ` · Bağlantı testi BAŞARISIZ: ${aiDurum.baglantiTesti.hata}`
+                  : aiDurum.baglantiTesti.krediYetersizMi
+                    ? ` · Anthropic hesabındaki kredi bitti — console.anthropic.com/settings/billing üzerinden yükleme yapılmalı`
+                    : ` · Bağlantı testi BAŞARISIZ: ${aiDurum.baglantiTesti.hata}`
               )}
             </div>
+            {aiDurum?.baglantiTesti?.krediYetersizMi && (
+              <div style={{ fontSize: 10.5, color: THEME.textFaint, marginTop: 3 }}>
+                Not: kalan bakiye tutarını (₺) panelden gösteremiyoruz — Anthropic bunun için herkese açık bir API sunmuyor, yalnızca console'da manuel görülebiliyor.
+              </div>
+            )}
           </div>
         </div>
         <div style={{ display: "flex", gap: 8 }}>
@@ -2394,6 +2411,90 @@ function LaboratuvarKuyrugu({ authFetch }) {
 }
 
 // ============ Bölüm 9 — AKADEMİ UZMAN KAPISI ============
+// EKLENDİ (6 Ağu 2026, kullanıcı talebi — "AI'larına direktif
+// gönderebileceğimiz bir panelimiz olmalı"): AI Menajer'in temel davranış
+// talimatı (anayasa) artık burada, koddan bağımsız olarak düzenlenebilir.
+// Değişiklik en geç 60 saniye içinde canlıya yansır (backend önbelleği).
+function MenajerDirektifleri({ authFetch }) {
+  const [direktif, setDirektif] = useState("");
+  const [orijinal, setOrijinal] = useState("");
+  const [varsayilanMi, setVarsayilanMi] = useState(true);
+  const [guncelleyen, setGuncelleyen] = useState(null);
+  const [guncellemeTarihi, setGuncellemeTarihi] = useState(null);
+  const [mesaj, setMesaj] = useState("");
+  const [calisiyor, setCalisiyor] = useState(false);
+  const [yukleniyor, setYukleniyor] = useState(true);
+
+  const yukle = async () => {
+    setYukleniyor(true);
+    try {
+      const r = await authFetch("/api/admin/menajer-direktif");
+      const d = await r.json();
+      setDirektif(d.direktif || ""); setOrijinal(d.direktif || "");
+      setVarsayilanMi(!!d.varsayilanMi); setGuncelleyen(d.guncelleyen); setGuncellemeTarihi(d.guncellemeTarihi);
+    } catch { setMesaj("Sunucuya ulaşılamadı."); }
+    finally { setYukleniyor(false); }
+  };
+  useEffect(() => { yukle(); }, []);
+
+  const kaydet = async () => {
+    if (calisiyor || direktif.trim() === orijinal.trim()) return;
+    setCalisiyor(true); setMesaj("");
+    try {
+      const r = await authFetch("/api/admin/menajer-direktif", { method: "POST", body: JSON.stringify({ direktif }) });
+      const d = await r.json();
+      if (d.ok) { setMesaj("Kaydedildi — en geç 60 saniye içinde canlıya yansır."); yukle(); }
+      else setMesaj(d.error || "Kaydedilemedi.");
+    } catch { setMesaj("Sunucuya ulaşılamadı."); }
+    finally { setCalisiyor(false); }
+  };
+
+  const fabrikaAyarinaDon = async () => {
+    try {
+      const r = await authFetch("/api/admin/menajer-direktif/varsayilan");
+      const d = await r.json();
+      setDirektif(d.direktif || "");
+      setMesaj("Fabrika ayarı metne yüklendi — kaydetmeyi unutmayın.");
+    } catch { setMesaj("Sunucuya ulaşılamadı."); }
+  };
+
+  const kutu = { background: THEME.panelBg, border: `1px solid ${THEME.border}`, borderRadius: 14, padding: 20, marginBottom: 16 };
+  const btn = (dolu) => ({ padding: "9px 18px", borderRadius: 8, fontSize: 12.5, fontWeight: 600, cursor: "pointer",
+    border: dolu ? "none" : `1px solid ${THEME.border}`, background: dolu ? THEME.cyan : THEME.panelBg, color: dolu ? "#fff" : THEME.textLight });
+
+  return (
+    <div>
+      <h2 style={{ color: THEME.textLight, fontFamily: FONT_DISPLAY, fontSize: 24, fontWeight: 600, margin: "0 0 6px" }}>AI Menajer Direktifleri</h2>
+      <div style={{ fontSize: 13, color: THEME.textMuted, marginBottom: 18 }}>
+        AI Menajer'in her yazarla konuşurken uyduğu temel kurallar. Buradaki değişiklik kod değişikliği gerektirmez, deploy beklemez.
+      </div>
+
+      {mesaj && <div style={{ ...kutu, color: THEME.cyan, fontSize: 13 }}>{mesaj}</div>}
+
+      <div style={kutu}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+          <span style={{ fontSize: 11, color: THEME.textFaint }}>
+            {varsayilanMi ? "Fabrika ayarı kullanılıyor (hiç özelleştirilmemiş)"
+              : `Son güncelleyen: ${guncelleyen || "bilinmiyor"} · ${guncellemeTarihi ? new Date(guncellemeTarihi).toLocaleString("tr-TR") : ""}`}
+          </span>
+          <button onClick={fabrikaAyarinaDon} style={btn(false)}>Fabrika ayarına dön</button>
+        </div>
+        {yukleniyor ? <div style={{ fontSize: 13, color: THEME.textMuted }}>Yükleniyor…</div> : (
+          <textarea value={direktif} onChange={e => setDirektif(e.target.value)} rows={22}
+            style={{ width: "100%", background: THEME.panelBgAlt, color: THEME.textLight, border: `1px solid ${THEME.border}`,
+                     borderRadius: 8, padding: 14, fontSize: 13, fontFamily: "monospace", lineHeight: 1.6, resize: "vertical", boxSizing: "border-box" }} />
+        )}
+        <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+          <button onClick={kaydet} disabled={calisiyor || direktif.trim() === orijinal.trim()} style={btn(true)}>
+            {calisiyor ? "Kaydediliyor…" : "Kaydet"}
+          </button>
+          {direktif.trim() !== orijinal.trim() && <span style={{ fontSize: 12, color: THEME.warn, alignSelf: "center" }}>Kaydedilmemiş değişiklik var</span>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function AkademiUzmanKapisi({ authFetch }) {
   const [bekleyen, setBekleyen] = useState([]);
   const [sozluk, setSozluk] = useState({});
@@ -8481,6 +8582,7 @@ export default function AdminPanel() {
     ["adayKokpiti", "Aday Kokpiti"],
     ["adayKazanimOgrenme", "Aday Kazanım Öğrenmeleri"],
     ["akademiUzman", "Akademi Uzman Kapısı"],
+    ["menajerDirektif", "AI Menajer Direktifleri"],
     ["reklamLtv", "Reklam LTV Zinciri"],
     ["gorusmePlani", "Görüşme Oyun Planı"],
     ["teklifMerkezi", "Teklif Merkezi"],
@@ -8625,6 +8727,7 @@ export default function AdminPanel() {
         {view === "adayKokpiti" && <AdayKokpiti authFetch={authFetch} />}
         {view === "adayKazanimOgrenme" && <AdayKazanimOgrenmeleri authFetch={authFetch} />}
         {view === "akademiUzman" && <AkademiUzmanKapisi authFetch={authFetch} />}
+        {view === "menajerDirektif" && <MenajerDirektifleri authFetch={authFetch} />}
         {view === "reklamLtv" && <ReklamLtv authFetch={authFetch} />}
         {view === "gorusmePlani" && <GorusmeOyunPlani authFetch={authFetch} />}
         {view === "teklifMerkezi" && <TeklifMerkezi authFetch={authFetch} />}
