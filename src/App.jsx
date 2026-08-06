@@ -1159,436 +1159,19 @@ const ADAY_ESER_DURUM = {
   reddedildi: { ad: "Reddedildi", renk: "#7A7A7A" },
 };
 
-function YazarAdaylari({ authFetch }) {
-  const [adaylar, setAdaylar] = useState([]);
-  const [kaynaklar, setKaynaklar] = useState([]);
-  const [secili, setSecili] = useState(null); // { aday, eserler }
-  const [filtre, setFiltre] = useState("hepsi");
-  const [redMetni, setRedMetni] = useState("");
-  const [redAcik, setRedAcik] = useState(null); // eser id
-  const [mesaj, setMesaj] = useState("");
-  const [calisiyor, setCalisiyor] = useState(false);
-  // Model 2 madde 7-8 — Editöryal değerlendirme formu (hukuki/güvenlik onay-red
-  // akışından AYRI, ek bir katman). Backend ucu hazır olunca /api/admin/eserler/:id/editoryal-degerlendirme'ye kaydedilecek.
-  const [editForm, setEditForm] = useState({
-    karar: "", // "hazir" | "gelistirme" | "henuz_degil"
-    gucluYonler: "", eksikYonler: "", hedefOkur: "", editorlukIhtiyaci: "",
-    hazirlikSeviyesi: "", sonrakiAdim: "", editorNotu: "",
-  });
-  const [editAcikEserId, setEditAcikEserId] = useState(null);
-
-  const yukle = async () => {
-    try {
-      const r = await authFetch("/api/admin/adaylar");
-      const d = await r.json();
-      setAdaylar(d.adaylar || []);
-      const r2 = await authFetch("/api/admin/aday-kaynak-analizi");
-      const d2 = await r2.json();
-      setKaynaklar(d2.kaynaklar || []);
-    } catch { setMesaj("Sunucuya ulaşılamadı."); }
-  };
-  useEffect(() => { yukle(); }, []);
-
-  // EKLENDİ (5 Ağu 2026, kullanıcı talebi — "aday ile danışman arasında
-  // köprü"): önceden bu ekran yalnız eser onay/red işlevi görüyordu, danışman
-  // brifingi (Karar Dosyası) TAMAMEN AYRI bir menüdeydi (Danışman Kokpiti).
-  // Editör bir adayı incelerken danışmanın kullanacağı zengin analizi hiç
-  // görmüyordu. Artık aynı ekranda — iki ayrı, birbirinden habersiz menüye
-  // gitmeye gerek yok.
-  const [kararDosyasi, setKararDosyasi] = useState(null);
-  const [kdYukleniyor, setKdYukleniyor] = useState(false);
-  const [kdAcik, setKdAcik] = useState(true);
-
-  const kararDosyasiKanitDogrula = async (kanitId, durum) => {
-    if (!secili || calisiyor) return;
-    try {
-      await authFetch(`/api/admin/adaylar/${secili.aday.id}/dogrulama`, {
-        method: "POST", body: JSON.stringify({ kanitId, durum }) });
-      const r = await authFetch(`/api/admin/adaylar/${secili.aday.id}/karar-dosyasi`);
-      setKararDosyasi(await r.json());
-    } catch { setMesaj("Kanıt doğrulaması kaydedilemedi."); }
-  };
-
-  const detayAc = async (aday) => {
-    setMesaj(""); setKararDosyasi(null);
-    try {
-      const r = await authFetch(`/api/admin/adaylar/${aday.id}/rapor`);
-      const d = await r.json();
-      setSecili({ aday, eserler: d.eserler || [] });
-    } catch { setMesaj("Rapor okunamadı."); }
-    setKdYukleniyor(true);
-    try {
-      const r2 = await authFetch(`/api/admin/adaylar/${aday.id}/karar-dosyasi`);
-      setKararDosyasi(await r2.json());
-    } catch { /* karar dosyası henüz oluşmamış olabilir — sessizce geç */ }
-    finally { setKdYukleniyor(false); }
-  };
-
-  const onayla = async (eserId) => {
-    if (calisiyor) return; setCalisiyor(true); setMesaj("");
-    try {
-      const r = await authFetch(`/api/admin/eserler/${eserId}/onayla`, { method: "POST" });
-      const d = await r.json();
-      if (d.ok) { setMesaj(`Onaylandı — belge no: ${d.sertifikaNo}`); detayAc(secili.aday); yukle(); }
-      else setMesaj(d.error || "Onaylanamadı.");
-    } catch { setMesaj("Sunucuya ulaşılamadı."); }
-    finally { setCalisiyor(false); }
-  };
-
-  const reddet = async (eserId) => {
-    const gerekceler = redMetni.split("\n").map(s => s.trim()).filter(Boolean);
-    if (!gerekceler.length) { setMesaj("Her satıra bir gerekçe yazın."); return; }
-    if (calisiyor) return; setCalisiyor(true); setMesaj("");
-    try {
-      const r = await authFetch(`/api/admin/eserler/${eserId}/reddet`, { method: "POST", body: JSON.stringify({ gerekceler }) });
-      const d = await r.json();
-      if (d.ok) { setMesaj("Reddedildi — gerekçeler adayın uygulamasında görünecek."); setRedAcik(null); setRedMetni(""); detayAc(secili.aday); yukle(); }
-      else setMesaj(d.error || "Reddedilemedi.");
-    } catch { setMesaj("Sunucuya ulaşılamadı."); }
-    finally { setCalisiyor(false); }
-  };
-
-  // Model 2 madde 7 — Editöryal karar modeli. Hukuki/güvenlik onay-red akışından
-  // ayrı, ek bir değerlendirme katmanı. Boş veya tamamen genel rapor engellenir:
-  // en az bir güçlü yön ve bir geliştirme önerisi zorunludur.
-  const editoryalKaydet = async (eserId) => {
-    if (!editForm.karar) { setMesaj("Bir karar seçin: Yayına hazır / Editöryal geliştirmeyle uygun / Henüz hazır değil."); return; }
-    if (!editForm.gucluYonler.trim()) { setMesaj("En az bir güçlü yön belirtin."); return; }
-    if (!editForm.eksikYonler.trim()) { setMesaj("En az bir geliştirme önerisi belirtin."); return; }
-    if (calisiyor) return; setCalisiyor(true); setMesaj("");
-    try {
-      const r = await authFetch(`/api/admin/eserler/${eserId}/editoryal-degerlendirme`, {
-        method: "POST",
-        body: JSON.stringify({
-          karar: editForm.karar,
-          gucluYonler: editForm.gucluYonler, eksikYonler: editForm.eksikYonler,
-          hedefOkur: editForm.hedefOkur, editorlukIhtiyaci: editForm.editorlukIhtiyaci,
-          hazirlikSeviyesi: editForm.hazirlikSeviyesi, sonrakiAdim: editForm.sonrakiAdim,
-          editorNotu: editForm.editorNotu,
-        }),
-      });
-      const d = await r.json();
-      if (d.ok) { setMesaj("Editöryal değerlendirme kaydedildi."); setEditAcikEserId(null); detayAc(secili.aday); yukle(); }
-      else setMesaj(d.error || "Kaydedilemedi.");
-    } catch { setMesaj("Sunucuya ulaşılamadı — bu özellik için backend ucu henüz eklenmemiş olabilir."); }
-    finally { setCalisiyor(false); }
-  };
-
-  // Model 2 madde 11 — genişletilmiş filtreler
-  const filtreli = adaylar.filter(a => {
-    if (filtre === "hepsi") return true;
-    if (filtre === "onay_bekleyen") return a.eser_durum === "rapor_hazir";
-    if (filtre === "yazar") return a.tip === "yazar";
-    if (filtre === "okur") return a.tip === "okur";
-    if (filtre === "dosya_yuklemeyen") return a.tip === "yazar" && !a.eser_id;
-    if (filtre === "analizi_suren") return a.eser_durum === "incelemede";
-    if (filtre === "raporu_hazir") return a.eser_durum === "rapor_hazir";
-    if (filtre === "gorusme_bekleyen") return (a.bekleyen_gorusme || 0) > 0;
-    if (filtre === "hareketsiz") return a.son_giris && (Date.now() - new Date(a.son_giris).getTime()) > 7 * 24 * 3600 * 1000;
-    if (filtre === "takip_yaklasan") return a.sonraki_takip_tarihi && new Date(a.sonraki_takip_tarihi) <= new Date(Date.now() + 3 * 24 * 3600 * 1000);
-    return true;
-  });
-  const onayBekleyen = adaylar.filter(a => a.eser_durum === "rapor_hazir").length;
-  const kutu = { background: THEME.cardBg, border: `1px solid ${THEME.border}`, borderRadius: 8, padding: 16, marginBottom: 14 };
-  const inputStyle = { background: THEME.bg, color: THEME.textLight, border: `1px solid ${THEME.border}`, borderRadius: 4, padding: "8px 11px", fontSize: 13, fontFamily: "inherit", width: "100%", boxSizing: "border-box" };
-
-  if (secili) {
-    return (
-      <div>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-          <h2 style={{ color: THEME.textLight, fontFamily: FONT, fontSize: 20, margin: 0 }}>{secili.aday.ad_soyad}</h2>
-          <button onClick={() => { setSecili(null); setRedAcik(null); setMesaj(""); }} style={{ ...inputStyle, width: "auto", cursor: "pointer" }}>← Listeye dön</button>
-        </div>
-        <div style={{ fontSize: 12.5, color: THEME.textMuted, marginBottom: 14 }}>
-          {secili.aday.telefon} · {secili.aday.eposta || "e-posta yok"} · Kaynak: <b>{secili.aday.kaynak || "bilinmiyor"}</b>
-          {/* Model 2 madde 10: "İkna profili" ifadesi kullanıcı arayüzünden kaldırıldı,
-              admin panelinde "Aday Hazırlık Puanı" kullanılıyor. Bu puan adaya hiç gösterilmez. */}
-          {secili.aday.ikna_profili && (
-            <div style={{ marginTop: 12, padding: "12px 14px", background: "rgba(201,162,75,.06)", border: "1px solid rgba(201,162,75,.25)", borderRadius: 4 }}>
-              <div style={{ fontSize: 10, letterSpacing: ".2em", color: "rgba(201,162,75,.7)", marginBottom: 8 }}>ADAY HAZIRLIK PUANI</div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-                {Object.entries(secili.aday.ikna_profili).map(([k, v]) => (
-                  <div key={k} style={{ fontSize: 12 }}>
-                    <span style={{ color: THEME.textMuted }}>{k}: </span>
-                    <span style={{ color: THEME.textLight, fontWeight: 600 }}>{v}</span>
-                  </div>
-                ))}
-              </div>
-              <div style={{ marginTop: 8, fontSize: 11, color: "rgba(201,162,75,.6)", fontStyle: "italic" }}>
-                Akademi ilerleme: Modül {secili.aday.akademi_mod || 0}/10
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* DANIŞMAN BRİFİNGİ — EKLENDİ (5 Ağu 2026, kullanıcı talebi):
-            "aday ile danışman arasında köprü". Aynı Karar Dosyası burada da
-            görünüyor — editör eseri değerlendirirken danışmanın kullanacağı
-            zengin brifingi de görür, ayrı bir menüye gitmesi gerekmez. */}
-        <div style={{ ...kutu, borderColor: "rgba(93,163,214,.35)" }}>
-          <div onClick={() => setKdAcik(!kdAcik)}
-            style={{ display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer" }}>
-            <div style={{ color: THEME.cyan, fontWeight: 700, fontSize: 14 }}>
-              ◆ Danışman Brifingi — Karar Dosyası
-            </div>
-            <span style={{ color: THEME.textMuted, fontSize: 12 }}>{kdAcik ? "▲ gizle" : "▼ göster"}</span>
-          </div>
-          <div style={{ fontSize: 11.5, color: THEME.textMuted, marginTop: 4 }}>
-            Görüşmeye giden danışmanın kullanacağı bilinen/tahmin/bilinmeyen ayrımı — aynı içerik Danışman Kokpiti'nde de görünür.
-          </div>
-          {kdAcik && (
-            <div style={{ marginTop: 12 }}>
-              {kdYukleniyor && <div style={{ fontSize: 12.5, color: THEME.textMuted }}>Yükleniyor…</div>}
-              {!kdYukleniyor && (
-                <KararDosyasiGovde ad={secili.aday.ad_soyad} dosya={kararDosyasi}
-                  kanitDogrula={kararDosyasiKanitDogrula} calisiyor={calisiyor}
-                  hazirlikPuani={secili.aday.hazirlik_puani} />
-              )}
-            </div>
-          )}
-        </div>
-
-        {mesaj && <div style={{ ...kutu, color: THEME.cyan, fontSize: 13 }}>{mesaj}</div>}
-        {!secili.eserler.length && <div style={kutu}>Bu aday henüz eser yüklemedi.</div>}
-        {secili.eserler.map(e => {
-          const d = ADAY_ESER_DURUM[e.durum] || { ad: e.durum, renk: THEME.textMuted };
-          const rapor = e.rapor || {};
-          const ozet = rapor.ozet || {};
-          return (
-            <div key={e.id} style={kutu}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-                <div style={{ color: THEME.textLight, fontWeight: 700, fontSize: 15 }}>{e.eser_adi} <span style={{ color: THEME.textMuted, fontWeight: 400, fontSize: 12 }}>({e.tur || "tür belirtilmedi"} · {Math.round((e.karakter_sayisi || 0) / 1000)}k karakter)</span></div>
-                <span style={{ color: d.renk, fontWeight: 700, fontSize: 12.5 }}>{d.ad}{e.sertifika_no ? ` · ${e.sertifika_no}` : ""}</span>
-              </div>
-              {rapor.oneri && (
-                <div style={{ fontSize: 13, marginBottom: 10, color: THEME.textLight }}>
-                  AI önerisi: <b style={{ color: rapor.oneri === "yayina_uygun_gorunuyor" ? "#2E7D32" : rapor.oneri === "duzeltme_gerekli" ? "#C0392B" : "#C9A227" }}>
-                    {rapor.oneri === "yayina_uygun_gorunuyor" ? "Yayına uygun görünüyor" : rapor.oneri === "duzeltme_gerekli" ? "Düzeltme gerekli" : "Dikkatli inceleme"}
-                  </b>
-                  <span style={{ color: THEME.textMuted }}> — {ozet.toplam ?? 0} bulgu ({ozet.yuksek ?? 0} yüksek · {ozet.orta ?? 0} orta · {ozet.dusuk ?? 0} düşük)</span>
-                </div>
-              )}
-              {(rapor.bulgular || []).map((b, i) => (
-                <div key={i} style={{ borderLeft: `3px solid ${ADAY_SIDDET[b.siddet] || "#7A7A7A"}`, padding: "6px 10px", marginBottom: 6, background: THEME.bg, borderRadius: 4 }}>
-                  <div style={{ fontSize: 12.5, color: THEME.textLight, fontWeight: 600 }}>{ADAY_KATEGORI[b.kategori] || b.kategori} <span style={{ color: ADAY_SIDDET[b.siddet], fontSize: 11 }}>({b.siddet})</span> <span style={{ color: THEME.textMuted, fontWeight: 400 }}>· {b.parca}. bölüm</span></div>
-                  {b.alinti && <div style={{ fontSize: 12, color: THEME.textMuted, fontStyle: "italic" }}>"{b.alinti}"</div>}
-                  <div style={{ fontSize: 12, color: THEME.textMuted }}>{b.aciklama}</div>
-                </div>
-              ))}
-              {e.durum === "rapor_hazir" && (
-                <div style={{ marginTop: 12 }}>
-                  <button onClick={() => onayla(e.id)} disabled={calisiyor} style={{ background: "#2E7D32", color: "#fff", border: "none", borderRadius: 4, padding: "9px 18px", fontSize: 13, fontWeight: 700, cursor: "pointer", marginRight: 8 }}>ONAYLA — YAYINA UYGUNLUK BELGESİ AÇ</button>
-                  <button onClick={() => setRedAcik(redAcik === e.id ? null : e.id)} style={{ background: "transparent", color: "#C0392B", border: "1px solid #C0392B", borderRadius: 4, padding: "9px 18px", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>REDDET…</button>
-                  {redAcik === e.id && (
-                    <div style={{ marginTop: 10 }}>
-                      <textarea value={redMetni} onChange={ev => setRedMetni(ev.target.value)} rows={4} placeholder={"Her satıra bir gerekçe yazın — aday bunları uygulamasında görecek.\nÖrn: Gerçek bir kurum hedef gösteriliyor (3. bölüm)"} style={{ ...inputStyle, resize: "vertical" }} />
-                      <button onClick={() => reddet(e.id)} disabled={calisiyor} style={{ marginTop: 8, background: "#C0392B", color: "#fff", border: "none", borderRadius: 4, padding: "9px 18px", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>Gerekçelerle reddet</button>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* Model 2 madde 7 — Editöryal değerlendirme (hukuki onay/red'den ayrı katman).
-                  Sertifika onayından bağımsız olarak, hukuki riski onaylanmış (ya da bekleyen)
-                  her eser için editör kalite değerlendirmesi girilebilir. */}
-              {(e.durum === "rapor_hazir" || e.durum === "onaylandi") && (
-                <div style={{ marginTop: 14, borderTop: `1px dashed ${THEME.border}`, paddingTop: 12 }}>
-                  <button onClick={() => setEditAcikEserId(editAcikEserId === e.id ? null : e.id)}
-                    style={{ ...inputStyle, width: "auto", cursor: "pointer", background: "transparent", color: THEME.cyan, border: `1px solid ${THEME.cyan}` }}>
-                    {editAcikEserId === e.id ? "Editöryal formu kapat" : "Editöryal Değerlendirme Gir…"}
-                  </button>
-                  {editAcikEserId === e.id && (
-                    <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 8 }}>
-                      {/* EKLENDİ (5 Ağu 2026, kullanıcı talebi): AI'ın ürettiği
-                          ham analiz artık burada görünüyor — editör sıfırdan
-                          yazmak yerine buradan başlayabilir. Karar HÂLÂ
-                          editöre ait; bu yalnızca bir öneri, "AI Ön Analizi"
-                          etiketiyle açıkça işaretli. */}
-                      {e.ai_editoryal_onanaliz && (() => {
-                        let ai; try { ai = JSON.parse(e.ai_editoryal_onanaliz); } catch { ai = null; }
-                        if (!ai) return null;
-                        return (
-                          <div style={{ background: "rgba(93,163,214,.06)", border: `1px solid rgba(93,163,214,.28)`,
-                                        borderRadius: 6, padding: "12px 14px", marginBottom: 4 }}>
-                            <div style={{ fontSize: 11, fontWeight: 700, color: THEME.cyan, marginBottom: 8, letterSpacing: .3 }}>
-                              AI ÖN ANALİZİ — öneri niteliğindedir, karar editöre aittir
-                            </div>
-                            {ai.ozet && <div style={{ fontSize: 12.5, color: THEME.textLight, marginBottom: 8 }}>{ai.ozet}</div>}
-                            {ai.guclu_yonler?.length > 0 && (
-                              <div style={{ fontSize: 12, color: THEME.textMuted, marginBottom: 6 }}>
-                                <b style={{ color: THEME.success }}>Güçlü yönler:</b> {ai.guclu_yonler.join(" · ")}
-                              </div>
-                            )}
-                            {ai.gelistirilecek?.length > 0 && (
-                              <div style={{ fontSize: 12, color: THEME.textMuted, marginBottom: 6 }}>
-                                <b style={{ color: THEME.warn }}>Geliştirilecek:</b> {ai.gelistirilecek.join(" · ")}
-                              </div>
-                            )}
-                            {ai.editor_sorunlari?.length > 0 && (
-                              <div style={{ fontSize: 12, color: THEME.textMuted, marginBottom: 6 }}>
-                                <b style={{ color: THEME.danger }}>Editör sorunları:</b> {ai.editor_sorunlari.join(" · ")}
-                              </div>
-                            )}
-                            {ai.yazim_kalitesi && (
-                              <div style={{ fontSize: 12, color: THEME.textMuted, marginBottom: 6 }}>
-                                <b>Yazım kalitesi:</b> {({ az: "az hata", orta: "orta düzeyde hata", sik: "sık hata" })[ai.yazim_kalitesi.seviye] || ai.yazim_kalitesi.seviye}
-                                {ai.yazim_kalitesi.aciklama ? ` — ${ai.yazim_kalitesi.aciklama}` : ""}
-                                <span style={{ color: THEME.textFaint, fontSize: 10.5 }}> (AI izlenimi, kesin sayım değildir)</span>
-                              </div>
-                            )}
-                            {ai.tur_benzerligi?.emin_mi && ai.tur_benzerligi?.tarz_gozlemi && (
-                              <div style={{ fontSize: 12, color: THEME.textMuted, marginBottom: 6 }}>
-                                <b>Tarz gözlemi:</b> {ai.tur_benzerligi.tarz_gozlemi}
-                                <span style={{ color: THEME.textFaint, fontSize: 10.5 }}> (tahmini, kesin kaynak değildir)</span>
-                              </div>
-                            )}
-                            {ai.hazirlik_seviyesi && (
-                              <div style={{ fontSize: 12, color: THEME.textMuted, marginBottom: 8 }}>
-                                <b>Hazırlık seviyesi:</b> {ai.hazirlik_seviyesi}
-                              </div>
-                            )}
-                            <button onClick={() => setEditForm({
-                                ...editForm,
-                                gucluYonler: (ai.guclu_yonler || []).join("\n"),
-                                eksikYonler: (ai.gelistirilecek || []).join("\n"),
-                                hedefOkur: ai.hedef_okur || editForm.hedefOkur,
-                                hazirlikSeviyesi: ai.hazirlik_seviyesi || editForm.hazirlikSeviyesi,
-                                sonrakiAdim: ai.onerilen_calisma || editForm.sonrakiAdim,
-                              })}
-                              style={{ ...inputStyle, width: "auto", cursor: "pointer", fontSize: 11.5,
-                                       background: "transparent", color: THEME.cyan, border: `1px solid ${THEME.cyan}` }}>
-                              AI önerisini forma aktar (gözden geçirip düzenleyin)
-                            </button>
-                          </div>
-                        );
-                      })()}
-                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                        {[["hazir", "Yayına hazırlık için uygun"], ["gelistirme", "Editöryal geliştirmeyle uygun"], ["henuz_degil", "Henüz hazır değil"]].map(([k, ad]) => (
-                          <button key={k} onClick={() => setEditForm({ ...editForm, karar: k })}
-                            style={{ ...inputStyle, width: "auto", cursor: "pointer",
-                              background: editForm.karar === k ? THEME.cyan : THEME.bg,
-                              color: editForm.karar === k ? THEME.onAccent : THEME.textLight,
-                              fontWeight: editForm.karar === k ? 700 : 500 }}>{ad}</button>
-                        ))}
-                      </div>
-                      <textarea value={editForm.gucluYonler} onChange={ev => setEditForm({ ...editForm, gucluYonler: ev.target.value })} rows={2} placeholder="Güçlü yönler (zorunlu — en az bir madde)" style={{ ...inputStyle, resize: "vertical" }} />
-                      <textarea value={editForm.eksikYonler} onChange={ev => setEditForm({ ...editForm, eksikYonler: ev.target.value })} rows={2} placeholder="Geliştirilmesi gereken alanlar (zorunlu — en az bir madde)" style={{ ...inputStyle, resize: "vertical" }} />
-                      <textarea value={editForm.hedefOkur} onChange={ev => setEditForm({ ...editForm, hedefOkur: ev.target.value })} rows={2} placeholder="Hedef okur değerlendirmesi" style={{ ...inputStyle, resize: "vertical" }} />
-                      <input value={editForm.editorlukIhtiyaci} onChange={ev => setEditForm({ ...editForm, editorlukIhtiyaci: ev.target.value })} placeholder="Editörlük ihtiyacı" style={inputStyle} />
-                      <input value={editForm.hazirlikSeviyesi} onChange={ev => setEditForm({ ...editForm, hazirlikSeviyesi: ev.target.value })} placeholder="Yayın hazırlık seviyesi" style={inputStyle} />
-                      <input value={editForm.sonrakiAdim} onChange={ev => setEditForm({ ...editForm, sonrakiAdim: ev.target.value })} placeholder="Önerilen sonraki adım" style={inputStyle} />
-                      <textarea value={editForm.editorNotu} onChange={ev => setEditForm({ ...editForm, editorNotu: ev.target.value })} rows={2} placeholder="Adaya özel editör notu" style={{ ...inputStyle, resize: "vertical" }} />
-                      <button onClick={() => editoryalKaydet(e.id)} disabled={calisiyor}
-                        style={{ background: THEME.cyan, color: THEME.onAccent, border: "none", borderRadius: 4, padding: "9px 18px", fontSize: 13, fontWeight: 700, cursor: "pointer", width: "fit-content" }}>
-                        Editöryal Değerlendirmeyi Kaydet
-                      </button>
-                      {/* Madde 8 — Rapor görünürlüğü onay/sertifikadan AYRIDIR.
-                          Böylece "henuz_degil" sonucu da adaya gösterilebilir. */}
-                      <button onClick={async () => {
-                        setCalisiyor(true); setMesaj("");
-                        try {
-                          const r = await authFetch(`/api/admin/eserler/${e.id}/rapor-yayinla`, { method: "POST" });
-                          const v = await r.json();
-                          setMesaj(v.ok ? "Rapor adaya açıldı." : (v.error || "Yayınlanamadı."));
-                          if (v.ok) { detayAc(secili.aday); yukle(); }
-                        } catch { setMesaj("Sunucuya ulaşılamadı."); }
-                        finally { setCalisiyor(false); }
-                      }} disabled={calisiyor}
-                        style={{ background: "transparent", color: "#C9A227", border: "1px solid #C9A227", borderRadius: 4, padding: "9px 18px", fontSize: 13, fontWeight: 700, cursor: "pointer", width: "fit-content", marginTop: 6 }}>
-                        RAPORU ADAYA AÇ (onaydan bağımsız)
-                      </button>
-                    </div>
-                  )}
-                </div>
-              )}
-              {e.durum === "incelemede" && <div style={{ fontSize: 12.5, color: THEME.textMuted }}>AI incelemesi sürüyor: {e.toplam_parca ? Math.round(((e.son_islenen_parca || 0) / e.toplam_parca) * 100) : 0}%</div>}
-              {e.durum === "reddedildi" && (e.red_gerekceleri || []).map((g, i) => <div key={i} style={{ fontSize: 12.5, color: THEME.textMuted }}>• {g}</div>)}
-            </div>
-          );
-        })}
-      </div>
-    );
-  }
-
-  return (
-    <div>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-        <h2 style={{ color: THEME.textLight, fontFamily: FONT, fontSize: 20, margin: 0 }}>Yazar Adayları</h2>
-        <button onClick={yukle} style={{ ...inputStyle, width: "auto", cursor: "pointer" }}>Yenile</button>
-      </div>
-      <div style={{ fontSize: 12, color: THEME.textMuted, marginBottom: 14 }}>
-        Eser metinleri panele gelmez — yalnızca AI raporu görünür. Bu, adaylara verdiğimiz gizlilik sözünün teknik karşılığıdır.
-      </div>
-      {mesaj && <div style={{ ...kutu, color: THEME.cyan, fontSize: 13 }}>{mesaj}</div>}
-      <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
-        {[["hepsi", `Hepsi (${adaylar.length})`], ["onay_bekleyen", `Onay bekleyen (${onayBekleyen})`], ["yazar", "Yazar adayları"], ["okur", "Okurlar"],
-          ["dosya_yuklemeyen", "Dosya yüklemeyen"], ["analizi_suren", "Analizi süren"], ["gorusme_bekleyen", "Görüşme bekleyen"],
-          ["hareketsiz", "Hareketsiz (7g+)"], ["takip_yaklasan", "Takibi yaklaşan"]].map(([k, ad]) => (
-          <button key={k} onClick={() => setFiltre(k)} style={{ ...inputStyle, width: "auto", cursor: "pointer", background: filtre === k ? THEME.cyan : THEME.bg, color: filtre === k ? THEME.onAccent : THEME.textLight, fontWeight: filtre === k ? 700 : 500 }}>{ad}</button>
-        ))}
-      </div>
-      <div style={kutu}>
-        {!filtreli.length && <div style={{ color: THEME.textMuted, fontSize: 13 }}>Kayıt yok.</div>}
-        {filtreli.map(a => {
-          const d = a.eser_durum ? (ADAY_ESER_DURUM[a.eser_durum] || { ad: a.eser_durum, renk: THEME.textMuted }) : null;
-          return (
-            <div key={a.id} onClick={() => detayAc(a)} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 8px", borderBottom: `1px solid ${THEME.border}`, cursor: "pointer" }}>
-              <div>
-                <div style={{ color: THEME.textLight, fontWeight: 600, fontSize: 13.5 }}>{a.ad_soyad} <span style={{ color: THEME.textMuted, fontWeight: 400, fontSize: 12 }}>· {a.tip === "okur" ? "okur" : a.tip === "yazar" ? "yazar adayı" : "seçim yapmadı"}</span></div>
-                <div style={{ color: THEME.textMuted, fontSize: 12 }}>{a.telefon} · kaynak: {a.kaynak || "—"} · {a.eser_adi ? `Eser: ${a.eser_adi}` : "eser yüklemedi"}</div>
-                {/* Model 2 madde 11 — UTM, danışman, sonraki takip */}
-                <div style={{ color: THEME.textMuted, fontSize: 11, marginTop: 2 }}>
-                  {a.utm_campaign && <span>UTM: {a.utm_campaign} · </span>}
-                  {a.son_atanan_danisman && <span>Danışman: {a.son_atanan_danisman} · </span>}
-                  {a.bekleyen_gorusme > 0 && <span style={{ color: "#C9A227" }}>{a.bekleyen_gorusme} bekleyen görüşme · </span>}
-                  {a.sonraki_takip_tarihi && <span>Takip: {new Date(a.sonraki_takip_tarihi).toLocaleDateString("tr-TR")}</span>}
-                </div>
-              </div>
-              <div style={{ textAlign: "right", display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
-                {d && <div style={{ color: d.renk, fontWeight: 700, fontSize: 12 }}>{d.ad}</div>}
-                <div style={{ color: "rgba(201,162,75,.8)", fontSize: 11 }}>Hazırlık: {a.hazirlik_puani ?? 0}</div>
-                <div style={{ color: THEME.textMuted, fontSize: 11 }}>{new Date(a.created_at).toLocaleDateString("tr-TR")}</div>
-                {/* Akademi ilerleme — her zaman görünür */}
-                <div style={{ display: "flex", alignItems: "center", gap: 5, marginTop: 4 }}>
-                  <div style={{ width: 64, height: 5, background: "rgba(201,162,75,.18)", borderRadius: 2, overflow: "hidden", border: "1px solid rgba(201,162,75,.25)" }}>
-                    <div style={{ height: "100%", width: `${Math.max(4, Math.round(((a.akademi_mod || 0) / 10) * 100))}%`, background: (a.akademi_mod || 0) === 0 ? "rgba(201,162,75,.3)" : "linear-gradient(90deg,#8C6A22,#C9A24B)", transition: "width .3s" }} />
-                  </div>
-                  <span style={{ fontSize: 10, color: (a.akademi_mod || 0) > 0 ? "rgba(201,162,75,.9)" : "rgba(201,162,75,.45)", fontWeight: (a.akademi_mod || 0) > 0 ? 600 : 400 }}>
-                    {(a.akademi_mod || 0) === 0 ? "Başlamadı" : `${a.akademi_mod}/10 modül`}
-                  </span>
-                </div>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-      <div style={kutu}>
-        <div style={{ color: THEME.textLight, fontWeight: 700, fontSize: 14, marginBottom: 10 }}>Reklam Kaynak Analizi — hangi kanal ne getiriyor</div>
-        <table style={{ width: "100%", fontSize: 12.5, color: THEME.textLight, borderCollapse: "collapse" }}>
-          <thead><tr style={{ color: THEME.textMuted, textAlign: "left" }}><th style={{ padding: 6 }}>Kaynak</th><th>Kayıt</th><th>Yazar adayı</th><th>Okur</th><th>Eser yükleyen</th><th>Onaylanan</th></tr></thead>
-          <tbody>
-            {kaynaklar.map((k, i) => (
-              <tr key={i} style={{ borderTop: `1px solid ${THEME.border}` }}>
-                <td style={{ padding: 6, fontWeight: 600 }}>{k.kaynak}</td><td>{k.kayit}</td><td>{k.yazar_adayi}</td><td>{k.okur}</td><td>{k.eser_yukleyen}</td><td style={{ color: "#2E7D32", fontWeight: 700 }}>{k.onaylanan}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-}
-
-// ============ ADAY YÖNETİMİ (6 Ağu 2026, kullanıcı talebi — "2001 hissi
-// veriyor, 2026'ya geçir") ============
-// Önceden ÜÇ AYRI menü vardı: Aday Görüşmeleri, Aday Takip Önerileri,
-// Danışman Kokpiti. Editör aynı adayı düşünmek için üç ayrı ekrana gidip
-// üç kez arıyordu. Artık TEK ekran: aday listesi solda, seçili adayın
-// Karar Dosyası + görüşme talebi (varsa) + sistem takip önerisi (varsa)
-// aynı sayfada, sırayla. Backend uçları DEĞİŞMEDİ — /admin/adaylar zaten
-// bekleyen_gorusme sayısını içeriyordu; /admin/gorusmeler ve
-// /admin/takip-onerileri tüm listeyi dönüyor, burada seçili adayın id'sine
-// göre istemci tarafında eşleştiriliyor (backend'e ek yük yok).
+// ============ ADAY KOKPİTİ (6 Ağu 2026, kullanıcı talebi — önce "2001
+// hissi veriyor, 2026'ya geçir" sonra "yazar adaylık ile ilgili tüm
+// herşeyi direkt o panele aktaralım, adını Aday Kokpiti yapalım") ============
+// Önceden BEŞ AYRI menü vardı: Yazar Adayları (eser onay/red + editöryal
+// değerlendirme + AI analizi), Aday Görüşmeleri, Aday Takip Önerileri,
+// Danışman Kokpiti, ve kaynak analizi Yazar Adayları'nın altına gömülüydü.
+// Editör bir adayı düşünmek için birden fazla ekrana gidip aynı kişiyi
+// tekrar tekrar arıyordu. Artık TEK ekran: aday listesi solda (zengin
+// filtrelerle), seçili adayın hero'su + görüşme talebi (varsa) + sistem
+// takip önerisi (varsa) + eserleri (onay/red, editöryal form, AI ön
+// analizi) + Karar Dosyası, hepsi aynı sayfada sırayla. En altta, aday
+// seçili olmasa bile görünen genel Reklam Kaynak Analizi tablosu.
+// Backend uçları DEĞİŞMEDİ — hepsi zaten vardı, burada birleştirildi.
 
 const GORUSME_DURUM = {
   talep_edildi: { ad: "Talep edildi", renk: THEME.warn },
@@ -1618,15 +1201,18 @@ function bashHarfleri(adSoyad) {
   return (adSoyad || "").trim().split(/\s+/).slice(0, 2).map(s => s[0]?.toUpperCase() || "").join("") || "?";
 }
 
-function AdayYonetimi({ authFetch }) {
+function AdayKokpiti({ authFetch }) {
   const [adaylar, setAdaylar] = useState([]);
+  const [kaynaklar, setKaynaklar] = useState([]);
   const [gorusmeler, setGorusmeler] = useState([]);
   const [oneriler, setOneriler] = useState([]);
-  const [secili, setSecili] = useState(null);
+  const [secili, setSecili] = useState(null); // aday listesi öğesi (özet)
+  const [detay, setDetay] = useState(null);   // { aday, eserler } — /rapor'dan
   const [dosya, setDosya] = useState(null);
   const [kdYukleniyor, setKdYukleniyor] = useState(false);
+  const [kdAcik, setKdAcik] = useState(true);
   const [arama, setArama] = useState("");
-  const [filtre, setFiltre] = useState("tumu"); // tumu | gorusme | takip
+  const [filtre, setFiltre] = useState("tumu");
   const [mesaj, setMesaj] = useState("");
   const [calisiyor, setCalisiyor] = useState(false);
 
@@ -1637,32 +1223,47 @@ function AdayYonetimi({ authFetch }) {
   const [takipFormAcik, setTakipFormAcik] = useState(false);
   const [takipNotu, setTakipNotu] = useState("");
   const [takipKanal, setTakipKanal] = useState("telefon");
+  // Eser onay/red
+  const [redMetni, setRedMetni] = useState("");
+  const [redAcik, setRedAcik] = useState(null);
+  // Editöryal değerlendirme formu (hukuki onay/red'den ayrı katman)
+  const [editForm, setEditForm] = useState({ karar: "", gucluYonler: "", eksikYonler: "", hedefOkur: "", editorlukIhtiyaci: "", hazirlikSeviyesi: "", sonrakiAdim: "", editorNotu: "" });
+  const [editAcikEserId, setEditAcikEserId] = useState(null);
 
   const yukle = async () => {
     try {
-      const [r1, r2, r3] = await Promise.all([
+      const [r1, r2, r3, r4] = await Promise.all([
         authFetch("/api/admin/adaylar"),
         authFetch("/api/admin/gorusmeler"),
         authFetch("/api/admin/takip-onerileri"),
+        authFetch("/api/admin/aday-kaynak-analizi"),
       ]);
-      const [d1, d2, d3] = await Promise.all([r1.json(), r2.json(), r3.json()]);
-      setAdaylar((d1.adaylar || []).filter(a => a.tip === "yazar"));
+      const [d1, d2, d3, d4] = await Promise.all([r1.json(), r2.json(), r3.json(), r4.json()]);
+      setAdaylar(d1.adaylar || []);
       setGorusmeler(d2.gorusmeler || []);
       setOneriler(d3.oneriler || []);
+      setKaynaklar(d4.kaynaklar || []);
     } catch { setMesaj("Sunucuya ulaşılamadı."); }
   };
   useEffect(() => { yukle(); }, []);
 
   const adaySec = async (a) => {
-    setSecili(a); setDosya(null); setMesaj("");
+    setSecili(a); setDetay(null); setDosya(null); setMesaj("");
     setGorusmeFormAcik(false); setTakipFormAcik(false); setTakipNotu("");
+    setRedAcik(null); setEditAcikEserId(null);
+    try {
+      const r = await authFetch(`/api/admin/adaylar/${a.id}/rapor`);
+      const d = await r.json();
+      setDetay({ aday: a, eserler: d.eserler || [] });
+    } catch { setMesaj("Rapor okunamadı."); }
     setKdYukleniyor(true);
     try {
-      const r = await authFetch(`/api/admin/adaylar/${a.id}/karar-dosyasi`);
-      setDosya(await r.json());
+      const r2 = await authFetch(`/api/admin/adaylar/${a.id}/karar-dosyasi`);
+      setDosya(await r2.json());
     } catch { /* karar dosyası henüz oluşmamış olabilir — sessizce geç */ }
     finally { setKdYukleniyor(false); }
   };
+  const yenidenAc = () => secili && adaySec(secili);
 
   const kararDosyasiKanitDogrula = async (kanitId, durum) => {
     if (!secili || calisiyor) return;
@@ -1696,49 +1297,115 @@ function AdayYonetimi({ authFetch }) {
     finally { setCalisiyor(false); }
   };
 
+  const onayla = async (eserId) => {
+    if (calisiyor) return; setCalisiyor(true); setMesaj("");
+    try {
+      const r = await authFetch(`/api/admin/eserler/${eserId}/onayla`, { method: "POST" });
+      const d = await r.json();
+      if (d.ok) { setMesaj(`Onaylandı — belge no: ${d.sertifikaNo}`); yenidenAc(); yukle(); }
+      else setMesaj(d.error || "Onaylanamadı.");
+    } catch { setMesaj("Sunucuya ulaşılamadı."); }
+    finally { setCalisiyor(false); }
+  };
+
+  const reddet = async (eserId) => {
+    const gerekceler = redMetni.split("\n").map(s => s.trim()).filter(Boolean);
+    if (!gerekceler.length) { setMesaj("Her satıra bir gerekçe yazın."); return; }
+    if (calisiyor) return; setCalisiyor(true); setMesaj("");
+    try {
+      const r = await authFetch(`/api/admin/eserler/${eserId}/reddet`, { method: "POST", body: JSON.stringify({ gerekceler }) });
+      const d = await r.json();
+      if (d.ok) { setMesaj("Reddedildi — gerekçeler adayın uygulamasında görünecek."); setRedAcik(null); setRedMetni(""); yenidenAc(); yukle(); }
+      else setMesaj(d.error || "Reddedilemedi.");
+    } catch { setMesaj("Sunucuya ulaşılamadı."); }
+    finally { setCalisiyor(false); }
+  };
+
+  const editoryalKaydet = async (eserId) => {
+    if (!editForm.karar) { setMesaj("Bir karar seçin: Yayına hazır / Editöryal geliştirmeyle uygun / Henüz hazır değil."); return; }
+    if (!editForm.gucluYonler.trim()) { setMesaj("En az bir güçlü yön belirtin."); return; }
+    if (!editForm.eksikYonler.trim()) { setMesaj("En az bir geliştirme önerisi belirtin."); return; }
+    if (calisiyor) return; setCalisiyor(true); setMesaj("");
+    try {
+      const r = await authFetch(`/api/admin/eserler/${eserId}/editoryal-degerlendirme`, {
+        method: "POST",
+        body: JSON.stringify({
+          karar: editForm.karar, gucluYonler: editForm.gucluYonler, eksikYonler: editForm.eksikYonler,
+          hedefOkur: editForm.hedefOkur, editorlukIhtiyaci: editForm.editorlukIhtiyaci,
+          hazirlikSeviyesi: editForm.hazirlikSeviyesi, sonrakiAdim: editForm.sonrakiAdim, editorNotu: editForm.editorNotu,
+        }),
+      });
+      const d = await r.json();
+      if (d.ok) { setMesaj("Editöryal değerlendirme kaydedildi."); setEditAcikEserId(null); yenidenAc(); yukle(); }
+      else setMesaj(d.error || "Kaydedilemedi.");
+    } catch { setMesaj("Sunucuya ulaşılamadı — bu özellik için backend ucu henüz eklenmemiş olabilir."); }
+    finally { setCalisiyor(false); }
+  };
+
+  const raporYayinla = async (eserId) => {
+    if (calisiyor) return; setCalisiyor(true); setMesaj("");
+    try {
+      const r = await authFetch(`/api/admin/eserler/${eserId}/rapor-yayinla`, { method: "POST" });
+      const v = await r.json();
+      setMesaj(v.ok ? "Rapor adaya açıldı." : (v.error || "Yayınlanamadı."));
+      if (v.ok) { yenidenAc(); yukle(); }
+    } catch { setMesaj("Sunucuya ulaşılamadı."); }
+    finally { setCalisiyor(false); }
+  };
+
   // Seçili adaya ait görüşme ve takip önerisini istemci tarafında eşleştir.
   const seciliGorusme = secili ? gorusmeler.find(g => g.aday_id === secili.id) : null;
   const seciliOneri = secili ? oneriler.find(o => o.aday_id === secili.id) : null;
-
   const gorusenIdler = new Set(gorusmeler.map(g => g.aday_id));
   const oneriIdler = new Set(oneriler.map(o => o.aday_id));
 
+  // Zengin filtreler (eski Yazar Adayları'ndan) — yeni pill tasarımında.
+  const onayBekleyen = adaylar.filter(a => a.eser_durum === "rapor_hazir").length;
+  const FILTRELER = [
+    ["tumu", `Tümü (${adaylar.length})`],
+    ["onay_bekleyen", `Onay bekleyen (${onayBekleyen})`],
+    ["gorusme", "Görüşme bekleyen"],
+    ["takip", "Takipte"],
+    ["dosya_yuklemeyen", "Dosya yüklemeyen"],
+    ["analizi_suren", "Analizi süren"],
+    ["hareketsiz", "Hareketsiz (7g+)"],
+  ];
   const filtrelenmis = adaylar.filter(a => {
     if (arama && !`${a.ad_soyad} ${a.telefon}`.toLowerCase().includes(arama.toLowerCase())) return false;
+    if (filtre === "onay_bekleyen") return a.eser_durum === "rapor_hazir";
     if (filtre === "gorusme") return gorusenIdler.has(a.id);
     if (filtre === "takip") return oneriIdler.has(a.id);
+    if (filtre === "dosya_yuklemeyen") return a.tip === "yazar" && !a.eser_id;
+    if (filtre === "analizi_suren") return a.eser_durum === "incelemede";
+    if (filtre === "hareketsiz") return a.son_giris && (Date.now() - new Date(a.son_giris).getTime()) > 7 * 24 * 3600 * 1000;
     return true;
   });
 
-  // ── Stil sabitleri (yeni tasarım dili) ──
+  // ── Stil sabitleri ──
   const kart = { background: THEME.panelBg, border: `1px solid ${THEME.border}`, borderRadius: 14, padding: 20, marginBottom: 16 };
   const kartBaslik = { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 };
   const kartBaslikH = { fontSize: 14.5, fontWeight: 700, display: "flex", alignItems: "center", gap: 8, color: THEME.textLight };
   const rozetMini = (renk, bg) => ({ display: "inline-flex", alignItems: "center", gap: 3, padding: "2px 8px", borderRadius: 6, fontSize: 10.5, fontWeight: 600, color: renk, background: bg });
   const inputStyle = { background: THEME.panelBgAlt, color: THEME.textLight, border: `1px solid ${THEME.border}`, borderRadius: 8, padding: "8px 12px", fontSize: 13, fontFamily: FONT, width: "100%", boxSizing: "border-box" };
-  const btn = (dolu) => ({ padding: "8px 15px", borderRadius: 8, fontSize: 12.5, fontWeight: 600, cursor: "pointer",
-    border: dolu ? "none" : `1px solid ${THEME.border}`, background: dolu ? THEME.cyan : THEME.panelBg, color: dolu ? "#fff" : THEME.textLight });
+  const btn = (dolu, renk) => ({ padding: "8px 15px", borderRadius: 8, fontSize: 12.5, fontWeight: 600, cursor: "pointer",
+    border: dolu ? "none" : `1px solid ${THEME.border}`, background: dolu ? (renk || THEME.cyan) : THEME.panelBg, color: dolu ? "#fff" : THEME.textLight });
 
-  const kpiSayilar = {
-    aktif: adaylar.length,
-    gorusmeBekleyen: gorusmeler.filter(g => g.durum === "talep_edildi").length,
-    takipOnerisi: oneriler.length,
-  };
+  const kpiSayilar = { aktif: adaylar.length, gorusmeBekleyen: gorusmeler.filter(g => g.durum === "talep_edildi").length, takipOnerisi: oneriler.length };
 
   return (
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 8 }}>
         <div>
-          <h2 style={{ color: THEME.textLight, fontFamily: FONT_DISPLAY, fontSize: 24, fontWeight: 600, margin: 0 }}>Aday Yönetimi</h2>
-          <div style={{ fontSize: 13, color: THEME.textMuted, marginTop: 2 }}>Karar dosyası, görüşme talepleri ve takip önerileri — tek ekranda.</div>
+          <h2 style={{ color: THEME.textLight, fontFamily: FONT_DISPLAY, fontSize: 24, fontWeight: 600, margin: 0 }}>Aday Kokpiti</h2>
+          <div style={{ fontSize: 13, color: THEME.textMuted, marginTop: 2 }}>Eser değerlendirme, karar dosyası, görüşme ve takip — tek ekranda. Eser metinleri panele gelmez, yalnızca AI raporu görünür.</div>
         </div>
         <button onClick={yukle} style={btn(false)}>Yenile</button>
       </div>
 
-      {/* Durum şeridi — signature element: sol kenarda renkli şerit */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 12, margin: "18px 0" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 12, margin: "18px 0" }}>
         {[
           { val: kpiSayilar.aktif, lbl: "Aktif aday", renk: THEME.altinAcik },
+          { val: onayBekleyen, lbl: "Onay bekleyen eser", renk: THEME.danger },
           { val: kpiSayilar.gorusmeBekleyen, lbl: "Görüşme bekliyor", renk: THEME.warn },
           { val: kpiSayilar.takipOnerisi, lbl: "Takip önerisi", renk: THEME.warn },
         ].map((k, i) => (
@@ -1755,11 +1422,11 @@ function AdayYonetimi({ authFetch }) {
 
       <div style={{ display: "grid", gridTemplateColumns: "320px 1fr", gap: 16, alignItems: "flex-start" }}>
         {/* SOL: aday listesi */}
-        <div style={{ background: THEME.panelBg, border: `1px solid ${THEME.border}`, borderRadius: 14, overflow: "hidden", maxHeight: 640, display: "flex", flexDirection: "column" }}>
+        <div style={{ background: THEME.panelBg, border: `1px solid ${THEME.border}`, borderRadius: 14, overflow: "hidden", maxHeight: 720, display: "flex", flexDirection: "column" }}>
           <div style={{ padding: 14, borderBottom: `1px solid ${THEME.divider}` }}>
             <input value={arama} onChange={e => setArama(e.target.value)} placeholder="İsim veya telefon ara…" style={inputStyle} />
             <div style={{ display: "flex", gap: 6, marginTop: 10, flexWrap: "wrap" }}>
-              {[["tumu", "Tümü"], ["gorusme", "Görüşme bekleyen"], ["takip", "Takipte"]].map(([k, ad]) => (
+              {FILTRELER.map(([k, ad]) => (
                 <span key={k} onClick={() => setFiltre(k)}
                   style={{ padding: "5px 11px", borderRadius: 20, fontSize: 11, cursor: "pointer",
                            border: `1px solid ${filtre === k ? THEME.cyan : THEME.border}`,
@@ -1774,6 +1441,7 @@ function AdayYonetimi({ authFetch }) {
               const gBekliyor = gorusenIdler.has(a.id);
               const takipte = oneriIdler.has(a.id);
               const aktif = secili?.id === a.id;
+              const d = a.eser_durum ? (ADAY_ESER_DURUM[a.eser_durum] || { ad: a.eser_durum, renk: THEME.textMuted }) : null;
               return (
                 <div key={a.id} onClick={() => adaySec(a)}
                   style={{ padding: "12px 14px", borderBottom: `1px solid ${THEME.divider}`, cursor: "pointer",
@@ -1785,10 +1453,11 @@ function AdayYonetimi({ authFetch }) {
                                 fontWeight: 600, fontSize: 13, flexShrink: 0 }}>{bashHarfleri(a.ad_soyad)}</div>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: 13, fontWeight: 600, color: THEME.textLight, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{a.ad_soyad}</div>
-                    <div style={{ display: "flex", gap: 5, marginTop: 2 }}>
+                    <div style={{ display: "flex", gap: 5, marginTop: 2, flexWrap: "wrap" }}>
+                      {d && <span style={rozetMini(d.renk, THEME.panelBgAlt)}>{d.ad}</span>}
                       {gBekliyor && <span style={rozetMini(THEME.warn, THEME.warnBg)}>Görüşme</span>}
                       {takipte && <span style={rozetMini(THEME.warn, THEME.warnBg)}>Takip</span>}
-                      {!gBekliyor && !takipte && <span style={{ fontSize: 11, color: THEME.textFaint }}>hazırlık {a.hazirlik_puani ?? 0}</span>}
+                      {!d && !gBekliyor && !takipte && <span style={{ fontSize: 11, color: THEME.textFaint }}>hazırlık {a.hazirlik_puani ?? 0}</span>}
                     </div>
                   </div>
                 </div>
@@ -1803,18 +1472,27 @@ function AdayYonetimi({ authFetch }) {
 
           {secili && (
             <>
-              {/* Hero + KPI */}
+              {/* Hero */}
               <div style={kart}>
-                <div style={{ display: "flex", gap: 14, alignItems: "center" }}>
-                  <div style={{ width: 50, height: 50, borderRadius: "50%", background: `linear-gradient(135deg, ${THEME.altinAcik}, ${THEME.cyan})`,
-                                color: "#fff", display: "flex", alignItems: "center", justifyContent: "center",
-                                fontFamily: FONT_DISPLAY, fontWeight: 600, fontSize: 19 }}>{bashHarfleri(secili.ad_soyad)}</div>
-                  <div>
-                    <div style={{ fontFamily: FONT_DISPLAY, fontSize: 20, fontWeight: 600, color: THEME.textLight }}>{secili.ad_soyad}</div>
-                    <div style={{ fontSize: 12.5, color: THEME.textMuted, marginTop: 2 }}>
-                      {secili.eser_adi || "eser yüklenmedi"} · {secili.telefon}
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                  <div style={{ display: "flex", gap: 14, alignItems: "center" }}>
+                    <div style={{ width: 50, height: 50, borderRadius: "50%", background: `linear-gradient(135deg, ${THEME.altinAcik}, ${THEME.cyan})`,
+                                  color: "#fff", display: "flex", alignItems: "center", justifyContent: "center",
+                                  fontFamily: FONT_DISPLAY, fontWeight: 600, fontSize: 19 }}>{bashHarfleri(secili.ad_soyad)}</div>
+                    <div>
+                      <div style={{ fontFamily: FONT_DISPLAY, fontSize: 20, fontWeight: 600, color: THEME.textLight }}>{secili.ad_soyad}</div>
+                      <div style={{ fontSize: 12.5, color: THEME.textMuted, marginTop: 2 }}>
+                        {secili.telefon} · {secili.eposta || "e-posta yok"} · kaynak: <b>{secili.kaynak || "bilinmiyor"}</b>
+                      </div>
                     </div>
                   </div>
+                </div>
+                {/* Akademi ilerleme */}
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 14 }}>
+                  <div style={{ flex: 1, maxWidth: 200, height: 6, background: THEME.divider, borderRadius: 3, overflow: "hidden" }}>
+                    <div style={{ height: "100%", width: `${Math.max(4, Math.round(((secili.akademi_mod || 0) / 10) * 100))}%`, background: (secili.akademi_mod || 0) === 0 ? THEME.divider : `linear-gradient(90deg, ${THEME.altinAcik}, ${THEME.cyan})` }} />
+                  </div>
+                  <span style={{ fontSize: 11, color: THEME.textMuted }}>{(secili.akademi_mod || 0) === 0 ? "Akademi: başlamadı" : `Akademi: ${secili.akademi_mod}/10 modül`}</span>
                 </div>
               </div>
 
@@ -1895,16 +1573,132 @@ function AdayYonetimi({ authFetch }) {
                 </div>
               )}
 
-              {/* Karar Dosyası */}
+              {/* Eserler — onay/red + editöryal değerlendirme */}
               <div style={kart}>
-                <div style={kartBaslik}><div style={kartBaslikH}><Ikon.dosya width={16} height={16} color={THEME.cyan} />Karar Dosyası</div></div>
-                {kdYukleniyor && <div style={{ fontSize: 12.5, color: THEME.textMuted }}>Yükleniyor…</div>}
-                {!kdYukleniyor && (
-                  <KararDosyasiGovde ad={secili.ad_soyad} dosya={dosya} kanitDogrula={kararDosyasiKanitDogrula} calisiyor={calisiyor} hazirlikPuani={secili.hazirlik_puani} />
+                <div style={kartBaslik}><div style={kartBaslikH}><Ikon.dosya width={16} height={16} color={THEME.cyan} />Eserler</div></div>
+                {!detay && <div style={{ fontSize: 12.5, color: THEME.textMuted }}>Yükleniyor…</div>}
+                {detay && !detay.eserler.length && <div style={{ fontSize: 12.5, color: THEME.textMuted }}>Bu aday henüz eser yüklemedi.</div>}
+                {detay && detay.eserler.map(e => {
+                  const d = ADAY_ESER_DURUM[e.durum] || { ad: e.durum, renk: THEME.textMuted };
+                  const rapor = e.rapor || {};
+                  const ozet = rapor.ozet || {};
+                  return (
+                    <div key={e.id} style={{ border: `1px solid ${THEME.divider}`, borderRadius: 10, padding: 14, marginBottom: 10 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                        <div style={{ color: THEME.textLight, fontWeight: 700, fontSize: 14 }}>{e.eser_adi} <span style={{ color: THEME.textMuted, fontWeight: 400, fontSize: 11.5 }}>({e.tur || "tür belirtilmedi"} · {Math.round((e.karakter_sayisi || 0) / 1000)}k karakter)</span></div>
+                        <span style={{ color: d.renk, fontWeight: 700, fontSize: 12 }}>{d.ad}{e.sertifika_no ? ` · ${e.sertifika_no}` : ""}</span>
+                      </div>
+                      {rapor.oneri && (
+                        <div style={{ fontSize: 12.5, marginBottom: 10, color: THEME.textLight }}>
+                          AI önerisi: <b style={{ color: rapor.oneri === "yayina_uygun_gorunuyor" ? THEME.success : rapor.oneri === "duzeltme_gerekli" ? THEME.danger : THEME.warn }}>
+                            {rapor.oneri === "yayina_uygun_gorunuyor" ? "Yayına uygun görünüyor" : rapor.oneri === "duzeltme_gerekli" ? "Düzeltme gerekli" : "Dikkatli inceleme"}
+                          </b>
+                          <span style={{ color: THEME.textMuted }}> — {ozet.toplam ?? 0} bulgu ({ozet.yuksek ?? 0} yüksek · {ozet.orta ?? 0} orta · {ozet.dusuk ?? 0} düşük)</span>
+                        </div>
+                      )}
+                      {(rapor.bulgular || []).map((b, i) => (
+                        <div key={i} style={{ borderLeft: `3px solid ${ADAY_SIDDET[b.siddet] || THEME.textFaint}`, padding: "6px 10px", marginBottom: 6, background: THEME.panelBgAlt, borderRadius: 4 }}>
+                          <div style={{ fontSize: 12, color: THEME.textLight, fontWeight: 600 }}>{ADAY_KATEGORI[b.kategori] || b.kategori} <span style={{ color: ADAY_SIDDET[b.siddet], fontSize: 10.5 }}>({b.siddet})</span> <span style={{ color: THEME.textMuted, fontWeight: 400 }}>· {b.parca}. bölüm</span></div>
+                          {b.alinti && <div style={{ fontSize: 11.5, color: THEME.textMuted, fontStyle: "italic" }}>"{b.alinti}"</div>}
+                          <div style={{ fontSize: 11.5, color: THEME.textMuted }}>{b.aciklama}</div>
+                        </div>
+                      ))}
+                      {e.durum === "rapor_hazir" && (
+                        <div style={{ marginTop: 10 }}>
+                          <button onClick={() => onayla(e.id)} disabled={calisiyor} style={{ ...btn(true, THEME.success), marginRight: 8 }}>ONAYLA — YAYINA UYGUNLUK BELGESİ AÇ</button>
+                          <button onClick={() => setRedAcik(redAcik === e.id ? null : e.id)} style={{ ...btn(false), color: THEME.danger, borderColor: THEME.danger }}>REDDET…</button>
+                          {redAcik === e.id && (
+                            <div style={{ marginTop: 10 }}>
+                              <textarea value={redMetni} onChange={ev => setRedMetni(ev.target.value)} rows={4} placeholder={"Her satıra bir gerekçe yazın — aday bunları uygulamasında görecek.\nÖrn: Gerçek bir kurum hedef gösteriliyor (3. bölüm)"} style={{ ...inputStyle, resize: "vertical" }} />
+                              <button onClick={() => reddet(e.id)} disabled={calisiyor} style={{ ...btn(true, THEME.danger), marginTop: 8 }}>Gerekçelerle reddet</button>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {(e.durum === "rapor_hazir" || e.durum === "onaylandi") && (
+                        <div style={{ marginTop: 12, borderTop: `1px dashed ${THEME.divider}`, paddingTop: 10 }}>
+                          <button onClick={() => setEditAcikEserId(editAcikEserId === e.id ? null : e.id)} style={{ ...btn(false), color: THEME.cyan, borderColor: THEME.cyan }}>
+                            {editAcikEserId === e.id ? "Editöryal formu kapat" : "Editöryal Değerlendirme Gir…"}
+                          </button>
+                          {editAcikEserId === e.id && (
+                            <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 8 }}>
+                              {e.ai_editoryal_onanaliz && (() => {
+                                let ai; try { ai = JSON.parse(e.ai_editoryal_onanaliz); } catch { ai = null; }
+                                if (!ai) return null;
+                                return (
+                                  <div style={{ background: THEME.cyanBg, border: `1px solid ${THEME.border}`, borderRadius: 8, padding: "12px 14px", marginBottom: 4 }}>
+                                    <div style={{ fontSize: 10.5, fontWeight: 700, color: THEME.cyan, marginBottom: 8, letterSpacing: .3 }}>AI ÖN ANALİZİ — öneri niteliğindedir, karar editöre aittir</div>
+                                    {ai.ozet && <div style={{ fontSize: 12, color: THEME.textLight, marginBottom: 8 }}>{ai.ozet}</div>}
+                                    {ai.guclu_yonler?.length > 0 && <div style={{ fontSize: 11.5, color: THEME.textMuted, marginBottom: 6 }}><b style={{ color: THEME.success }}>Güçlü yönler:</b> {ai.guclu_yonler.join(" · ")}</div>}
+                                    {ai.gelistirilecek?.length > 0 && <div style={{ fontSize: 11.5, color: THEME.textMuted, marginBottom: 6 }}><b style={{ color: THEME.warn }}>Geliştirilecek:</b> {ai.gelistirilecek.join(" · ")}</div>}
+                                    {ai.editor_sorunlari?.length > 0 && <div style={{ fontSize: 11.5, color: THEME.textMuted, marginBottom: 6 }}><b style={{ color: THEME.danger }}>Editör sorunları:</b> {ai.editor_sorunlari.join(" · ")}</div>}
+                                    {ai.yazim_kalitesi && <div style={{ fontSize: 11.5, color: THEME.textMuted, marginBottom: 6 }}><b>Yazım kalitesi:</b> {({ az: "az hata", orta: "orta düzeyde hata", sik: "sık hata" })[ai.yazim_kalitesi.seviye] || ai.yazim_kalitesi.seviye}{ai.yazim_kalitesi.aciklama ? ` — ${ai.yazim_kalitesi.aciklama}` : ""}<span style={{ color: THEME.textFaint, fontSize: 10 }}> (AI izlenimi, kesin sayım değildir)</span></div>}
+                                    {ai.tur_benzerligi?.emin_mi && ai.tur_benzerligi?.tarz_gozlemi && <div style={{ fontSize: 11.5, color: THEME.textMuted, marginBottom: 6 }}><b>Tarz gözlemi:</b> {ai.tur_benzerligi.tarz_gozlemi}<span style={{ color: THEME.textFaint, fontSize: 10 }}> (tahmini, kesin kaynak değildir)</span></div>}
+                                    {ai.hazirlik_seviyesi && <div style={{ fontSize: 11.5, color: THEME.textMuted, marginBottom: 8 }}><b>Hazırlık seviyesi:</b> {ai.hazirlik_seviyesi}</div>}
+                                    <button onClick={() => setEditForm({ ...editForm, gucluYonler: (ai.guclu_yonler || []).join("\n"), eksikYonler: (ai.gelistirilecek || []).join("\n"), hedefOkur: ai.hedef_okur || editForm.hedefOkur, hazirlikSeviyesi: ai.hazirlik_seviyesi || editForm.hazirlikSeviyesi, sonrakiAdim: ai.onerilen_calisma || editForm.sonrakiAdim })}
+                                      style={{ ...btn(false), fontSize: 11, color: THEME.cyan, borderColor: THEME.cyan }}>AI önerisini forma aktar (gözden geçirip düzenleyin)</button>
+                                  </div>
+                                );
+                              })()}
+                              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                                {[["hazir", "Yayına hazırlık için uygun"], ["gelistirme", "Editöryal geliştirmeyle uygun"], ["henuz_degil", "Henüz hazır değil"]].map(([k, ad]) => (
+                                  <span key={k} onClick={() => setEditForm({ ...editForm, karar: k })}
+                                    style={{ ...rozetMini(editForm.karar === k ? "#fff" : THEME.textMuted, editForm.karar === k ? THEME.cyan : THEME.panelBg), cursor: "pointer", border: `1px solid ${THEME.border}`, padding: "6px 12px" }}>{ad}</span>
+                                ))}
+                              </div>
+                              <textarea value={editForm.gucluYonler} onChange={ev => setEditForm({ ...editForm, gucluYonler: ev.target.value })} rows={2} placeholder="Güçlü yönler (zorunlu — en az bir madde)" style={{ ...inputStyle, resize: "vertical" }} />
+                              <textarea value={editForm.eksikYonler} onChange={ev => setEditForm({ ...editForm, eksikYonler: ev.target.value })} rows={2} placeholder="Geliştirilmesi gereken alanlar (zorunlu — en az bir madde)" style={{ ...inputStyle, resize: "vertical" }} />
+                              <textarea value={editForm.hedefOkur} onChange={ev => setEditForm({ ...editForm, hedefOkur: ev.target.value })} rows={2} placeholder="Hedef okur değerlendirmesi" style={{ ...inputStyle, resize: "vertical" }} />
+                              <input value={editForm.editorlukIhtiyaci} onChange={ev => setEditForm({ ...editForm, editorlukIhtiyaci: ev.target.value })} placeholder="Editörlük ihtiyacı" style={inputStyle} />
+                              <input value={editForm.hazirlikSeviyesi} onChange={ev => setEditForm({ ...editForm, hazirlikSeviyesi: ev.target.value })} placeholder="Yayın hazırlık seviyesi" style={inputStyle} />
+                              <input value={editForm.sonrakiAdim} onChange={ev => setEditForm({ ...editForm, sonrakiAdim: ev.target.value })} placeholder="Önerilen sonraki adım" style={inputStyle} />
+                              <textarea value={editForm.editorNotu} onChange={ev => setEditForm({ ...editForm, editorNotu: ev.target.value })} rows={2} placeholder="Adaya özel editör notu" style={{ ...inputStyle, resize: "vertical" }} />
+                              <div style={{ display: "flex", gap: 8 }}>
+                                <button onClick={() => editoryalKaydet(e.id)} disabled={calisiyor} style={btn(true)}>Editöryal Değerlendirmeyi Kaydet</button>
+                                <button onClick={() => raporYayinla(e.id)} disabled={calisiyor} style={{ ...btn(false), color: THEME.warn, borderColor: THEME.warn }}>RAPORU ADAYA AÇ (onaydan bağımsız)</button>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                      {e.durum === "incelemede" && <div style={{ fontSize: 12, color: THEME.textMuted, marginTop: 6 }}>AI incelemesi sürüyor: {e.toplam_parca ? Math.round(((e.son_islenen_parca || 0) / e.toplam_parca) * 100) : 0}%</div>}
+                      {e.durum === "reddedildi" && (e.red_gerekceleri || []).map((g, i) => <div key={i} style={{ fontSize: 12, color: THEME.textMuted, marginTop: 4 }}>• {g}</div>)}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Karar Dosyası — Danışman Brifingi */}
+              <div style={kart}>
+                <div onClick={() => setKdAcik(!kdAcik)} style={{ ...kartBaslik, cursor: "pointer" }}>
+                  <div style={kartBaslikH}><Ikon.dosya width={16} height={16} color={THEME.cyan} />Karar Dosyası — Danışman Brifingi</div>
+                  <span style={{ color: THEME.textMuted, fontSize: 12 }}>{kdAcik ? "▲ gizle" : "▼ göster"}</span>
+                </div>
+                {kdAcik && (kdYukleniyor
+                  ? <div style={{ fontSize: 12.5, color: THEME.textMuted }}>Yükleniyor…</div>
+                  : <KararDosyasiGovde ad={secili.ad_soyad} dosya={dosya} kanitDogrula={kararDosyasiKanitDogrula} calisiyor={calisiyor} hazirlikPuani={secili.hazirlik_puani} />
                 )}
               </div>
             </>
           )}
+        </div>
+      </div>
+
+      {/* Reklam Kaynak Analizi — genel referans, aday seçili olmasa bile görünür */}
+      <div style={kart}>
+        <div style={kartBaslikH}>Reklam Kaynak Analizi — hangi kanal ne getiriyor</div>
+        <div style={{ overflowX: "auto", marginTop: 12 }}>
+          <table style={{ width: "100%", fontSize: 12.5, color: THEME.textLight, borderCollapse: "collapse" }}>
+            <thead><tr style={{ color: THEME.textMuted, textAlign: "left" }}><th style={{ padding: 6 }}>Kaynak</th><th>Kayıt</th><th>Yazar adayı</th><th>Okur</th><th>Eser yükleyen</th><th>Onaylanan</th></tr></thead>
+            <tbody>
+              {kaynaklar.map((k, i) => (
+                <tr key={i} style={{ borderTop: `1px solid ${THEME.divider}` }}>
+                  <td style={{ padding: 6, fontWeight: 600 }}>{k.kaynak}</td><td>{k.kayit}</td><td>{k.yazar_adayi}</td><td>{k.okur}</td><td>{k.eser_yukleyen}</td><td style={{ color: THEME.success, fontWeight: 700 }}>{k.onaylanan}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       </div>
     </div>
@@ -8662,8 +8456,7 @@ export default function AdminPanel() {
     ["destek", "Destek & Şikayet"], ["duyurular", "Duyurular"], ["meta", "Meta Reklam"],
     ["oyun", "Görev & Ödül"],
     ["demoHesap", "Demo Hesaplar"],
-    ["yazarAdaylari", "Yazar Adayları"],
-    ["adayYonetimi", "Aday Yönetimi"],
+    ["adayKokpiti", "Aday Kokpiti"],
     ["adayKazanimOgrenme", "Aday Kazanım Öğrenmeleri"],
     ["akademiUzman", "Akademi Uzman Kapısı"],
     ["reklamLtv", "Reklam LTV Zinciri"],
@@ -8807,8 +8600,7 @@ export default function AdminPanel() {
         {view === "meta" && <MetaReklamView authFetch={authFetch} />}
         {view === "oyun" && <OyunView authFetch={authFetch} authors={authors} />}
         {view === "demoHesap" && <DemoHesaplar authFetch={authFetch} />}
-        {view === "yazarAdaylari" && <YazarAdaylari authFetch={authFetch} />}
-        {view === "adayYonetimi" && <AdayYonetimi authFetch={authFetch} />}
+        {view === "adayKokpiti" && <AdayKokpiti authFetch={authFetch} />}
         {view === "adayKazanimOgrenme" && <AdayKazanimOgrenmeleri authFetch={authFetch} />}
         {view === "akademiUzman" && <AkademiUzmanKapisi authFetch={authFetch} />}
         {view === "reklamLtv" && <ReklamLtv authFetch={authFetch} />}
