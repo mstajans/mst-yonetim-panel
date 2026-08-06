@@ -2764,6 +2764,28 @@ function KararDosyasiGovde({ ad, dosya, kanitDogrula, calisiyor, hazirlikPuani }
         <JBlok baslik="GÖRÜŞMEDE DOĞRULANACAK" veri={kd.insan_dogrulamasi_gereken} bos="—" />
       </div>
 
+      {/* EKLENDİ (6 Ağu 2026, kullanıcı kararı — "sorularla boğmadan veri
+          gerçekliğini artırmak, ikisinin ortası"): AI'ın en zayıf iki
+          göstergenin (hedef netliği, finansal uyum) kaynak sorularından
+          sonra ürettiği takip sorusu ve adayın SERBEST cevabı. Bu metin
+          HİÇBİR göstergeyi otomatik değiştirmez — yalnızca danışmana ek
+          bağlam sunar, "adayın kendi sözleriyle" diye açıkça işaretli. */}
+      {dosya?.aiTakipNotlari?.length > 0 && (
+        <div style={{ ...kutu, borderColor: "rgba(169,118,47,.3)" }}>
+          <div style={{ fontSize: 11, letterSpacing: ".15em", color: THEME.cyan, marginBottom: 10 }}>
+            ADAYIN KENDİ SÖZLERİYLE — serbest not, göstergeleri etkilemez
+          </div>
+          {dosya.aiTakipNotlari.map((n, i) => (
+            <div key={i} style={{ marginBottom: i < dosya.aiTakipNotlari.length - 1 ? 12 : 0,
+                                   paddingBottom: i < dosya.aiTakipNotlari.length - 1 ? 12 : 0,
+                                   borderBottom: i < dosya.aiTakipNotlari.length - 1 ? `1px solid ${THEME.divider}` : "none" }}>
+              <div style={{ fontSize: 11.5, color: THEME.textMuted, fontStyle: "italic", marginBottom: 4 }}>{n.ai_sorusu}</div>
+              <div style={{ fontSize: 13, color: THEME.textLight }}>"{n.aday_cevabi}"</div>
+            </div>
+          ))}
+        </div>
+      )}
+
       {/* EKLENDİ (5 Ağu 2026, kullanıcı talebi — "yazar aday ekosistemindeki
           bulgulardan elde edilen sonuçlar"): AI'ın eseri okuyup ürettiği
           editöryal analiz ve risk taraması özeti artık burada. Önceden bu
