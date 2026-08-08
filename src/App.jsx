@@ -1707,11 +1707,11 @@ function AdayKokpiti({ authFetch }) {
         <div style={kartBaslikH}>Reklam Kaynak Analizi — hangi kanal ne getiriyor</div>
         <div style={{ overflowX: "auto", marginTop: 12 }}>
           <table style={{ width: "100%", fontSize: 12.5, color: THEME.textLight, borderCollapse: "collapse" }}>
-            <thead><tr style={{ color: THEME.textMuted, textAlign: "left" }}><th style={{ padding: 6 }}>Kaynak</th><th>Kayıt</th><th>Yazar adayı</th><th>Okur</th><th>Eser yükleyen</th><th>Onaylanan</th></tr></thead>
+            <thead><tr style={{ color: THEME.textMuted, textAlign: "left" }}><th style={{ padding: 6 }}>Kaynak</th><th>Kayıt</th><th>Yazar adayı</th><th>Eser yükleyen</th><th>Onaylanan</th></tr></thead>
             <tbody>
               {kaynaklar.map((k, i) => (
                 <tr key={i} style={{ borderTop: `1px solid ${THEME.divider}` }}>
-                  <td style={{ padding: 6, fontWeight: 600 }}>{k.kaynak}</td><td>{k.kayit}</td><td>{k.yazar_adayi}</td><td>{k.okur}</td><td>{k.eser_yukleyen}</td><td style={{ color: THEME.success, fontWeight: 700 }}>{k.onaylanan}</td>
+                  <td style={{ padding: 6, fontWeight: 600 }}>{k.kaynak}</td><td>{k.kayit}</td><td>{k.yazar_adayi}</td><td>{k.eser_yukleyen}</td><td style={{ color: THEME.success, fontWeight: 700 }}>{k.onaylanan}</td>
                 </tr>
               ))}
             </tbody>
@@ -6168,6 +6168,154 @@ function ToplulukHedefYonetimi({ authFetch }) {
   );
 }
 
+// EKLENDİ (6 Ağu 2026, kullanıcı talebi — "yazar getirmelerinde 2000 TL
+// ödül mekanizması"): önceden bu özellik yalnızca görünüşte vardı, yazar
+// uygulamasındaki form hiçbir yere kaydetmiyordu. Artık gerçek bir akış:
+// admin burada "paket aldı" işaretlediğinde, getiren yazara otomatik
+// 2000₺ kredi + kutlama verilir (backend'de tek noktadan, iki kez
+// verilmez).
+// EKLENDİ (6 Ağu 2026, kullanıcı talebi — "panelde bir özet ekran
+// istiyorum"): ai_kullanim_log tablosundan GERÇEK (tahmini değil,
+// gerçekleşen) token kullanımına dayalı maliyet özeti. Gerçek zamanlı
+// değil — Anthropic Console'daki resmi rakamlarla karşılaştırıp
+// doğruluğunu teyit etmek iyi bir alışkanlıktır.
+function AiMaliyetOzeti({ authFetch }) {
+  const [veri, setVeri] = useState(null);
+  const [gun, setGun] = useState(30);
+  const [yukleniyor, setYukleniyor] = useState(true);
+
+  const yukle = async (g) => {
+    setYukleniyor(true);
+    try {
+      const r = await authFetch(`/api/admin/ai-maliyet-ozeti?gun=${g}`);
+      setVeri(await r.json());
+    } catch { setVeri(null); }
+    finally { setYukleniyor(false); }
+  };
+  useEffect(() => { yukle(gun); }, [gun]);
+
+  const ozellikAdi = { eser_inceleme: "Eser İnceleme", editoryal_analiz: "Editöryal Analiz", ai_menajer: "AI Menajer",
+    ai_takip_sorusu: "AI Takip Sorusu", admin_arac: "Panel Araçları (diğer)" };
+  const kutu = { background: THEME.panelBg, border: `1px solid ${THEME.border}`, borderRadius: 14, padding: 20, marginBottom: 16 };
+
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+        <h2 style={{ color: THEME.textLight, fontFamily: FONT_DISPLAY, fontSize: 24, fontWeight: 600, margin: 0 }}>AI Maliyet Özeti</h2>
+        <div style={{ display: "flex", gap: 6 }}>
+          {[7, 30, 90].map(g => (
+            <button key={g} onClick={() => setGun(g)}
+              style={{ padding: "6px 14px", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: "pointer",
+                       border: gun === g ? "none" : `1px solid ${THEME.border}`, background: gun === g ? THEME.cyan : THEME.panelBg,
+                       color: gun === g ? "#fff" : THEME.textLight }}>
+              {g} gün
+            </button>
+          ))}
+        </div>
+      </div>
+      <div style={{ fontSize: 13, color: THEME.textMuted, marginBottom: 18 }}>
+        Gerçek Anthropic API kullanımına dayalı tahmini maliyet — gerçek zamanlı değil, hesaplanmış. Anthropic Console'daki resmi rakamlarla karşılaştırmanı öneririz.
+      </div>
+
+      {yukleniyor && <div style={{ fontSize: 13, color: THEME.textMuted }}>Yükleniyor…</div>}
+
+      {veri && !yukleniyor && (
+        <>
+          <div style={{ ...kutu, textAlign: "center", padding: "28px 20px" }}>
+            <div style={{ fontSize: 11, letterSpacing: ".15em", color: THEME.textFaint, marginBottom: 8 }}>SON {veri.gunAraligi} GÜN TOPLAM TAHMİNİ MALİYET</div>
+            <div style={{ fontFamily: FONT_DISPLAY, fontSize: 40, fontWeight: 700, color: THEME.cyan }}>${veri.toplamDolar.toFixed(2)}</div>
+          </div>
+
+          {!veri.ozellikler.length && <div style={{ fontSize: 13, color: THEME.textMuted }}>Bu dönemde kayıtlı AI kullanımı yok.</div>}
+
+          {veri.ozellikler.map(o => (
+            <div key={o.ozellik} style={kutu}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                <div style={{ fontSize: 15, fontWeight: 700, color: THEME.textLight }}>{ozellikAdi[o.ozellik] || o.ozellik}</div>
+                <div style={{ fontSize: 18, fontWeight: 700, color: THEME.cyan }}>${o.tahminiDolar.toFixed(4)}</div>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10, fontSize: 12, color: THEME.textMuted }}>
+                <div>Çağrı: <b style={{ color: THEME.textLight }}>{o.cagri_sayisi}</b></div>
+                <div>Input: <b style={{ color: THEME.textLight }}>{Number(o.input_token).toLocaleString("tr-TR")}</b></div>
+                <div>Output: <b style={{ color: THEME.textLight }}>{Number(o.output_token).toLocaleString("tr-TR")}</b></div>
+                {(Number(o.cache_okuma_token) > 0 || Number(o.cache_yazma_token) > 0) &&
+                  <div>Cache: <b style={{ color: THEME.success }}>{Number(o.cache_okuma_token).toLocaleString("tr-TR")} okuma</b></div>}
+              </div>
+            </div>
+          ))}
+
+          <div style={{ fontSize: 11, color: THEME.textFaint, marginTop: 8 }}>
+            Fiyatlandırma (Sonnet 4.6, Ağu 2026): ${veri.fiyatlandirma.input}/MTok input · ${veri.fiyatlandirma.output}/MTok output · cache okuma ${veri.fiyatlandirma.cacheOku}/MTok
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function ReferanslarView({ authFetch }) {
+  const [list, setList] = useState([]);
+  const [yukleniyor, setYukleniyor] = useState(true);
+  const [mesaj, setMesaj] = useState("");
+  const [calisiyor, setCalisiyor] = useState(false);
+
+  const yukle = async () => {
+    setYukleniyor(true);
+    try {
+      const r = await authFetch("/api/admin/referanslar");
+      setList((await r.json()).referanslar || []);
+    } catch { setMesaj("Sunucuya ulaşılamadı."); }
+    finally { setYukleniyor(false); }
+  };
+  useEffect(() => { yukle(); }, []);
+
+  const durumGuncelle = async (id, durum) => {
+    if (calisiyor) return; setCalisiyor(true); setMesaj("");
+    try {
+      const r = await authFetch(`/api/admin/referanslar/${id}/durum`, { method: "POST", body: JSON.stringify({ durum }) });
+      const d = await r.json();
+      if (d.ok) { setMesaj(durum === "paket_aldi" ? "İşaretlendi — ödül otomatik verildi." : "Güncellendi."); yukle(); }
+      else setMesaj(d.error || "Güncellenemedi.");
+    } catch { setMesaj("Sunucuya ulaşılamadı."); }
+    finally { setCalisiyor(false); }
+  };
+
+  const kutu = { background: THEME.panelBg, border: `1px solid ${THEME.border}`, borderRadius: 8, padding: "14px 18px", marginBottom: 10 };
+  const btn = (dolu, renk) => ({ padding: "7px 14px", borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: "pointer",
+    border: dolu ? "none" : `1px solid ${THEME.border}`, background: dolu ? (renk || THEME.cyan) : THEME.panelBg, color: dolu ? "#fff" : THEME.textLight });
+  const durumEtiket = { bekliyor: "Beklemede", kayit_oldu: "Kayıt Oldu", paket_aldi: "Paket Aldı" };
+
+  return (
+    <div>
+      <h2 style={{ color: THEME.textLight, fontSize: 22, margin: "0 0 6px" }}>Yazar Getirme</h2>
+      <div style={{ fontSize: 13, color: THEME.textMuted, marginBottom: 18 }}>
+        Yazarların önerdiği kişiler. "Paket Aldı" işaretlendiğinde getiren yazara otomatik 2.000₺ kredi verilir — bu işlem geri alınamaz ve aynı öneriye iki kez uygulanmaz.
+      </div>
+      {mesaj && <div style={{ ...kutu, color: THEME.cyan }}>{mesaj}</div>}
+      {yukleniyor && <div style={{ fontSize: 13, color: THEME.textMuted }}>Yükleniyor…</div>}
+      {!yukleniyor && !list.length && <div style={{ fontSize: 13, color: THEME.textMuted }}>Henüz hiç öneri yok.</div>}
+      {list.map(r => (
+        <div key={r.id} style={kutu}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
+            <div>
+              <div style={{ color: THEME.textLight, fontWeight: 700, fontSize: 14 }}>{r.getirilen_ad} <span style={{ color: THEME.textMuted, fontWeight: 400, fontSize: 12 }}>({r.getirilen_telefon || "telefon yok"})</span></div>
+              <div style={{ color: THEME.textMuted, fontSize: 12, marginTop: 2 }}>
+                Öneren: <b>{r.getiren_adi}</b> · {new Date(r.created_at).toLocaleDateString("tr-TR")}
+                {r.odul_verildi && <span style={{ color: THEME.success }}> · 2.000₺ ödül verildi</span>}
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+              <span style={{ fontSize: 11.5, color: THEME.textMuted, marginRight: 4 }}>{durumEtiket[r.durum] || r.durum}</span>
+              {r.durum === "bekliyor" && <button disabled={calisiyor} style={btn(false)} onClick={() => durumGuncelle(r.id, "kayit_oldu")}>Kayıt Oldu İşaretle</button>}
+              {r.durum !== "paket_aldi" && <button disabled={calisiyor} style={btn(true, THEME.success)} onClick={() => durumGuncelle(r.id, "paket_aldi")}>Paket Aldı — Ödül Ver</button>}
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function DuyurularView({ authFetch, authors }) {
   const [list, setList] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -8589,7 +8737,7 @@ export default function AdminPanel() {
     ["overview", "Genel Bakış"], ["gorevTakip", "Görev Takip"], ["authors", "Yazarlar"], ["discounts", "Hediye & İndirimli"],
     ["indirimliOzet", "Hediye & İnd. Özet"],
     ["orders", "Mağaza Siparişleri"], ["ads", "Reklam Talepleri"], ["translations", "Çeviri Talepleri"],
-    ["destek", "Destek & Şikayet"], ["duyurular", "Duyurular"], ["meta", "Meta Reklam"],
+    ["destek", "Destek & Şikayet"], ["duyurular", "Duyurular"], ["referanslar", "Yazar Getirme"], ["aiMaliyet", "AI Maliyet Özeti"], ["meta", "Meta Reklam"],
     ["oyun", "Görev & Ödül"],
     ["demoHesap", "Demo Hesaplar"],
     ["adayKokpiti", "Aday Kokpiti"],
@@ -8734,6 +8882,8 @@ export default function AdminPanel() {
         {view === "translations" && <TranslationRequestsView requests={translationRequests} loading={loadingTranslations} onUpdateStatus={updateTranslationStatus} />}
         {view === "destek" && <DestekTalepleriView requests={destekTalepleri} loading={loadingDestek} onUpdateStatus={updateDestekStatus} />}
         {view === "duyurular" && <DuyurularView authFetch={authFetch} authors={authors} />}
+        {view === "referanslar" && <ReferanslarView authFetch={authFetch} />}
+        {view === "aiMaliyet" && <AiMaliyetOzeti authFetch={authFetch} />}
         {view === "meta" && <MetaReklamView authFetch={authFetch} />}
         {view === "oyun" && <OyunView authFetch={authFetch} authors={authors} />}
         {view === "demoHesap" && <DemoHesaplar authFetch={authFetch} />}
