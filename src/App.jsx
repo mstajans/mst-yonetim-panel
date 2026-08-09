@@ -3590,6 +3590,13 @@ function KreatifUretim({ authFetch }) {
   const [calisiyor, setCalisiyor] = useState("");
   const [hata, setHata] = useState("");
   const [mesaj, setMesaj] = useState("");
+  // EKLENDİ (8 Ağu 2026, kullanıcı talebi — "ben sistemden görseli kendim
+  // yükleyebileyim o çok önemli"): önceden Meta'ya hiç görsel gönderilmiyordu,
+  // hedef sayfanın önizleme görseli olmadığı için Meta alakasız bir görsel
+  // kullanmıştı. Artık görsel yükleme zorunlu ve admin kendi seçiyor.
+  const [gorselOnizleme, setGorselOnizleme] = useState(null); // { dataUrl, dosyaAdi }
+  const [gorselHash, setGorselHash] = useState(null);
+  const [gorselYukleniyor, setGorselYukleniyor] = useState(false);
 
   const cagir = async (yol, ayar, etiket) => {
     setCalisiyor(etiket); setHata(""); setMesaj("");
@@ -3610,12 +3617,39 @@ function KreatifUretim({ authFetch }) {
   const senaryoAl = async (aci) => { setSenaryoAci(aci); const d = await cagir(`/api/admin/reklam/senaryo?aci=${aci}&sure=20`, {}, "senaryo"); if (d) setSenaryo(d); };
   const performansAl = async () => { const d = await cagir("/api/admin/reklam/metin-performans", {}, "performans"); if (d) setPerformans(d); };
 
+  // Görsel seçildiğinde önce önizleme gösterilir, sonra "Görseli Yükle"
+  // butonuyla Meta'ya gönderilir (dosya seçmek ile Meta'ya yüklemek ayrı
+  // adımlar — kullanıcı yanlış görseli fark edip değiştirebilsin diye).
+  const gorselSec = (e) => {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    setGorselHash(null); setHata("");
+    const reader = new FileReader();
+    reader.onload = () => setGorselOnizleme({ dataUrl: reader.result, dosyaAdi: f.name });
+    reader.readAsDataURL(f);
+  };
+
+  const gorseliYukle = async () => {
+    if (!gorselOnizleme) return;
+    setGorselYukleniyor(true); setHata(""); setMesaj("");
+    try {
+      const r = await authFetch("/api/admin/reklam/gorsel-yukle", {
+        method: "POST", body: JSON.stringify({ dataUrl: gorselOnizleme.dataUrl }) });
+      const d = await r.json();
+      if (!d.ok) { setHata(d.error || "Görsel yüklenemedi."); return; }
+      setGorselHash(d.imageHash);
+      setMesaj(d.mesaj);
+    } catch { setHata("Sunucuya ulaşılamadı."); }
+    finally { setGorselYukleniyor(false); }
+  };
+
   const metinleriYayinla = async () => {
     if (!secilenMetinler.length) { setHata("En az bir metin seçin."); return; }
-    if (!window.confirm(`${secilenMetinler.length} kreatif tek reklam setinde yayına alınacak.\n\nGünlük 300 ₺, 14 gün. Meta hangisinin kazandığını kendisi bulacak.\n\nOnaylıyor musun?`)) return;
+    if (!gorselHash) { setHata("Önce bir görsel yükleyin — görselsiz reklam yayınlanamıyor."); return; }
+    if (!window.confirm(`${secilenMetinler.length} kreatif tek reklam setinde yayına alınacak.\n\nGünlük 300 ₺, 14 gün. Meta hangisinin kazandığını kendisi bulacak. Yüklediğiniz görsel hepsinde kullanılacak.\n\nOnaylıyor musun?`)) return;
     const secilen = metinler.metinler.filter((_, i) => secilenMetinler.includes(i));
     const d = await cagir("/api/admin/reklam/metinden-reklam", {
-      method: "POST", body: JSON.stringify({ metinler: secilen, gunlukButce: 300, gun: 14 }) }, "yayinla");
+      method: "POST", body: JSON.stringify({ metinler: secilen, gunlukButce: 300, gun: 14, imageHash: gorselHash }) }, "yayinla");
     if (d) setSecilenMetinler([]);
   };
 
@@ -3755,11 +3789,37 @@ function KreatifUretim({ authFetch }) {
             <div style={{ marginTop: 5, color: THEME.textFaint }}>{metinler.not}</div>
           </div>
 
+          {/* ── GÖRSEL YÜKLEME (8 Ağu 2026 eklendi) ── */}
+          <div style={{ background: gorselHash ? "rgba(46,125,50,.08)" : THEME.panelBgAlt, border: `1px solid ${gorselHash ? THEME.success : THEME.border}`, borderRadius: 6, padding: "12px 14px", marginBottom: 14 }}>
+            <div style={{ fontSize: 12.5, fontWeight: 600, color: THEME.textLight, marginBottom: 6 }}>
+              Reklam görseli {gorselHash ? "✓ yüklendi" : <span style={{ color: THEME.warn }}>— zorunlu, henüz yüklenmedi</span>}
+            </div>
+            <div style={{ fontSize: 11, color: THEME.textFaint, marginBottom: 10 }}>
+              Seçtiğiniz görsel, yayınlanacak tüm kreatiflerde kullanılır. Görsel yüklenmeden reklam yayına alınamaz.
+            </div>
+            <input type="file" accept="image/png,image/jpeg,image/gif,image/webp" onChange={gorselSec}
+              style={{ display: "block", width: "100%", fontSize: 13, color: THEME.textLight, marginBottom: gorselOnizleme ? 10 : 0 }} />
+            {gorselOnizleme && (
+              <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 6 }}>
+                <img src={gorselOnizleme.dataUrl} alt="Önizleme" style={{ width: 72, height: 72, objectFit: "cover", borderRadius: 6, border: `1px solid ${THEME.border}` }} />
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 12, color: THEME.textLight }}>{gorselOnizleme.dosyaAdi}</div>
+                  {!gorselHash && (
+                    <Btn small disabled={gorselYukleniyor} onClick={gorseliYukle} style={{ marginTop: 6 }}>
+                      {gorselYukleniyor ? "Yükleniyor…" : "Görseli Yükle"}
+                    </Btn>
+                  )}
+                  {gorselHash && <div style={{ fontSize: 11.5, color: THEME.success, marginTop: 4 }}>Meta'ya yüklendi — kreatiflerde kullanılacak</div>}
+                </div>
+              </div>
+            )}
+          </div>
+
           {secilenMetinler.length > 0 && (
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, background: "rgba(46,125,50,.10)", border: `1px solid ${THEME.success}`, borderRadius: 6, padding: "10px 13px", marginBottom: 12, flexWrap: "wrap" }}>
               <div style={{ fontSize: 12.5, color: THEME.success }}>{secilenMetinler.length} metin seçildi</div>
               <div style={{ display: "flex", gap: 6 }}>
-                <Btn small disabled={!!calisiyor} onClick={metinleriYayinla}>Seçilenleri yayına al</Btn>
+                <Btn small disabled={!!calisiyor || !gorselHash} onClick={metinleriYayinla}>Seçilenleri yayına al</Btn>
                 <Btn small variant="ghost" onClick={() => setSecilenMetinler([])}>Temizle</Btn>
               </div>
             </div>
