@@ -5440,12 +5440,12 @@ function ReklamBasvurulari({ authFetch }) {
     <div>
       <DonusumBeslemesi authFetch={authFetch} />
 
-      <h2 style={{ color: THEME.textLight, fontFamily: FONT, fontSize: 20, marginBottom: 6 }}>Reklam Başvuruları</h2>
-      <div style={{ color: THEME.textMuted, fontSize: 13, marginBottom: 16, lineHeight: 1.55 }}>
-        Yazarların kapsamlı reklam talepleri. Teklifi kalem kalem hazırlarsın, yazar uygulamasından onaylar.
-        Yeni başvurular en üstte.
+      <h2 style={{ color: THEME.textLight, fontFamily: FONT, fontSize: 20, marginBottom: 6 }}>Reklam Başvuruları <span style={{ fontSize: 13, color: THEME.textFaint, fontWeight: 400 }}>(eski sistem — arşiv)</span></h2>
+      <div style={{ background: "rgba(201,162,75,.10)", border: `1px solid ${THEME.warn}`, borderRadius: 6, padding: "10px 14px", marginBottom: 16, fontSize: 12.5, color: THEME.textLight, lineHeight: 1.6 }}>
+        Bu sistem artık yeni başvuru almıyor — yazarlar artık "Kitabımı Reklama Aç" ile <b>Yazar Kampanyaları</b>'ndan
+        doğrudan kampanya açıyor. Aşağıdakiler daha önce gelmiş, henüz kapanmamış başvurular — istersen elle işleyebilirsin.
       </div>
-      {liste.length === 0 && <div style={{ color: THEME.textFaint, fontSize: 13 }}>Henüz başvuru yok.</div>}
+      {liste.length === 0 && <div style={{ color: THEME.textFaint, fontSize: 13 }}>Bekleyen eski başvuru yok.</div>}
       <div style={{ display: "grid", gap: 10 }}>
         {liste.map((t) => {
           const d = TEKLIF_DURUM[t.durum] || TEKLIF_DURUM.basvuru;
