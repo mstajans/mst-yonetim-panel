@@ -3594,9 +3594,21 @@ function KreatifUretim({ authFetch }) {
   // yükleyebileyim o çok önemli"): önceden Meta'ya hiç görsel gönderilmiyordu,
   // hedef sayfanın önizleme görseli olmadığı için Meta alakasız bir görsel
   // kullanmıştı. Artık görsel yükleme zorunlu ve admin kendi seçiyor.
-  const [gorselOnizleme, setGorselOnizleme] = useState(null); // { dataUrl, dosyaAdi }
-  const [gorselHash, setGorselHash] = useState(null);
-  const [gorselYukleniyor, setGorselYukleniyor] = useState(false);
+  // GENİŞLETİLDİ (9 Ağu 2026, "story formatına ayrı, gönderi formatı ayrı
+  // oluyor... öyle basit yükle geçle olmaz" geri bildirimi): artık Feed
+  // (1:1/4:5) ve Story/Reels (9:16) için AYRI görsel yükleniyor, oran
+  // kontrolü ve gerçek Meta önizlemesiyle birlikte — bkz. admin.js
+  // formatOranKontrol / kreatifGovdesiOlustur / /admin/reklam/onizleme.
+  const [gorselFeed, setGorselFeed] = useState(null); // { dataUrl, dosyaAdi, genislik, yukseklik }
+  const [gorselFeedHash, setGorselFeedHash] = useState(null);
+  const [gorselFeedUyari, setGorselFeedUyari] = useState(null);
+  const [gorselFeedYukleniyor, setGorselFeedYukleniyor] = useState(false);
+  const [gorselStory, setGorselStory] = useState(null);
+  const [gorselStoryHash, setGorselStoryHash] = useState(null);
+  const [gorselStoryUyari, setGorselStoryUyari] = useState(null);
+  const [gorselStoryYukleniyor, setGorselStoryYukleniyor] = useState(false);
+  const [onizlemeler, setOnizlemeler] = useState(null); // { feed, story }
+  const [onizlemeYukleniyor, setOnizlemeYukleniyor] = useState(false);
 
   const cagir = async (yol, ayar, etiket) => {
     setCalisiyor(etiket); setHata(""); setMesaj("");
@@ -3617,39 +3629,80 @@ function KreatifUretim({ authFetch }) {
   const senaryoAl = async (aci) => { setSenaryoAci(aci); const d = await cagir(`/api/admin/reklam/senaryo?aci=${aci}&sure=20`, {}, "senaryo"); if (d) setSenaryo(d); };
   const performansAl = async () => { const d = await cagir("/api/admin/reklam/metin-performans", {}, "performans"); if (d) setPerformans(d); };
 
-  // Görsel seçildiğinde önce önizleme gösterilir, sonra "Görseli Yükle"
-  // butonuyla Meta'ya gönderilir (dosya seçmek ile Meta'ya yüklemek ayrı
-  // adımlar — kullanıcı yanlış görseli fark edip değiştirebilsin diye).
-  const gorselSec = (e) => {
+  // Görsel seçildiğinde hem dosya okunur hem GERÇEK piksel boyutu (naturalWidth/
+  // Height) öğrenilir — tarayıcı zaten decode ediyor, sunucuya ekstra bir
+  // görsel kütüphanesi eklemeye gerek kalmadan oran kontrolü yapılabiliyor.
+  const gorselSecOlustur = (format) => (e) => {
     const f = e.target.files?.[0];
     if (!f) return;
-    setGorselHash(null); setHata("");
+    const setHashFn = format === "feed" ? setGorselFeedHash : setGorselStoryHash;
+    const setUyariFn = format === "feed" ? setGorselFeedUyari : setGorselStoryUyari;
+    const setOnizlemeFn = format === "feed" ? setGorselFeed : setGorselStory;
+    setHashFn(null); setUyariFn(null); setOnizlemeler(null); setHata("");
     const reader = new FileReader();
-    reader.onload = () => setGorselOnizleme({ dataUrl: reader.result, dosyaAdi: f.name });
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = () => setOnizlemeFn({ dataUrl: reader.result, dosyaAdi: f.name, genislik: img.naturalWidth, yukseklik: img.naturalHeight });
+      img.src = reader.result;
+    };
     reader.readAsDataURL(f);
   };
+  const gorselSecFeed = gorselSecOlustur("feed");
+  const gorselSecStory = gorselSecOlustur("story");
 
-  const gorseliYukle = async () => {
-    if (!gorselOnizleme) return;
-    setGorselYukleniyor(true); setHata(""); setMesaj("");
+  const gorseliYukleOlustur = (format) => async () => {
+    const gorsel = format === "feed" ? gorselFeed : gorselStory;
+    if (!gorsel) return;
+    const setYukleniyorFn = format === "feed" ? setGorselFeedYukleniyor : setGorselStoryYukleniyor;
+    const setHashFn = format === "feed" ? setGorselFeedHash : setGorselStoryHash;
+    const setUyariFn = format === "feed" ? setGorselFeedUyari : setGorselStoryUyari;
+    setYukleniyorFn(true); setHata(""); setMesaj(""); setOnizlemeler(null);
     try {
       const r = await authFetch("/api/admin/reklam/gorsel-yukle", {
-        method: "POST", body: JSON.stringify({ dataUrl: gorselOnizleme.dataUrl }) });
+        method: "POST", body: JSON.stringify({
+          dataUrl: gorsel.dataUrl, format, genislik: gorsel.genislik, yukseklik: gorsel.yukseklik,
+        }) });
       const d = await r.json();
       if (!d.ok) { setHata(d.error || "Görsel yüklenemedi."); return; }
-      setGorselHash(d.imageHash);
+      setHashFn(d.imageHash);
+      setUyariFn(d.oranUyarisi || null);
       setMesaj(d.mesaj);
     } catch { setHata("Sunucuya ulaşılamadı."); }
-    finally { setGorselYukleniyor(false); }
+    finally { setYukleniyorFn(false); }
+  };
+  const gorseliYukleFeed = gorseliYukleOlustur("feed");
+  const gorseliYukleStory = gorseliYukleOlustur("story");
+
+  // Reklamı yayınlamadan önce Meta'nın KENDİ render motorundan gerçek
+  // önizleme ister — tahmin değil, Meta'nın /generatepreviews API'si.
+  const onizlemeGetir = async () => {
+    if (!gorselFeedHash || !secilenMetinler.length) return;
+    setOnizlemeYukleniyor(true); setHata(""); setOnizlemeler(null);
+    try {
+      const secilen = metinler.metinler[secilenMetinler[0]];
+      const r = await authFetch("/api/admin/reklam/onizleme", {
+        method: "POST", body: JSON.stringify({
+          imageHashFeed: gorselFeedHash, imageHashStory: gorselStoryHash || undefined,
+          mesaj: secilen.metin, baslik: secilen.baslik, aciklama: secilen.aciklama,
+        }) });
+      const d = await r.json();
+      if (!d.ok) { setHata(d.error || "Önizleme alınamadı."); return; }
+      setOnizlemeler(d.onizlemeler);
+    } catch { setHata("Sunucuya ulaşılamadı."); }
+    finally { setOnizlemeYukleniyor(false); }
   };
 
   const metinleriYayinla = async () => {
     if (!secilenMetinler.length) { setHata("En az bir metin seçin."); return; }
-    if (!gorselHash) { setHata("Önce bir görsel yükleyin — görselsiz reklam yayınlanamıyor."); return; }
-    if (!window.confirm(`${secilenMetinler.length} kreatif tek reklam setinde yayına alınacak.\n\nGünlük 300 ₺, 14 gün. Meta hangisinin kazandığını kendisi bulacak. Yüklediğiniz görsel hepsinde kullanılacak.\n\nOnaylıyor musun?`)) return;
+    if (!gorselFeedHash) { setHata("Önce Feed görselini yükleyin — görselsiz reklam yayınlanamıyor."); return; }
+    const storyNotu = gorselStoryHash ? "" : "\n\nNot: Story/Reels görseli yüklemediniz — Meta, Feed görselinizi otomatik kırparak kullanacak.";
+    if (!window.confirm(`${secilenMetinler.length} kreatif tek reklam setinde yayına alınacak.\n\nGünlük 300 ₺, 14 gün. Meta hangisinin kazandığını kendisi bulacak.${storyNotu}\n\nOnaylıyor musun?`)) return;
     const secilen = metinler.metinler.filter((_, i) => secilenMetinler.includes(i));
     const d = await cagir("/api/admin/reklam/metinden-reklam", {
-      method: "POST", body: JSON.stringify({ metinler: secilen, gunlukButce: 300, gun: 14, imageHash: gorselHash }) }, "yayinla");
+      method: "POST", body: JSON.stringify({
+        metinler: secilen, gunlukButce: 300, gun: 14,
+        imageHashFeed: gorselFeedHash, imageHashStory: gorselStoryHash || undefined,
+      }) }, "yayinla");
     if (d) setSecilenMetinler([]);
   };
 
@@ -3789,37 +3842,86 @@ function KreatifUretim({ authFetch }) {
             <div style={{ marginTop: 5, color: THEME.textFaint }}>{metinler.not}</div>
           </div>
 
-          {/* ── GÖRSEL YÜKLEME (8 Ağu 2026 eklendi) ── */}
-          <div style={{ background: gorselHash ? "rgba(46,125,50,.08)" : THEME.panelBgAlt, border: `1px solid ${gorselHash ? THEME.success : THEME.border}`, borderRadius: 6, padding: "12px 14px", marginBottom: 14 }}>
-            <div style={{ fontSize: 12.5, fontWeight: 600, color: THEME.textLight, marginBottom: 6 }}>
-              Reklam görseli {gorselHash ? "✓ yüklendi" : <span style={{ color: THEME.warn }}>— zorunlu, henüz yüklenmedi</span>}
-            </div>
-            <div style={{ fontSize: 11, color: THEME.textFaint, marginBottom: 10 }}>
-              Seçtiğiniz görsel, yayınlanacak tüm kreatiflerde kullanılır. Görsel yüklenmeden reklam yayına alınamaz.
-            </div>
-            <input type="file" accept="image/png,image/jpeg,image/gif,image/webp" onChange={gorselSec}
-              style={{ display: "block", width: "100%", fontSize: 13, color: THEME.textLight, marginBottom: gorselOnizleme ? 10 : 0 }} />
-            {gorselOnizleme && (
-              <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 6 }}>
-                <img src={gorselOnizleme.dataUrl} alt="Önizleme" style={{ width: 72, height: 72, objectFit: "cover", borderRadius: 6, border: `1px solid ${THEME.border}` }} />
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: 12, color: THEME.textLight }}>{gorselOnizleme.dosyaAdi}</div>
-                  {!gorselHash && (
-                    <Btn small disabled={gorselYukleniyor} onClick={gorseliYukle} style={{ marginTop: 6 }}>
-                      {gorselYukleniyor ? "Yükleniyor…" : "Görseli Yükle"}
-                    </Btn>
-                  )}
-                  {gorselHash && <div style={{ fontSize: 11.5, color: THEME.success, marginTop: 4 }}>Meta'ya yüklendi — kreatiflerde kullanılacak</div>}
+          {/* ── GÖRSEL YÜKLEME: FEED + STORY AYRI (9 Ağu 2026 genişletildi) ── */}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 14 }}>
+            {[
+              { format: "feed", baslikMetin: "Feed görseli (kare, 1:1)", zorunlu: true,
+                gorsel: gorselFeed, hash: gorselFeedHash, uyari: gorselFeedUyari, yukleniyor: gorselFeedYukleniyor,
+                secFn: gorselSecFeed, yukleFn: gorseliYukleFeed },
+              { format: "story", baslikMetin: "Story / Reels görseli (dikey, 9:16)", zorunlu: false,
+                gorsel: gorselStory, hash: gorselStoryHash, uyari: gorselStoryUyari, yukleniyor: gorselStoryYukleniyor,
+                secFn: gorselSecStory, yukleFn: gorseliYukleStory },
+            ].map((g) => (
+              <div key={g.format} style={{ background: g.hash ? "rgba(46,125,50,.08)" : THEME.panelBgAlt, border: `1px solid ${g.hash ? THEME.success : THEME.border}`, borderRadius: 6, padding: "12px 14px" }}>
+                <div style={{ fontSize: 12.5, fontWeight: 600, color: THEME.textLight, marginBottom: 4 }}>
+                  {g.baslikMetin} {g.hash ? "✓" : g.zorunlu ? <span style={{ color: THEME.warn }}>— zorunlu</span> : <span style={{ color: THEME.textFaint }}>— opsiyonel</span>}
                 </div>
+                <div style={{ fontSize: 10.5, color: THEME.textFaint, marginBottom: 8, lineHeight: 1.5 }}>
+                  {g.format === "feed"
+                    ? "Facebook/Instagram akışında (Feed) gösterilir."
+                    : "Yüklenmezse Meta, Feed görselinizi kırparak kullanır — logo/başlık kesilebilir."}
+                </div>
+                <input type="file" accept="image/png,image/jpeg,image/gif,image/webp" onChange={g.secFn}
+                  style={{ display: "block", width: "100%", fontSize: 12, color: THEME.textLight, marginBottom: g.gorsel ? 8 : 0 }} />
+                {g.gorsel && (
+                  <div style={{ marginTop: 6 }}>
+                    <div style={{ position: "relative", width: g.format === "story" ? 62 : 84, height: 84, borderRadius: 6, overflow: "hidden", border: `1px solid ${THEME.border}` }}>
+                      <img src={g.gorsel.dataUrl} alt="Önizleme" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+                      {g.format === "story" && (
+                        <>
+                          <div title="Meta arayüzü (profil/altyazı) bu bölgeyi kaplar" style={{ position: "absolute", top: 0, left: 0, right: 0, height: "14%", background: "rgba(224,144,128,.55)" }} />
+                          <div title="Meta arayüzü (CTA/altyazı) bu bölgeyi kaplar" style={{ position: "absolute", bottom: 0, left: 0, right: 0, height: "35%", background: "rgba(224,144,128,.55)" }} />
+                        </>
+                      )}
+                    </div>
+                    <div style={{ fontSize: 10.5, color: THEME.textFaint, marginTop: 4 }}>{g.gorsel.genislik}×{g.gorsel.yukseklik}px</div>
+                    {g.format === "story" && <div style={{ fontSize: 9.5, color: "rgba(224,144,128,.9)", marginTop: 2 }}>Kırmızı alanlar Meta arayüzünün kapladığı bölge</div>}
+                    {g.uyari && <div style={{ fontSize: 10.5, color: THEME.warn, marginTop: 5, lineHeight: 1.5, background: "rgba(255,180,60,.08)", padding: "5px 7px", borderRadius: 4 }}>⚠ {g.uyari}</div>}
+                    {!g.hash && (
+                      <Btn small disabled={g.yukleniyor} onClick={g.yukleFn} style={{ marginTop: 6 }}>
+                        {g.yukleniyor ? "Yükleniyor…" : "Meta'ya Yükle"}
+                      </Btn>
+                    )}
+                    {g.hash && <div style={{ fontSize: 11, color: THEME.success, marginTop: 4 }}>Meta'ya yüklendi</div>}
+                  </div>
+                )}
               </div>
-            )}
+            ))}
           </div>
+
+          {/* ── GERÇEK META ÖNİZLEMESİ (9 Ağu 2026 eklendi) — mockup değil,
+               Meta'nın kendi /generatepreviews API'sinden gelen render ── */}
+          {gorselFeedHash && secilenMetinler.length > 0 && (
+            <div style={{ marginBottom: 14 }}>
+              <Btn small variant="ghost" disabled={onizlemeYukleniyor} onClick={onizlemeGetir}>
+                {onizlemeYukleniyor ? "Meta'dan önizleme isteniyor…" : "Yayınlamadan önce gerçek önizlemeyi gör"}
+              </Btn>
+              {onizlemeler && (
+                <div style={{ display: "grid", gridTemplateColumns: onizlemeler.story ? "1fr 1fr" : "1fr", gap: 10, marginTop: 10 }}>
+                  {onizlemeler.feed && (
+                    <div>
+                      <div style={{ fontSize: 10.5, color: THEME.textFaint, marginBottom: 4 }}>FEED'DE BÖYLE GÖRÜNECEK</div>
+                      <div style={{ border: `1px solid ${THEME.border}`, borderRadius: 6, overflow: "hidden", maxHeight: 420, overflowY: "auto" }}
+                        dangerouslySetInnerHTML={{ __html: onizlemeler.feed }} />
+                    </div>
+                  )}
+                  {onizlemeler.story && (
+                    <div>
+                      <div style={{ fontSize: 10.5, color: THEME.textFaint, marginBottom: 4 }}>STORY/REELS'TE BÖYLE GÖRÜNECEK</div>
+                      <div style={{ border: `1px solid ${THEME.border}`, borderRadius: 6, overflow: "hidden", maxHeight: 420, overflowY: "auto" }}
+                        dangerouslySetInnerHTML={{ __html: onizlemeler.story }} />
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
 
           {secilenMetinler.length > 0 && (
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, background: "rgba(46,125,50,.10)", border: `1px solid ${THEME.success}`, borderRadius: 6, padding: "10px 13px", marginBottom: 12, flexWrap: "wrap" }}>
               <div style={{ fontSize: 12.5, color: THEME.success }}>{secilenMetinler.length} metin seçildi</div>
               <div style={{ display: "flex", gap: 6 }}>
-                <Btn small disabled={!!calisiyor || !gorselHash} onClick={metinleriYayinla}>Seçilenleri yayına al</Btn>
+                <Btn small disabled={!!calisiyor || !gorselFeedHash} onClick={metinleriYayinla}>Seçilenleri yayına al</Btn>
                 <Btn small variant="ghost" onClick={() => setSecilenMetinler([])}>Temizle</Btn>
               </div>
             </div>
