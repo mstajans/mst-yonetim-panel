@@ -3493,6 +3493,38 @@ function KitapStudyo({ authFetch }) {
   const [pdfHazirlaniyorMu, setPdfHazirlaniyorMu] = React.useState(false);
   const [ekPozTarifleri, setEkPozTarifleri] = React.useState({});
   const [ekPozUretiliyorIdx, setEkPozUretiliyorIdx] = React.useState(null);
+  // EKLENDİ (14 Ağu 2026, "projeden çıkınca üretim devam etmeli" — Bedirhan'ın
+  // talebi): arka planda üretilen projelerin GÜNCEL verisini React state'inden
+  // (seciliProje) BAĞIMSIZ tutan bir ref. Kullanıcı "Tümünü Üret"e bastıktan
+  // sonra Proje Panosuna dönüp başka bir projeye girse bile, bu ref'teki kopya
+  // üzerinden üretim doğru projeye yazmaya devam eder — seciliProje değişmiş
+  // olsa bile karışmaz. Ekranda hâlâ o proje açıksa, her adımda ayrıca
+  // setSeciliProje ile ekran da güncellenir.
+  const aktifUretimVerisiRef = React.useRef({});
+  const [aktifUretimIlerleme, setAktifUretimIlerleme] = React.useState({}); // {[projeId]: "3/10"}
+
+  // hedefId verilmezse (normal, ekrandaki proje üzerinde çalışma) seciliProje
+  // döner — mevcut tüm çağrılarla geriye dönük uyumlu. hedefId verilmişse
+  // (arka plan üretimi) ref'teki en güncel kopya döner.
+  const projeOku = (hedefId) => {
+    if (!hedefId || hedefId === seciliId) return aktifUretimVerisiRef.current[hedefId] || seciliProje;
+    return aktifUretimVerisiRef.current[hedefId];
+  };
+  // Projeyi günceller: ref'e yazar, backend'e PUT eder, ekranda hâlâ o proje
+  // açıksa state'i de günceller. Tüm üretim fonksiyonları artık setSeciliProje
+  // + metaKaydet yerine bunu kullanıyor.
+  const projeGuncelle = async (hedefId, guncelMeta) => {
+    aktifUretimVerisiRef.current[hedefId] = guncelMeta;
+    if (hedefId === seciliId) setSeciliProje(guncelMeta);
+    try {
+      const r = await authFetch(`/api/admin/kitap-studyo/projeler/${hedefId}`, {
+        method: "PUT", body: JSON.stringify({ ...guncelMeta, asama: guncelMeta.asama || "sahneler" }),
+      });
+      const d = await r.json();
+      if (!d.ok && hedefId === seciliId) setHata(d.error || "Kaydedilemedi.");
+      return d.ok;
+    } catch { if (hedefId === seciliId) setHata("Sunucuya ulaşılamadı."); return false; }
+  };
 
   const stil = {
     sayfa: { background: "#FFFFFF", borderTop: "8px solid", borderImage: "linear-gradient(90deg,#E85D75,#F4A83E,#4FAF7A,#3E8ED0) 1", padding: "28px 24px", borderRadius: 8, color: "#18181a" },
@@ -3738,24 +3770,26 @@ function KitapStudyo({ authFetch }) {
   };
 
   // Künye sayfasını canvas ile çizer — AI'ye hiç gitmez, anında ve ücretsiz.
-  const kunyeUret = async () => {
-    if (kunyeUretiliyorMu) return;
-    setKunyeUretiliyorMu(true); setHata("");
+  const kunyeUret = async (hedefId) => {
+    hedefId = hedefId || seciliId;
+    const p = projeOku(hedefId);
+    if (kunyeUretiliyorMu && hedefId === seciliId) return;
+    if (hedefId === seciliId) { setKunyeUretiliyorMu(true); setHata(""); }
     try {
       await fontHazirla(40, "Capriola");
-      const [w, h] = (seciliProje.boyut || "1024x1536").split("x").map(Number);
+      const [w, h] = (p.boyut || "1024x1536").split("x").map(Number);
       const canvas = document.createElement("canvas");
       canvas.width = w; canvas.height = h;
       const ctx = canvas.getContext("2d");
       ctx.fillStyle = "#FFFFFF"; ctx.fillRect(0, 0, w, h);
       ctx.fillStyle = "#18181a"; ctx.textAlign = "center";
-      const oz = seciliProje.ozellikler || {};
+      const oz = p.ozellikler || {};
       let y = h * 0.22;
       ctx.font = `${Math.round(w * 0.075)}px Capriola, Georgia, serif`;
-      y = metniSar(ctx, seciliProje.kitapAdi || "Kitap Adı", w / 2, y, w * 0.8, w * 0.09) + w * 0.09;
-      if (seciliProje.yazarAdi) {
+      y = metniSar(ctx, p.kitapAdi || "Kitap Adı", w / 2, y, w * 0.8, w * 0.09) + w * 0.09;
+      if (p.yazarAdi) {
         ctx.font = `${Math.round(w * 0.04)}px Capriola, Georgia, serif`;
-        ctx.fillText(seciliProje.yazarAdi, w / 2, y); y += w * 0.09;
+        ctx.fillText(p.yazarAdi, w / 2, y); y += w * 0.09;
       }
       ctx.strokeStyle = "#cccccc"; ctx.beginPath(); ctx.moveTo(w * 0.25, y); ctx.lineTo(w * 0.75, y); ctx.stroke(); y += w * 0.09;
       ctx.textAlign = "left"; ctx.font = `${Math.round(w * 0.028)}px Capriola, Georgia, serif`;
@@ -3772,11 +3806,10 @@ function KitapStudyo({ authFetch }) {
       ].filter(Boolean).forEach((satir) => { ctx.fillText(satir, w * 0.14, y); y += w * 0.045; });
       const b64 = canvas.toDataURL("image/png").split(",")[1];
       const url = await gorselYukle(b64, "kunye");
-      const guncelMeta = { ...seciliProje, kunyeGorselUrl: url };
-      setSeciliProje(guncelMeta);
-      await metaKaydet(guncelMeta);
-    } catch (err) { setHata("Künye oluşturulamadı: " + err.message); }
-    finally { setKunyeUretiliyorMu(false); }
+      const guncelMeta = { ...p, kunyeGorselUrl: url };
+      await projeGuncelle(hedefId, guncelMeta);
+    } catch (err) { if (hedefId === seciliId) setHata("Künye oluşturulamadı: " + err.message); }
+    finally { if (hedefId === seciliId) setKunyeUretiliyorMu(false); }
   };
 
   // Bir görsel URL'sini (fetch ile) indirip base64'e çevirir — kapak
@@ -3794,7 +3827,7 @@ function KitapStudyo({ authFetch }) {
 
   // Ham kapak görselinin (b64) üzerine, alt kısma karartma bant + kitap adı
   // + yazar adı bindirir (Capriola font, metin AI'ye çizdirilmiyor).
-  const onKapakMetniBindir = async (hamB64) => {
+  const onKapakMetniBindir = async (hamB64, p) => {
     await fontHazirla(48, "Capriola");
     return new Promise((resolve) => {
       const img = new Image();
@@ -3809,10 +3842,10 @@ function KitapStudyo({ authFetch }) {
         ctx.fillStyle = grad; ctx.fillRect(0, img.height - bant, img.width, bant);
         ctx.textAlign = "center"; ctx.fillStyle = "#ffffff";
         ctx.font = `${Math.round(img.width * 0.078)}px Capriola, Georgia, serif`;
-        const sonY = metniSar(ctx, seciliProje.kitapAdi || "Kitap Adı", img.width / 2, img.height - bant * 0.62, img.width * 0.86, img.width * 0.09);
-        if (seciliProje.yazarAdi) {
+        const sonY = metniSar(ctx, p.kitapAdi || "Kitap Adı", img.width / 2, img.height - bant * 0.62, img.width * 0.86, img.width * 0.09);
+        if (p.yazarAdi) {
           ctx.font = `${Math.round(img.width * 0.036)}px Capriola, Georgia, serif`;
-          ctx.fillText(seciliProje.yazarAdi, img.width / 2, Math.max(sonY + img.width * 0.07, img.height - img.height * 0.05));
+          ctx.fillText(p.yazarAdi, img.width / 2, Math.max(sonY + img.width * 0.07, img.height - img.height * 0.05));
         }
         resolve(canvas.toDataURL("image/png").split(",")[1]);
       };
@@ -3820,9 +3853,9 @@ function KitapStudyo({ authFetch }) {
     });
   };
 
-  const arkaKapakMetniBindir = async (hamB64) => {
+  const arkaKapakMetniBindir = async (hamB64, p) => {
     await fontHazirla(32, "Capriola");
-    const yazi = (seciliProje.kapakArkasiYazisi || "").trim();
+    const yazi = (p.kapakArkasiYazisi || "").trim();
     return new Promise((resolve) => {
       const img = new Image();
       img.onload = () => {
@@ -3847,7 +3880,7 @@ function KitapStudyo({ authFetch }) {
     return canvas.toDataURL("image/png").split(",")[1];
   };
 
-  const referansHavuzuTopla = () => (seciliProje.karakterler || []).flatMap((k) => {
+  const referansHavuzuTopla = (hedefId) => (projeOku(hedefId).karakterler || []).flatMap((k) => {
     const liste = [];
     if (k.gorselUrl) liste.push(k.gorselUrl);
     (k.ekPozlar || []).forEach((e) => liste.push(e.gorselUrl));
@@ -3895,19 +3928,20 @@ function KitapStudyo({ authFetch }) {
     throw sonHata;
   };
 
-  const onKapakUret = async () => {
-    if (onKapakUretiliyorMu || !seciliProje.onKapakSahne?.trim()) { if (!seciliProje.onKapakSahne?.trim()) setHata("Önce kapak görselinin ne göstermesi gerektiğini yaz."); return; }
-    setOnKapakUretiliyorMu(true); setHata("");
+  const onKapakUret = async (hedefId) => {
+    hedefId = hedefId || seciliId;
+    const p = projeOku(hedefId);
+    if ((onKapakUretiliyorMu && hedefId === seciliId) || !p.onKapakSahne?.trim()) { if (!p.onKapakSahne?.trim() && hedefId === seciliId) setHata("Önce kapak görselinin ne göstermesi gerektiğini yaz."); return; }
+    if (hedefId === seciliId) { setOnKapakUretiliyorMu(true); setHata(""); }
     try {
-      const hamUrl = await gorselIsteYenidenDeneyerek({ karakterTanimi: seciliProje.stilTanimi, sahne: seciliProje.onKapakSahne, model: seciliProje.model, kalite: seciliProje.kalite, boyut: seciliProje.boyut, referansGorseller: referansHavuzuTopla() });
+      const hamUrl = await gorselIsteYenidenDeneyerek({ karakterTanimi: p.stilTanimi, sahne: p.onKapakSahne, model: p.model, kalite: p.kalite, boyut: p.boyut, referansGorseller: referansHavuzuTopla(hedefId) });
       const hamB64 = await urlDenB64Al(hamUrl);
-      const finalB64 = await onKapakMetniBindir(hamB64);
+      const finalB64 = await onKapakMetniBindir(hamB64, p);
       const finalUrl = await gorselYukle(finalB64, "on-kapak");
-      const guncelMeta = { ...seciliProje, onKapakHamUrl: hamUrl, onKapakGorselUrl: finalUrl };
-      setSeciliProje(guncelMeta);
-      await metaKaydet(guncelMeta);
-    } catch (err) { setHata("Hata: " + err.message); }
-    finally { setOnKapakUretiliyorMu(false); }
+      const guncelMeta = { ...p, onKapakHamUrl: hamUrl, onKapakGorselUrl: finalUrl };
+      await projeGuncelle(hedefId, guncelMeta);
+    } catch (err) { if (hedefId === seciliId) setHata("Hata: " + err.message); }
+    finally { if (hedefId === seciliId) setOnKapakUretiliyorMu(false); }
   };
 
   const onKapakYaziYenidenYerlestir = async () => {
@@ -3915,35 +3949,35 @@ function KitapStudyo({ authFetch }) {
     setOnKapakUretiliyorMu(true); setHata("");
     try {
       const hamB64 = await urlDenB64Al(seciliProje.onKapakHamUrl);
-      const finalB64 = await onKapakMetniBindir(hamB64);
+      const finalB64 = await onKapakMetniBindir(hamB64, seciliProje);
       const finalUrl = await gorselYukle(finalB64, "on-kapak");
       const guncelMeta = { ...seciliProje, onKapakGorselUrl: finalUrl };
-      setSeciliProje(guncelMeta);
-      await metaKaydet(guncelMeta);
+      await projeGuncelle(seciliId, guncelMeta);
     } catch (err) { setHata("Hata: " + err.message); }
     finally { setOnKapakUretiliyorMu(false); }
   };
 
-  const arkaKapakUret = async () => {
-    if (arkaKapakUretiliyorMu) return;
-    setArkaKapakUretiliyorMu(true); setHata("");
+  const arkaKapakUret = async (hedefId) => {
+    hedefId = hedefId || seciliId;
+    const p = projeOku(hedefId);
+    if (arkaKapakUretiliyorMu && hedefId === seciliId) return;
+    if (hedefId === seciliId) { setArkaKapakUretiliyorMu(true); setHata(""); }
     try {
-      const [w, h] = (seciliProje.boyut || "1024x1536").split("x").map(Number);
+      const [w, h] = (p.boyut || "1024x1536").split("x").map(Number);
       let hamB64, hamUrl;
-      if (seciliProje.arkaKapakSahne?.trim()) {
-        hamUrl = await gorselIsteYenidenDeneyerek({ karakterTanimi: seciliProje.stilTanimi, sahne: seciliProje.arkaKapakSahne, model: seciliProje.model, kalite: seciliProje.kalite, boyut: seciliProje.boyut, referansGorseller: referansHavuzuTopla() });
+      if (p.arkaKapakSahne?.trim()) {
+        hamUrl = await gorselIsteYenidenDeneyerek({ karakterTanimi: p.stilTanimi, sahne: p.arkaKapakSahne, model: p.model, kalite: p.kalite, boyut: p.boyut, referansGorseller: referansHavuzuTopla(hedefId) });
         hamB64 = await urlDenB64Al(hamUrl);
       } else {
         hamB64 = duzZeminOlustur(w, h);
         hamUrl = await gorselYukle(hamB64, "arka-kapak-ham");
       }
-      const finalB64 = await arkaKapakMetniBindir(hamB64);
+      const finalB64 = await arkaKapakMetniBindir(hamB64, p);
       const finalUrl = await gorselYukle(finalB64, "arka-kapak");
-      const guncelMeta = { ...seciliProje, arkaKapakHamUrl: hamUrl, arkaKapakGorselUrl: finalUrl };
-      setSeciliProje(guncelMeta);
-      await metaKaydet(guncelMeta);
-    } catch (err) { setHata("Hata: " + err.message); }
-    finally { setArkaKapakUretiliyorMu(false); }
+      const guncelMeta = { ...p, arkaKapakHamUrl: hamUrl, arkaKapakGorselUrl: finalUrl };
+      await projeGuncelle(hedefId, guncelMeta);
+    } catch (err) { if (hedefId === seciliId) setHata("Hata: " + err.message); }
+    finally { if (hedefId === seciliId) setArkaKapakUretiliyorMu(false); }
   };
 
   const arkaKapakYaziYenidenYerlestir = async () => {
@@ -3951,11 +3985,10 @@ function KitapStudyo({ authFetch }) {
     setArkaKapakUretiliyorMu(true); setHata("");
     try {
       const hamB64 = await urlDenB64Al(seciliProje.arkaKapakHamUrl);
-      const finalB64 = await arkaKapakMetniBindir(hamB64);
+      const finalB64 = await arkaKapakMetniBindir(hamB64, seciliProje);
       const finalUrl = await gorselYukle(finalB64, "arka-kapak");
       const guncelMeta = { ...seciliProje, arkaKapakGorselUrl: finalUrl };
-      setSeciliProje(guncelMeta);
-      await metaKaydet(guncelMeta);
+      await projeGuncelle(seciliId, guncelMeta);
     } catch (err) { setHata("Hata: " + err.message); }
     finally { setArkaKapakUretiliyorMu(false); }
   };
@@ -4027,12 +4060,14 @@ function KitapStudyo({ authFetch }) {
     });
   };
 
-  const spreadUret = async (idx) => {
-    const s = seciliProje.spreadler[idx];
-    if (!s.sahne?.trim()) { setHata("Önce bu sayfa çifti için bir sahne yaz."); return; }
-    setSpreadUretiliyorIdx(idx); setHata("");
+  const spreadUret = async (idx, hedefId) => {
+    hedefId = hedefId || seciliId;
+    const p = projeOku(hedefId);
+    const s = p.spreadler[idx];
+    if (!s.sahne?.trim()) { if (hedefId === seciliId) setHata("Önce bu sayfa çifti için bir sahne yaz."); return; }
+    if (hedefId === seciliId) { setSpreadUretiliyorIdx(idx); setHata(""); }
     try {
-      const genisUrl = await gorselIsteYenidenDeneyerek({ karakterTanimi: seciliProje.stilTanimi, sahne: s.sahne, model: seciliProje.model, kalite: seciliProje.kalite, boyut: "1536x1024", referansGorseller: referansHavuzuTopla() });
+      const genisUrl = await gorselIsteYenidenDeneyerek({ karakterTanimi: p.stilTanimi, sahne: s.sahne, model: p.model, kalite: p.kalite, boyut: "1536x1024", referansGorseller: referansHavuzuTopla(hedefId) });
       const genisB64 = await urlDenB64Al(genisUrl);
       const { sol, sag } = await gorseliIkiyeBol(genisB64);
       const { solSayfa, sagSayfa } = spreadNumaralariGetir(idx);
@@ -4040,42 +4075,58 @@ function KitapStudyo({ authFetch }) {
       const sagFinal = await sayfaMetniBindir(sag, s.sagMetinsiz ? "" : s.sagMetin, sagSayfa);
       const solUrl = await gorselYukle(solFinal, "sayfa");
       const sagUrl = await gorselYukle(sagFinal, "sayfa");
-      const yeniSpreadler = seciliProje.spreadler.map((sp, i) => i === idx ? { ...sp, solGorselUrl: solUrl, sagGorselUrl: sagUrl } : sp);
-      const guncelMeta = { ...seciliProje, spreadler: yeniSpreadler };
-      setSeciliProje(guncelMeta);
-      await metaKaydet(guncelMeta);
-    } catch (err) { setHata("Hata: " + err.message); }
-    finally { setSpreadUretiliyorIdx(null); }
+      // p.spreadler yerine EN GÜNCEL kopyayı (projeOku ile) tekrar okuyoruz —
+      // arka planda üretim sırasında bu spread'e ait metin/sahne başka bir
+      // adımda değişmiş olabilir.
+      const guncelP = projeOku(hedefId);
+      const yeniSpreadler = guncelP.spreadler.map((sp, i) => i === idx ? { ...sp, solGorselUrl: solUrl, sagGorselUrl: sagUrl } : sp);
+      const guncelMeta = { ...guncelP, spreadler: yeniSpreadler };
+      await projeGuncelle(hedefId, guncelMeta);
+    } catch (err) { if (hedefId === seciliId) setHata("Hata: " + err.message); }
+    finally { if (hedefId === seciliId) setSpreadUretiliyorIdx(null); }
   };
 
   const spreadMetniYenidenYerlestir = async (idx) => {
     setSpreadUretiliyorIdx(idx); setHata("");
     try {
-      const s = seciliProje.spreadler[idx];
-      const { solSayfa, sagSayfa } = spreadNumaralariGetir(idx);
       // Ham görseller ayrı saklanmıyor (boyut için) — metin değişince sahneyi
       // yeniden üretmek gerekiyor. Bu, vanilla araçtaki "aynı oturumda"
       // sınırlamasının basitleştirilmiş hali.
-      await spreadUret(idx);
+      await spreadUret(idx, seciliId);
     } finally { setSpreadUretiliyorIdx(null); }
   };
 
   // ================= EKLENDİ: 4. parça — "Tümünü Üret" ve "Kalite değişti,
-  // yeniden üretime hazırla" ================= 
-  const tumunuUret = async () => {
-    if (tumunuUretiliyorMu) return;
-    setTumunuUretiliyorMu(true); setHata("");
+  // yeniden üretime hazırla" =================
+  // EKLENDİ (14 Ağu 2026, "projeden çıkınca üretim devam etmeli"): artık
+  // seciliProje state'ine bağımlı değil — hedefId'yi (proje numarasını)
+  // sabit yakalar, her adımı projeOku/projeGuncelle üzerinden (backend'e
+  // doğrudan authFetch ile) yürütür. Kullanıcı Proje Panosuna dönüp başka
+  // projeye girse bile bu döngü doğru projeye yazmaya devam eder; ekranda
+  // hâlâ bu proje açıksa arayüz de canlı güncellenir.
+  const tumunuUret = async (hedefId) => {
+    hedefId = hedefId || seciliId;
+    if (aktifUretimIlerleme[hedefId]) return; // zaten üretimde
+    setAktifUretimIlerleme((m) => ({ ...m, [hedefId]: "başlıyor…" }));
+    if (hedefId === seciliId) { setTumunuUretiliyorMu(true); setHata(""); }
     const beklemeMs = Math.max(0, (parseFloat(beklemeSn) || 0) * 1000);
     try {
-      if (!seciliProje.kunyeGorselUrl) { await kunyeUret(); if (beklemeMs) await bekle(beklemeMs); }
-      if (seciliProje.onKapakSahne?.trim() && !seciliProje.onKapakGorselUrl) { await onKapakUret(); if (beklemeMs) await bekle(beklemeMs); }
-      if (!seciliProje.arkaKapakGorselUrl) { await arkaKapakUret(); if (beklemeMs) await bekle(beklemeMs); }
-      for (let i = 0; i < (seciliProje.spreadler || []).length; i++) {
-        if (seciliProje.spreadler[i].solGorselUrl) continue;
-        await spreadUret(i);
+      let p = projeOku(hedefId);
+      if (!p.kunyeGorselUrl) { await kunyeUret(hedefId); if (beklemeMs) await bekle(beklemeMs); p = projeOku(hedefId); }
+      if (p.onKapakSahne?.trim() && !p.onKapakGorselUrl) { await onKapakUret(hedefId); if (beklemeMs) await bekle(beklemeMs); p = projeOku(hedefId); }
+      if (!p.arkaKapakGorselUrl) { await arkaKapakUret(hedefId); if (beklemeMs) await bekle(beklemeMs); p = projeOku(hedefId); }
+      const toplamSpread = (p.spreadler || []).length;
+      for (let i = 0; i < toplamSpread; i++) {
+        p = projeOku(hedefId);
+        if (p.spreadler[i].solGorselUrl) continue;
+        setAktifUretimIlerleme((m) => ({ ...m, [hedefId]: `${i + 1}/${toplamSpread} sayfa çifti` }));
+        await spreadUret(i, hedefId);
         if (beklemeMs) await bekle(beklemeMs);
       }
-    } finally { setTumunuUretiliyorMu(false); }
+    } finally {
+      setAktifUretimIlerleme((m) => { const y = { ...m }; delete y[hedefId]; return y; });
+      if (hedefId === seciliId) setTumunuUretiliyorMu(false);
+    }
   };
 
   const uretimiSifirla = async () => {
@@ -4213,6 +4264,11 @@ function KitapStudyo({ authFetch }) {
                 <span onClick={(e) => projeSil(p.id, e)} style={{ color: "#C0392B", cursor: "pointer", fontSize: 12 }}>✕</span>
               </div>
               <span style={stil.rozet}>{{ stil: "Stil Seçimi", karakter: "Karakter", sahneler: "Sahneler" }[p.asama] || p.asama}</span>
+              {/* EKLENDİ (14 Ağu 2026): projeden çıkılsa da arka planda devam
+                  eden üretimi, Proje Panosunda da canlı gösterir. */}
+              {aktifUretimIlerleme[p.id] && (
+                <span style={{ ...stil.rozet, background: "#3E8ED0", marginLeft: 6 }}>⏳ {aktifUretimIlerleme[p.id]}</span>
+              )}
               <div style={{ fontSize: 11, color: "#9a9a96", marginTop: 6 }}>{new Date(p.guncellendi).toLocaleString("tr-TR")}</div>
             </div>
           ))}
@@ -4557,9 +4613,9 @@ function KitapStudyo({ authFetch }) {
                         </div>
                       </div>
                       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                        <button style={{ ...stil.buton, background: "#4FAF7A", ...(tumunuUretiliyorMu ? stil.butonPasif : {}) }}
-                          disabled={tumunuUretiliyorMu} onClick={tumunuUret}>
-                          {tumunuUretiliyorMu ? "Üretiliyor..." : "Eksik Olanları Üret (Sırayla)"}
+                        <button style={{ ...stil.buton, background: "#4FAF7A", ...(aktifUretimIlerleme[seciliProje.id] ? stil.butonPasif : {}) }}
+                          disabled={!!aktifUretimIlerleme[seciliProje.id]} onClick={() => tumunuUret()}>
+                          {aktifUretimIlerleme[seciliProje.id] ? `Üretiliyor... (${aktifUretimIlerleme[seciliProje.id]})` : "Eksik Olanları Üret (Sırayla)"}
                         </button>
                         <button style={stil.buton} disabled={kitapSayfaListesiOlustur().length === 0} onClick={kitapiOnizle}>Kitabı Önizle</button>
                         <button style={{ ...stil.buton, ...(pdfHazirlaniyorMu ? stil.butonPasif : {}) }}
