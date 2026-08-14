@@ -3464,7 +3464,35 @@ function KitapStudyo({ authFetch }) {
   // üretiliyor olduğunu (indeks) tutar — birden fazla eşzamanlı üretim
   // isteğini önlemek için.
   const [stilUretiliyorIdx, setStilUretiliyorIdx] = React.useState(null);
+  // EKLENDİ (14 Ağu 2026, ② Karakter aşaması): yeni karakter formu ve
+  // hangi karakterin görselinin üretiliyor olduğunu tutan state'ler.
+  const [yeniKarakterAd, setYeniKarakterAd] = React.useState("");
+  const [yeniKarakterAciklama, setYeniKarakterAciklama] = React.useState("");
+  const [karakterUretiliyorIdx, setKarakterUretiliyorIdx] = React.useState(null);
   const [kaydediliyor, setKaydediliyor] = React.useState(false);
+  // EKLENDİ (14 Ağu 2026, ③ Sahneler aşaması — 1. parça: kitap metni yükleme
+  // + otomatik sahne bölme): metin ayrıştırma durumunu ve mammoth (.docx
+  // okuyucu) kütüphanesinin yüklenip yüklenmediğini tutar.
+  const [sahnelerDolduruluyorMu, setSahnelerDolduruluyorMu] = React.useState(false);
+  const [sahnelerDurumMetni, setSahnelerDurumMetni] = React.useState("");
+  // EKLENDİ (14 Ağu 2026, ③ Sahneler — 2. parça: künye + kapaklar): künye
+  // üretimi anlık (canvas), kapak üretimi OpenAI'ye gidiyor — ayrı "üretiliyor"
+  // bayrakları gerekiyor.
+  const [kunyeUretiliyorMu, setKunyeUretiliyorMu] = React.useState(false);
+  const [onKapakUretiliyorMu, setOnKapakUretiliyorMu] = React.useState(false);
+  const [arkaKapakUretiliyorMu, setArkaKapakUretiliyorMu] = React.useState(false);
+  // EKLENDİ (14 Ağu 2026, ③ Sahneler — 3-6. parçalar): sayfa çifti üretimi,
+  // güvenilirlik katmanı (bekleme/yeniden deneme/maliyet), PDF+önizleme,
+  // karakter ek poz için state'ler.
+  const [spreadUretiliyorIdx, setSpreadUretiliyorIdx] = React.useState(null);
+  const [tumunuUretiliyorMu, setTumunuUretiliyorMu] = React.useState(false);
+  const [beklemeSn, setBeklemeSn] = React.useState("4");
+  const [toplamMaliyet, setToplamMaliyet] = React.useState(0);
+  const [onizlemeAcikMi, setOnizlemeAcikMi] = React.useState(false);
+  const [onizlemeIndex, setOnizlemeIndex] = React.useState(0);
+  const [pdfHazirlaniyorMu, setPdfHazirlaniyorMu] = React.useState(false);
+  const [ekPozTarifleri, setEkPozTarifleri] = React.useState({});
+  const [ekPozUretiliyorIdx, setEkPozUretiliyorIdx] = React.useState(null);
 
   const stil = {
     sayfa: { background: "#FFFFFF", borderTop: "8px solid", borderImage: "linear-gradient(90deg,#E85D75,#F4A83E,#4FAF7A,#3E8ED0) 1", padding: "28px 24px", borderRadius: 8, color: "#18181a" },
@@ -3548,6 +3576,574 @@ function KitapStudyo({ authFetch }) {
     setSeciliProje({ ...guncelMeta, asama: "karakter" });
     const basarili = await metaKaydet(guncelMeta, "karakter");
     if (basarili) await projeAc(seciliId); // güncel durumu (asama dahil) taze çek
+  };
+
+  // EKLENDİ (14 Ağu 2026): ② Karakter aşaması — yeni karakter ekleme,
+  // referans görsel üretme, silme, sahnelere geçme.
+  const karakterEkle = async () => {
+    if (!yeniKarakterAd.trim()) return;
+    const yeniKarakter = { ad: yeniKarakterAd.trim(), aciklama: yeniKarakterAciklama.trim(), gorselUrl: null, ekPozlar: [] };
+    const guncelMeta = { ...seciliProje, karakterler: [...(seciliProje.karakterler || []), yeniKarakter] };
+    setSeciliProje(guncelMeta);
+    setYeniKarakterAd(""); setYeniKarakterAciklama("");
+    await metaKaydet(guncelMeta);
+  };
+
+  // Karakterin İLK (referans) görselini üretir — henüz hiçbir referansı
+  // yokken /v1/images/generations yoluna gider (kitap-resim-uret.js'de
+  // referansGorseller boşsa otomatik seçilen yol). Onaylı stil tanımı
+  // karakterTanimi olarak, karakterin kendi açıklaması sahne olarak gidiyor
+  // — STYLE LOCK'ın karakterin ilk görselinde de korunması için.
+  const karakterGorseliUret = async (idx) => {
+    if (karakterUretiliyorIdx !== null) return;
+    setKarakterUretiliyorIdx(idx); setHata("");
+    try {
+      const karakter = seciliProje.karakterler[idx];
+      const r = await authFetch("/api/admin/kitap-studyo/gorsel-uret", {
+        method: "POST",
+        body: JSON.stringify({
+          karakterTanimi: seciliProje.stilTanimi,
+          sahne: `Karakter referans görseli, tam boy, nötr duruş, nötr arka plan: ${karakter.aciklama}`,
+          model: seciliProje.model, kalite: seciliProje.kalite, boyut: "1024x1024",
+        }),
+      });
+      const d = await r.json();
+      if (!d.ok) { setHata(d.error || "Görsel üretilemedi."); return; }
+      const yeniKarakterler = seciliProje.karakterler.map((k, i) => i === idx ? { ...k, gorselUrl: d.gorselUrl } : k);
+      const guncelMeta = { ...seciliProje, karakterler: yeniKarakterler };
+      setSeciliProje(guncelMeta);
+      await metaKaydet(guncelMeta);
+    } catch { setHata("Sunucuya ulaşılamadı."); }
+    finally { setKarakterUretiliyorIdx(null); }
+  };
+
+  const karakterSil = async (idx) => {
+    const guncelMeta = { ...seciliProje, karakterler: seciliProje.karakterler.filter((_, i) => i !== idx) };
+    setSeciliProje(guncelMeta);
+    await metaKaydet(guncelMeta);
+  };
+
+  const sahnelereGec = async () => {
+    setSeciliProje({ ...seciliProje, asama: "sahneler" });
+    const basarili = await metaKaydet(seciliProje, "sahneler");
+    if (basarili) await projeAc(seciliId);
+  };
+
+  // EKLENDİ (14 Ağu 2026): ③ Sahneler aşaması — kitap metni yükleme +
+  // otomatik sahne bölme. mammoth (.docx okuyucu) CDN'den dinamik yüklenir
+  // — vanilla araçtaki gibi <script> etiketiyle, npm bağımlılığı eklemeden.
+  const mammothYukle = () => new Promise((resolve, reject) => {
+    if (window.mammoth) return resolve();
+    const s = document.createElement("script");
+    s.src = "https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js";
+    s.onload = () => resolve();
+    s.onerror = () => reject(new Error("mammoth yüklenemedi"));
+    document.head.appendChild(s);
+  });
+
+  const kitapMetniDosyaSecildi = async (e) => {
+    const dosya = e.target.files[0];
+    if (!dosya) return;
+    setHata("");
+    try {
+      let metin;
+      if (dosya.name.toLowerCase().endsWith(".docx")) {
+        await mammothYukle();
+        const arrayBuffer = await dosya.arrayBuffer();
+        const sonuc = await window.mammoth.extractRawText({ arrayBuffer });
+        metin = sonuc.value;
+      } else {
+        metin = await dosya.text();
+      }
+      const guncelMeta = { ...seciliProje, kitapMetni: metin };
+      setSeciliProje(guncelMeta);
+      await metaKaydet(guncelMeta);
+    } catch (err) { setHata("Dosya okunamadı: " + err.message); }
+  };
+
+  // Kitap metnini (kitap-metin-ayir.js üzerinden) sayfa çiftlerine böler —
+  // metin uydurmadan, orijinali böler; arka kapak yazısını da üretir.
+  const sahneleriOtomatikDoldur = async () => {
+    if (!seciliProje.kitapMetni?.trim()) { setHata("Önce kitap metnini yükleyin ya da yapıştırın."); return; }
+    if (sahnelerDolduruluyorMu) return;
+    setSahnelerDolduruluyorMu(true); setHata("");
+    setSahnelerDurumMetni("Sahnelere ayrılıyor, bu biraz sürebilir…");
+    try {
+      const r = await authFetch("/api/admin/kitap-studyo/metin-ayir", {
+        method: "POST",
+        body: JSON.stringify({
+          metin: seciliProje.kitapMetni,
+          hedefSayfaSayisi: seciliProje.hedefSayfaSayisi ? parseInt(seciliProje.hedefSayfaSayisi, 10) : undefined,
+          kitapAdi: seciliProje.kitapAdi, yazarAdi: seciliProje.yazarAdi,
+        }),
+      });
+      const d = await r.json();
+      if (!d.ok) { setHata(d.error || "Metin ayrıştırılamadı."); setSahnelerDurumMetni(""); return; }
+      const yeniSpreadler = (d.sayfalar || []).map((s) => ({
+        sahne: s.sahne || "", solMetin: s.solSayfaMetni || "", sagMetin: s.sagSayfaMetni || "",
+        solMetinsiz: false, sagMetinsiz: false, solGorselUrl: null, sagGorselUrl: null,
+      }));
+      const guncelMeta = {
+        ...seciliProje, spreadler: yeniSpreadler,
+        kapakArkasiYazisi: d.kapakArkasiYazisi || seciliProje.kapakArkasiYazisi || "",
+      };
+      setSeciliProje(guncelMeta);
+      await metaKaydet(guncelMeta);
+      setSahnelerDurumMetni(`${yeniSpreadler.length} sayfa çifti oluşturuldu — üretime geçmeden önce gözden geçir.`);
+    } catch { setHata("Sunucuya ulaşılamadı."); setSahnelerDurumMetni(""); }
+    finally { setSahnelerDolduruluyorMu(false); }
+  };
+
+  // EKLENDİ (14 Ağu 2026): ③ Sahneler — künye + ön/arka kapak. Ortak yardımcı:
+  // canvas'ta çok satırlı metni sığdırır (vanilla araçtaki metniSar mantığı).
+  const metniSar = (ctx, metin, x, y, maxGenislik, satirYuksekligi) => {
+    const kelimeler = (metin || "").split(" ");
+    let satir = ""; let cy = y;
+    for (const kelime of kelimeler) {
+      const test = satir + kelime + " ";
+      if (ctx.measureText(test).width > maxGenislik && satir !== "") {
+        ctx.fillText(satir.trim(), x, cy); satir = kelime + " "; cy += satirYuksekligi;
+      } else { satir = test; }
+    }
+    ctx.fillText(satir.trim(), x, cy);
+    return cy;
+  };
+
+  const fontHazirla = async (px, aile) => { try { await document.fonts.load(`${px}px ${aile}`); } catch {} };
+
+  // Hazır bir görseli (base64/veri URL) doğrudan Blob'a yükler — künye/kapak
+  // gibi OpenAI'ye hiç gitmeyen görseller için.
+  const gorselYukle = async (b64, onEki) => {
+    const r = await authFetch("/api/admin/kitap-studyo/gorsel-yukle", { method: "POST", body: JSON.stringify({ gorselB64: b64, dosyaOnEki: onEki }) });
+    const d = await r.json();
+    if (!d.ok) throw new Error(d.error || "Görsel yüklenemedi.");
+    return d.gorselUrl;
+  };
+
+  const ozellikGuncelle = (alan, deger) => {
+    const guncelMeta = { ...seciliProje, ozellikler: { ...(seciliProje.ozellikler || {}), [alan]: deger } };
+    setSeciliProje(guncelMeta);
+    return guncelMeta;
+  };
+
+  // Künye sayfasını canvas ile çizer — AI'ye hiç gitmez, anında ve ücretsiz.
+  const kunyeUret = async () => {
+    if (kunyeUretiliyorMu) return;
+    setKunyeUretiliyorMu(true); setHata("");
+    try {
+      await fontHazirla(40, "Capriola");
+      const [w, h] = (seciliProje.boyut || "1024x1536").split("x").map(Number);
+      const canvas = document.createElement("canvas");
+      canvas.width = w; canvas.height = h;
+      const ctx = canvas.getContext("2d");
+      ctx.fillStyle = "#FFFFFF"; ctx.fillRect(0, 0, w, h);
+      ctx.fillStyle = "#18181a"; ctx.textAlign = "center";
+      const oz = seciliProje.ozellikler || {};
+      let y = h * 0.22;
+      ctx.font = `${Math.round(w * 0.075)}px Capriola, Georgia, serif`;
+      y = metniSar(ctx, seciliProje.kitapAdi || "Kitap Adı", w / 2, y, w * 0.8, w * 0.09) + w * 0.09;
+      if (seciliProje.yazarAdi) {
+        ctx.font = `${Math.round(w * 0.04)}px Capriola, Georgia, serif`;
+        ctx.fillText(seciliProje.yazarAdi, w / 2, y); y += w * 0.09;
+      }
+      ctx.strokeStyle = "#cccccc"; ctx.beginPath(); ctx.moveTo(w * 0.25, y); ctx.lineTo(w * 0.75, y); ctx.stroke(); y += w * 0.09;
+      ctx.textAlign = "left"; ctx.font = `${Math.round(w * 0.028)}px Capriola, Georgia, serif`;
+      [
+        oz.yayinevi || "MST Yayıncılık",
+        oz.illustrasyonKredi ? `İllüstrasyon: ${oz.illustrasyonKredi}` : "İllüstrasyon: MST Çocuk Stüdyo",
+        oz.isbn ? `ISBN: ${oz.isbn}` : null,
+        oz.basimTarihi ? `Basım Tarihi: ${oz.basimTarihi}` : null,
+        oz.basimAdedi ? `Basım Adedi: ${oz.basimAdedi}` : null,
+        oz.baskiYeri ? `Baskı: ${oz.baskiYeri}` : null,
+        (oz.genislikCm && oz.yukseklikCm) ? `Ölçü: ${oz.genislikCm} x ${oz.yukseklikCm} cm` : null,
+        oz.ekNot || null,
+        "Tüm hakları saklıdır.",
+      ].filter(Boolean).forEach((satir) => { ctx.fillText(satir, w * 0.14, y); y += w * 0.045; });
+      const b64 = canvas.toDataURL("image/png").split(",")[1];
+      const url = await gorselYukle(b64, "kunye");
+      const guncelMeta = { ...seciliProje, kunyeGorselUrl: url };
+      setSeciliProje(guncelMeta);
+      await metaKaydet(guncelMeta);
+    } catch (err) { setHata("Künye oluşturulamadı: " + err.message); }
+    finally { setKunyeUretiliyorMu(false); }
+  };
+
+  // Bir görsel URL'sini (fetch ile) indirip base64'e çevirir — kapak
+  // görseline metin bindirmek için ham görsele ihtiyaç var.
+  const urlDenB64Al = async (url) => {
+    const r = await fetch(url);
+    const blob = await r.blob();
+    return new Promise((resolve, reject) => {
+      const okuyucu = new FileReader();
+      okuyucu.onload = () => resolve(okuyucu.result.split(",")[1]);
+      okuyucu.onerror = reject;
+      okuyucu.readAsDataURL(blob);
+    });
+  };
+
+  // Ham kapak görselinin (b64) üzerine, alt kısma karartma bant + kitap adı
+  // + yazar adı bindirir (Capriola font, metin AI'ye çizdirilmiyor).
+  const onKapakMetniBindir = async (hamB64) => {
+    await fontHazirla(48, "Capriola");
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement("canvas");
+        canvas.width = img.width; canvas.height = img.height;
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0);
+        const bant = img.height * 0.24;
+        const grad = ctx.createLinearGradient(0, img.height - bant, 0, img.height);
+        grad.addColorStop(0, "rgba(0,0,0,0)"); grad.addColorStop(1, "rgba(0,0,0,0.6)");
+        ctx.fillStyle = grad; ctx.fillRect(0, img.height - bant, img.width, bant);
+        ctx.textAlign = "center"; ctx.fillStyle = "#ffffff";
+        ctx.font = `${Math.round(img.width * 0.078)}px Capriola, Georgia, serif`;
+        const sonY = metniSar(ctx, seciliProje.kitapAdi || "Kitap Adı", img.width / 2, img.height - bant * 0.62, img.width * 0.86, img.width * 0.09);
+        if (seciliProje.yazarAdi) {
+          ctx.font = `${Math.round(img.width * 0.036)}px Capriola, Georgia, serif`;
+          ctx.fillText(seciliProje.yazarAdi, img.width / 2, Math.max(sonY + img.width * 0.07, img.height - img.height * 0.05));
+        }
+        resolve(canvas.toDataURL("image/png").split(",")[1]);
+      };
+      img.src = "data:image/png;base64," + hamB64;
+    });
+  };
+
+  const arkaKapakMetniBindir = async (hamB64) => {
+    await fontHazirla(32, "Capriola");
+    const yazi = (seciliProje.kapakArkasiYazisi || "").trim();
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement("canvas");
+        canvas.width = img.width; canvas.height = img.height;
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0);
+        const kutuY = img.height * 0.32, kutuH = img.height * 0.36;
+        ctx.fillStyle = "rgba(255,255,255,0.9)"; ctx.fillRect(img.width * 0.08, kutuY, img.width * 0.84, kutuH);
+        ctx.fillStyle = "#18181a"; ctx.textAlign = "left";
+        ctx.font = `${Math.round(img.width * 0.032)}px Capriola, Georgia, serif`;
+        metniSar(ctx, yazi, img.width * 0.12, kutuY + img.width * 0.06, img.width * 0.76, img.width * 0.045);
+        resolve(canvas.toDataURL("image/png").split(",")[1]);
+      };
+      img.src = "data:image/png;base64," + hamB64;
+    });
+  };
+
+  const duzZeminOlustur = (w, h) => {
+    const canvas = document.createElement("canvas"); canvas.width = w; canvas.height = h;
+    const ctx = canvas.getContext("2d"); ctx.fillStyle = "#F5F0E4"; ctx.fillRect(0, 0, w, h);
+    return canvas.toDataURL("image/png").split(",")[1];
+  };
+
+  const referansHavuzuTopla = () => (seciliProje.karakterler || []).flatMap((k) => {
+    const liste = [];
+    if (k.gorselUrl) liste.push(k.gorselUrl);
+    (k.ekPozlar || []).forEach((e) => liste.push(e.gorselUrl));
+    return liste;
+  });
+
+  // ---- Güvenilirlik katmanı: maliyet tahmini + yeniden deneme ----
+  const FIYAT_TABLOSU = {
+    "gpt-image-2": { kare: { low: .006, medium: .053, high: .211 }, diger: { low: .005, medium: .041, high: .165 } },
+    "gpt-image-1.5": { kare: { low: .009, medium: .034, high: .133 }, diger: { low: .013, medium: .05, high: .20 } },
+    "gpt-image-1-mini": { kare: { low: .005, medium: .02, high: .052 }, diger: { low: .005, medium: .025, high: .06 } },
+  };
+  const maliyetTahminiEkle = (model, boyut, kalite, referansliMi) => {
+    const tablo = FIYAT_TABLOSU[model] || FIYAT_TABLOSU["gpt-image-2"];
+    const grup = boyut === "1024x1024" ? tablo.kare : tablo.diger;
+    let fiyat = grup[kalite] ?? grup.medium;
+    if (boyut === "1536x1024") fiyat *= 1.3;
+    if (referansliMi) fiyat *= 1.15;
+    setToplamMaliyet((t) => t + fiyat);
+  };
+  const bekle = (ms) => new Promise((r) => setTimeout(r, ms));
+
+  // gorsel-uret ucunu, hata durumunda (429'da daha uzun bekleyerek) otomatik
+  // yeniden deneyerek çağırır. Tüm sahne üretimleri (kapaklar, karakterler,
+  // sayfa çiftleri, ek pozlar) bu ortak fonksiyonu kullanır.
+  const gorselIsteYenidenDeneyerek = async (govde, durumSetter) => {
+    const tekrar = 2;
+    let sonHata;
+    for (let deneme = 0; deneme <= tekrar; deneme++) {
+      try {
+        const r = await authFetch("/api/admin/kitap-studyo/gorsel-uret", { method: "POST", body: JSON.stringify(govde) });
+        const d = await r.json();
+        if (!d.ok) { const h = new Error(d.error || "Görsel üretilemedi."); h.durumKodu = r.status; throw h; }
+        maliyetTahminiEkle(govde.model, govde.boyut, govde.kalite, !!(govde.referansGorseller && govde.referansGorseller.length));
+        return d.gorselUrl;
+      } catch (err) {
+        sonHata = err;
+        if (deneme < tekrar) {
+          const bekleSure = err.durumKodu === 429 ? 12000 : 3000 * (deneme + 1);
+          if (durumSetter) durumSetter(`Hata, ${Math.round(bekleSure / 1000)} sn sonra tekrar denenecek…`);
+          await bekle(bekleSure);
+        }
+      }
+    }
+    throw sonHata;
+  };
+
+  const onKapakUret = async () => {
+    if (onKapakUretiliyorMu || !seciliProje.onKapakSahne?.trim()) { if (!seciliProje.onKapakSahne?.trim()) setHata("Önce kapak görselinin ne göstermesi gerektiğini yaz."); return; }
+    setOnKapakUretiliyorMu(true); setHata("");
+    try {
+      const hamUrl = await gorselIsteYenidenDeneyerek({ karakterTanimi: seciliProje.stilTanimi, sahne: seciliProje.onKapakSahne, model: seciliProje.model, kalite: seciliProje.kalite, boyut: seciliProje.boyut, referansGorseller: referansHavuzuTopla() });
+      const hamB64 = await urlDenB64Al(hamUrl);
+      const finalB64 = await onKapakMetniBindir(hamB64);
+      const finalUrl = await gorselYukle(finalB64, "on-kapak");
+      const guncelMeta = { ...seciliProje, onKapakHamUrl: hamUrl, onKapakGorselUrl: finalUrl };
+      setSeciliProje(guncelMeta);
+      await metaKaydet(guncelMeta);
+    } catch (err) { setHata("Hata: " + err.message); }
+    finally { setOnKapakUretiliyorMu(false); }
+  };
+
+  const onKapakYaziYenidenYerlestir = async () => {
+    if (!seciliProje.onKapakHamUrl) { setHata("Önce kapağı üret."); return; }
+    setOnKapakUretiliyorMu(true); setHata("");
+    try {
+      const hamB64 = await urlDenB64Al(seciliProje.onKapakHamUrl);
+      const finalB64 = await onKapakMetniBindir(hamB64);
+      const finalUrl = await gorselYukle(finalB64, "on-kapak");
+      const guncelMeta = { ...seciliProje, onKapakGorselUrl: finalUrl };
+      setSeciliProje(guncelMeta);
+      await metaKaydet(guncelMeta);
+    } catch (err) { setHata("Hata: " + err.message); }
+    finally { setOnKapakUretiliyorMu(false); }
+  };
+
+  const arkaKapakUret = async () => {
+    if (arkaKapakUretiliyorMu) return;
+    setArkaKapakUretiliyorMu(true); setHata("");
+    try {
+      const [w, h] = (seciliProje.boyut || "1024x1536").split("x").map(Number);
+      let hamB64, hamUrl;
+      if (seciliProje.arkaKapakSahne?.trim()) {
+        hamUrl = await gorselIsteYenidenDeneyerek({ karakterTanimi: seciliProje.stilTanimi, sahne: seciliProje.arkaKapakSahne, model: seciliProje.model, kalite: seciliProje.kalite, boyut: seciliProje.boyut, referansGorseller: referansHavuzuTopla() });
+        hamB64 = await urlDenB64Al(hamUrl);
+      } else {
+        hamB64 = duzZeminOlustur(w, h);
+        hamUrl = await gorselYukle(hamB64, "arka-kapak-ham");
+      }
+      const finalB64 = await arkaKapakMetniBindir(hamB64);
+      const finalUrl = await gorselYukle(finalB64, "arka-kapak");
+      const guncelMeta = { ...seciliProje, arkaKapakHamUrl: hamUrl, arkaKapakGorselUrl: finalUrl };
+      setSeciliProje(guncelMeta);
+      await metaKaydet(guncelMeta);
+    } catch (err) { setHata("Hata: " + err.message); }
+    finally { setArkaKapakUretiliyorMu(false); }
+  };
+
+  const arkaKapakYaziYenidenYerlestir = async () => {
+    if (!seciliProje.arkaKapakHamUrl) { setHata("Önce arka kapağı üret."); return; }
+    setArkaKapakUretiliyorMu(true); setHata("");
+    try {
+      const hamB64 = await urlDenB64Al(seciliProje.arkaKapakHamUrl);
+      const finalB64 = await arkaKapakMetniBindir(hamB64);
+      const finalUrl = await gorselYukle(finalB64, "arka-kapak");
+      const guncelMeta = { ...seciliProje, arkaKapakGorselUrl: finalUrl };
+      setSeciliProje(guncelMeta);
+      await metaKaydet(guncelMeta);
+    } catch (err) { setHata("Hata: " + err.message); }
+    finally { setArkaKapakUretiliyorMu(false); }
+  };
+
+  // ================= EKLENDİ (14 Ağu 2026): ③ Sahneler — 3. parça: sayfa
+  // çiftleri + görsel üretimi (sahne metni/numarası bindirme dahil) =================
+  // Bir sayfa çifti kartı ekler/günceller.
+  const spreadEkle = () => {
+    const guncelMeta = { ...seciliProje, spreadler: [...(seciliProje.spreadler || []), { sahne: "", solMetin: "", sagMetin: "", solMetinsiz: false, sagMetinsiz: false, solGorselUrl: null, sagGorselUrl: null }] };
+    setSeciliProje(guncelMeta);
+    metaKaydet(guncelMeta);
+  };
+  const spreadSil = (idx) => {
+    const guncelMeta = { ...seciliProje, spreadler: seciliProje.spreadler.filter((_, i) => i !== idx) };
+    setSeciliProje(guncelMeta);
+    metaKaydet(guncelMeta);
+  };
+  const spreadAlanGuncelle = (idx, alan, deger) => {
+    const yeniSpreadler = seciliProje.spreadler.map((s, i) => i === idx ? { ...s, [alan]: deger } : s);
+    const guncelMeta = { ...seciliProje, spreadler: yeniSpreadler };
+    setSeciliProje(guncelMeta);
+    return guncelMeta;
+  };
+  const spreadNumaralariGetir = (idx) => { const sol = 2 + idx * 2; return { solSayfa: sol, sagSayfa: sol + 1 }; };
+
+  // Geniş (1536x1024) sayfa çifti görselini tarayıcıda ortadan ikiye böler.
+  const gorseliIkiyeBol = (b64Genis) => new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const yarim = img.width / 2;
+      const sol = document.createElement("canvas"); sol.width = yarim; sol.height = img.height;
+      sol.getContext("2d").drawImage(img, 0, 0, yarim, img.height, 0, 0, yarim, img.height);
+      const sag = document.createElement("canvas"); sag.width = yarim; sag.height = img.height;
+      sag.getContext("2d").drawImage(img, yarim, 0, yarim, img.height, 0, 0, yarim, img.height);
+      resolve({ sol: sol.toDataURL("image/png").split(",")[1], sag: sag.toDataURL("image/png").split(",")[1] });
+    };
+    img.src = "data:image/png;base64," + b64Genis;
+  });
+
+  // KRİTİK ÖZELLİK (bağımsız araçta sonradan eklenen en önemli düzeltme):
+  // sayfa metnini ve sayfa numarasını görsele canvas ile bindirir — önceden
+  // sadece veride tutulup görsele hiç basılmıyordu.
+  const sayfaMetniBindir = async (hamB64, metin, sayfaNo) => {
+    await fontHazirla(28, "Capriola");
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement("canvas");
+        canvas.width = img.width; canvas.height = img.height;
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0);
+        const metniVar = metin && metin.trim();
+        if (metniVar) {
+          const bantH = img.height * 0.2;
+          ctx.fillStyle = "rgba(255,255,255,0.9)"; ctx.fillRect(0, img.height - bantH, img.width, bantH);
+          ctx.fillStyle = "#18181a"; ctx.textAlign = "center";
+          ctx.font = `${Math.round(img.width * 0.062)}px Capriola, Georgia, serif`;
+          metniSar(ctx, metin.trim(), img.width / 2, img.height - bantH + img.width * 0.085, img.width * 0.86, img.width * 0.075);
+        }
+        if (sayfaNo) {
+          ctx.textAlign = "center";
+          ctx.fillStyle = metniVar ? "#6f6f6c" : "rgba(0,0,0,0.55)";
+          ctx.font = `${Math.round(img.width * 0.03)}px Capriola, Georgia, serif`;
+          ctx.fillText(String(sayfaNo), img.width / 2, img.height - img.width * 0.025);
+        }
+        resolve(canvas.toDataURL("image/png").split(",")[1]);
+      };
+      img.src = "data:image/png;base64," + hamB64;
+    });
+  };
+
+  const spreadUret = async (idx) => {
+    const s = seciliProje.spreadler[idx];
+    if (!s.sahne?.trim()) { setHata("Önce bu sayfa çifti için bir sahne yaz."); return; }
+    setSpreadUretiliyorIdx(idx); setHata("");
+    try {
+      const genisUrl = await gorselIsteYenidenDeneyerek({ karakterTanimi: seciliProje.stilTanimi, sahne: s.sahne, model: seciliProje.model, kalite: seciliProje.kalite, boyut: "1536x1024", referansGorseller: referansHavuzuTopla() });
+      const genisB64 = await urlDenB64Al(genisUrl);
+      const { sol, sag } = await gorseliIkiyeBol(genisB64);
+      const { solSayfa, sagSayfa } = spreadNumaralariGetir(idx);
+      const solFinal = await sayfaMetniBindir(sol, s.solMetinsiz ? "" : s.solMetin, solSayfa);
+      const sagFinal = await sayfaMetniBindir(sag, s.sagMetinsiz ? "" : s.sagMetin, sagSayfa);
+      const solUrl = await gorselYukle(solFinal, "sayfa");
+      const sagUrl = await gorselYukle(sagFinal, "sayfa");
+      const yeniSpreadler = seciliProje.spreadler.map((sp, i) => i === idx ? { ...sp, solGorselUrl: solUrl, sagGorselUrl: sagUrl } : sp);
+      const guncelMeta = { ...seciliProje, spreadler: yeniSpreadler };
+      setSeciliProje(guncelMeta);
+      await metaKaydet(guncelMeta);
+    } catch (err) { setHata("Hata: " + err.message); }
+    finally { setSpreadUretiliyorIdx(null); }
+  };
+
+  const spreadMetniYenidenYerlestir = async (idx) => {
+    setSpreadUretiliyorIdx(idx); setHata("");
+    try {
+      const s = seciliProje.spreadler[idx];
+      const { solSayfa, sagSayfa } = spreadNumaralariGetir(idx);
+      // Ham görseller ayrı saklanmıyor (boyut için) — metin değişince sahneyi
+      // yeniden üretmek gerekiyor. Bu, vanilla araçtaki "aynı oturumda"
+      // sınırlamasının basitleştirilmiş hali.
+      await spreadUret(idx);
+    } finally { setSpreadUretiliyorIdx(null); }
+  };
+
+  // ================= EKLENDİ: 4. parça — "Tümünü Üret" ve "Kalite değişti,
+  // yeniden üretime hazırla" ================= 
+  const tumunuUret = async () => {
+    if (tumunuUretiliyorMu) return;
+    setTumunuUretiliyorMu(true); setHata("");
+    const beklemeMs = Math.max(0, (parseFloat(beklemeSn) || 0) * 1000);
+    try {
+      if (!seciliProje.kunyeGorselUrl) { await kunyeUret(); if (beklemeMs) await bekle(beklemeMs); }
+      if (seciliProje.onKapakSahne?.trim() && !seciliProje.onKapakGorselUrl) { await onKapakUret(); if (beklemeMs) await bekle(beklemeMs); }
+      if (!seciliProje.arkaKapakGorselUrl) { await arkaKapakUret(); if (beklemeMs) await bekle(beklemeMs); }
+      for (let i = 0; i < (seciliProje.spreadler || []).length; i++) {
+        if (seciliProje.spreadler[i].solGorselUrl) continue;
+        await spreadUret(i);
+        if (beklemeMs) await bekle(beklemeMs);
+      }
+    } finally { setTumunuUretiliyorMu(false); }
+  };
+
+  const uretimiSifirla = async () => {
+    if (!window.confirm('Tüm sayfa çiftlerinin ve kapakların "tamamlandı" durumu sıfırlanacak (metinler korunur). Onaylıyor musun?')) return;
+    const yeniSpreadler = (seciliProje.spreadler || []).map((s) => ({ ...s, solGorselUrl: null, sagGorselUrl: null }));
+    const guncelMeta = { ...seciliProje, spreadler: yeniSpreadler, onKapakGorselUrl: null, onKapakHamUrl: null, arkaKapakGorselUrl: null, arkaKapakHamUrl: null };
+    setSeciliProje(guncelMeta);
+    await metaKaydet(guncelMeta);
+  };
+
+  // ================= EKLENDİ: 5. parça — kitap listesi, çevirerek önizleme,
+  // PDF çıktısı ================= 
+  const kitapSayfaListesiOlustur = () => {
+    const liste = [];
+    if (seciliProje.onKapakGorselUrl) liste.push({ url: seciliProje.onKapakGorselUrl, etiket: "Ön kapak" });
+    if (seciliProje.kunyeGorselUrl) liste.push({ url: seciliProje.kunyeGorselUrl, etiket: "Künye (sayfa 1)" });
+    (seciliProje.spreadler || []).forEach((s, i) => {
+      const { solSayfa, sagSayfa } = spreadNumaralariGetir(i);
+      if (s.solGorselUrl) liste.push({ url: s.solGorselUrl, etiket: `Sayfa ${solSayfa}` });
+      if (s.sagGorselUrl) liste.push({ url: s.sagGorselUrl, etiket: `Sayfa ${sagSayfa}` });
+    });
+    if (seciliProje.arkaKapakGorselUrl) liste.push({ url: seciliProje.arkaKapakGorselUrl, etiket: "Arka kapak" });
+    return liste;
+  };
+
+  const kitapiOnizle = () => { setOnizlemeIndex(0); setOnizlemeAcikMi(true); };
+
+  const jspdfYukle = () => new Promise((resolve, reject) => {
+    if (window.jspdf) return resolve();
+    const s = document.createElement("script");
+    s.src = "https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js";
+    s.onload = () => resolve();
+    s.onerror = () => reject(new Error("jsPDF yüklenemedi"));
+    document.head.appendChild(s);
+  });
+
+  const pdfIndir = async () => {
+    const liste = kitapSayfaListesiOlustur();
+    if (liste.length === 0) { setHata("Henüz indirilecek bir görsel yok."); return; }
+    setPdfHazirlaniyorMu(true); setHata("");
+    try {
+      await jspdfYukle();
+      const { jsPDF } = window.jspdf;
+      let doc;
+      for (let i = 0; i < liste.length; i++) {
+        const b64 = await urlDenB64Al(liste[i].url);
+        const boyut = await new Promise((resolve) => { const img = new Image(); img.onload = () => resolve({ w: img.width, h: img.height }); img.src = "data:image/png;base64," + b64; });
+        if (i === 0) doc = new jsPDF({ unit: "px", format: [boyut.w, boyut.h] });
+        else doc.addPage([boyut.w, boyut.h]);
+        doc.addImage("data:image/png;base64," + b64, "PNG", 0, 0, boyut.w, boyut.h);
+      }
+      doc.save(`${(seciliProje.kitapAdi || "kitap").replace(/[^a-zA-Z0-9ığüşöçİĞÜŞÖÇ_-]+/g, "-")}.pdf`);
+    } catch (err) { setHata("PDF oluşturulamadı: " + err.message); }
+    finally { setPdfHazirlaniyorMu(false); }
+  };
+
+  // ================= EKLENDİ: 6. parça — karakter ek poz/ifade ================= 
+  const ekPozUret = async (karakterIdx) => {
+    const karakter = seciliProje.karakterler[karakterIdx];
+    const tarif = (ekPozTarifleri[karakterIdx] || "").trim();
+    if (!karakter.gorselUrl) { setHata("Önce bu karakterin ana referansını üret."); return; }
+    if (!tarif) { setHata("Ek pozun ne olacağını yaz (örn. gülümseyen, yandan, koşarken)."); return; }
+    setEkPozUretiliyorIdx(karakterIdx); setHata("");
+    try {
+      const sahne = `Aynı karakterin farklı bir poz/ifadesi: ${tarif}. Karakter kimliği birebir korunmalı (yüz, saç, kıyafet aynı) — sadece poz, ifade ya da kamera açısı değişsin.`;
+      const gorselUrl = await gorselIsteYenidenDeneyerek({ karakterTanimi: seciliProje.stilTanimi, sahne, model: seciliProje.model, kalite: seciliProje.kalite, boyut: "1024x1024", referansGorseller: [karakter.gorselUrl] });
+      const yeniKarakterler = seciliProje.karakterler.map((k, i) => i === karakterIdx ? { ...k, ekPozlar: [...(k.ekPozlar || []), { tarif, gorselUrl }] } : k);
+      const guncelMeta = { ...seciliProje, karakterler: yeniKarakterler };
+      setSeciliProje(guncelMeta);
+      await metaKaydet(guncelMeta);
+      setEkPozTarifleri((t) => ({ ...t, [karakterIdx]: "" }));
+    } catch (err) { setHata("Hata: " + err.message); }
+    finally { setEkPozUretiliyorIdx(null); }
+  };
+  const ekPozSil = async (karakterIdx, ekPozIdx) => {
+    const yeniKarakterler = seciliProje.karakterler.map((k, i) => i === karakterIdx ? { ...k, ekPozlar: k.ekPozlar.filter((_, j) => j !== ekPozIdx) } : k);
+    const guncelMeta = { ...seciliProje, karakterler: yeniKarakterler };
+    setSeciliProje(guncelMeta);
+    await metaKaydet(guncelMeta);
   };
 
   const yeniProjeOlustur = async () => {
@@ -3664,10 +4260,292 @@ function KitapStudyo({ authFetch }) {
                   </div>
                 )}
 
-                {seciliProje.asama !== "stil" && (
-                  <div style={{ fontSize: 13, color: "#6f6f6c", lineHeight: 1.7 }}>
-                    Stil onaylandı — <b>{seciliProje.onaylananStilEtiket}</b>.
-                    Karakter ve sahne üretim ekranları sırada, henüz eklenmedi.
+                {/* EKLENDİ (14 Ağu 2026): ② KARAKTER aşaması — gerçek akış.
+                    Karakter ekle (isim + açıklama), her biri için onaylı
+                    stille bir referans görsel üret, en az bir karakter
+                    varsa sahnelere geç. */}
+                {seciliProje.asama === "karakter" && (
+                  <div>
+                    <div style={{ fontSize: 12, color: "#4FAF7A", marginBottom: 14 }}>
+                      ✓ Stil onaylandı — <b>{seciliProje.onaylananStilEtiket}</b>
+                    </div>
+                    <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+                      <input style={stil.input} placeholder="Karakter adı (örn. Zeynep)"
+                        value={yeniKarakterAd} onChange={(e) => setYeniKarakterAd(e.target.value)} />
+                      <input style={stil.input} placeholder="Açıklama (örn. 7 yaşında, kısa siyah saçlı, kırmızı önlüklü)"
+                        value={yeniKarakterAciklama} onChange={(e) => setYeniKarakterAciklama(e.target.value)}
+                        onKeyDown={(e) => e.key === "Enter" && karakterEkle()} />
+                      <button style={{ ...stil.buton, whiteSpace: "nowrap" }} onClick={karakterEkle}>+ Ekle</button>
+                    </div>
+
+                    {!(seciliProje.karakterler || []).length && (
+                      <div style={{ fontSize: 13, color: "#6f6f6c", marginBottom: 16 }}>Henüz karakter eklenmedi.</div>
+                    )}
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(160px,1fr))", gap: 12, marginBottom: 20 }}>
+                      {(seciliProje.karakterler || []).map((k, idx) => (
+                        <div key={idx} style={{ background: "#fff", border: "1.5px solid #E4DFD1", borderRadius: 12, padding: 12 }}>
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                            <div style={{ fontFamily: "'Fredoka', sans-serif", fontWeight: 600, fontSize: 13 }}>{k.ad}</div>
+                            <span onClick={() => karakterSil(idx)} style={{ color: "#C0392B", cursor: "pointer", fontSize: 12 }}>✕</span>
+                          </div>
+                          <div style={{ fontSize: 11, color: "#6f6f6c", margin: "4px 0 8px", minHeight: 30 }}>{k.aciklama}</div>
+                          {k.gorselUrl && <img src={k.gorselUrl} style={{ width: "100%", borderRadius: 8, marginBottom: 8 }} />}
+                          {!k.gorselUrl && (
+                            <button style={{ ...stil.buton, width: "100%", fontSize: 11, padding: "8px 10px",
+                              ...(karakterUretiliyorIdx !== null ? stil.butonPasif : {}) }}
+                              disabled={karakterUretiliyorIdx !== null} onClick={() => karakterGorseliUret(idx)}>
+                              {karakterUretiliyorIdx === idx ? "Üretiliyor..." : "Referans Üret"}
+                            </button>
+                          )}
+                          {/* EKLENDİ (14 Ağu 2026): 6. parça — ek poz/ifade. Karakter
+                              tutarlılığını güçlendirmek için aynı referansla farklı
+                              poz/ifade üretme. */}
+                          {k.gorselUrl && (
+                            <div style={{ marginTop: 8 }}>
+                              <input style={{ ...stil.input, fontSize: 11, padding: "6px 8px" }} placeholder="Ek poz (örn. gülümseyen, yandan)"
+                                value={ekPozTarifleri[idx] || ""} onChange={(e) => setEkPozTarifleri((t) => ({ ...t, [idx]: e.target.value }))}
+                                onKeyDown={(e) => e.key === "Enter" && ekPozUret(idx)} />
+                              <button style={{ ...stil.buton, width: "100%", fontSize: 11, padding: "6px 8px", marginTop: 4,
+                                ...(ekPozUretiliyorIdx !== null ? stil.butonPasif : {}) }}
+                                disabled={ekPozUretiliyorIdx !== null} onClick={() => ekPozUret(idx)}>
+                                {ekPozUretiliyorIdx === idx ? "Üretiliyor..." : "+ Ek Poz Ekle"}
+                              </button>
+                              {(k.ekPozlar || []).length > 0 && (
+                                <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 6 }}>
+                                  {k.ekPozlar.map((e, eIdx) => (
+                                    <img key={eIdx} src={e.gorselUrl} title={e.tarif + " — kaldırmak için tıkla"} onClick={() => ekPozSil(idx, eIdx)}
+                                      style={{ width: 40, height: 40, objectFit: "cover", borderRadius: 6, cursor: "pointer", border: "1px solid #E4DFD1" }} />
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+
+                    {(seciliProje.karakterler || []).length > 0 && (
+                      <button style={{ ...stil.buton, background: "#4FAF7A" }} onClick={sahnelereGec}>
+                        Sahnelere Geç →
+                      </button>
+                    )}
+                  </div>
+                )}
+
+                {/* EKLENDİ (14 Ağu 2026): ③ Sahneler aşaması, 1. parça —
+                    kitap metni yükleme + otomatik sahne bölme. */}
+                {seciliProje.asama === "sahneler" && (
+                  <div>
+                    <div style={{ fontSize: 12, color: "#4FAF7A", marginBottom: 14 }}>
+                      ✓ Stil: <b>{seciliProje.onaylananStilEtiket}</b> · Karakter: <b>{(seciliProje.karakterler || []).length}</b>
+                    </div>
+
+                    <div style={{ background: "#FBF9F6", borderRadius: 16, padding: 18, border: "2px solid #F4A83E", marginBottom: 16 }}>
+                      <div style={{ fontFamily: "'Fredoka', sans-serif", fontWeight: 600, fontSize: 14, marginBottom: 6 }}>Kitap Metni</div>
+                      <div style={{ fontSize: 12, color: "#6f6f6c", marginBottom: 12 }}>
+                        Tam kitap metnini yükle (.docx/.txt) ya da yapıştır. "Sahneleri otomatik doldur" metni sayfa çiftlerine böler
+                        (orijinal metni bölerek, uydurmadan) ve arka kapak yazısını da üretir.
+                      </div>
+                      <label style={{ display: "inline-block", fontSize: 12, color: "#18181a", border: "1.5px solid #F4A83E", borderRadius: 100, padding: "8px 16px", cursor: "pointer", marginBottom: 10 }}>
+                        Dosya seç (.docx / .txt)
+                        <input type="file" accept=".docx,.txt" style={{ display: "none" }} onChange={kitapMetniDosyaSecildi} />
+                      </label>
+                      <textarea style={{ ...stil.input, minHeight: 110, marginTop: 8 }}
+                        placeholder="Ya da kitabın tam metnini buraya yapıştır…"
+                        value={seciliProje.kitapMetni || ""}
+                        onChange={(e) => setSeciliProje({ ...seciliProje, kitapMetni: e.target.value })}
+                        onBlur={() => metaKaydet(seciliProje)} />
+                      <div style={{ display: "flex", gap: 8, marginTop: 10, alignItems: "center" }}>
+                        <input style={{ ...stil.input, width: 160 }} type="number" placeholder="Hedef iç sayfa (örn. 32)"
+                          value={seciliProje.hedefSayfaSayisi || ""}
+                          onChange={(e) => setSeciliProje({ ...seciliProje, hedefSayfaSayisi: e.target.value })}
+                          onBlur={() => metaKaydet(seciliProje)} />
+                        <button style={{ ...stil.buton, ...(sahnelerDolduruluyorMu ? stil.butonPasif : {}) }}
+                          disabled={sahnelerDolduruluyorMu} onClick={sahneleriOtomatikDoldur}>
+                          {sahnelerDolduruluyorMu ? "Sahnelere ayrılıyor..." : "Sahneleri Otomatik Doldur"}
+                        </button>
+                      </div>
+                      {sahnelerDurumMetni && <div style={{ fontSize: 12, color: "#6f6f6c", marginTop: 8 }}>{sahnelerDurumMetni}</div>}
+                    </div>
+
+                    {/* EKLENDİ (14 Ağu 2026): ③ Sahneler, 2. parça — künye + kapaklar */}
+                    <div style={{ background: "#FBF9F6", borderRadius: 16, padding: 18, border: "2px solid #F4A83E", marginBottom: 16 }}>
+                      <div style={{ fontFamily: "'Fredoka', sans-serif", fontWeight: 600, fontSize: 14, marginBottom: 10 }}>Özellikler ve Künye</div>
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 8 }}>
+                        <input style={stil.input} placeholder="Genişlik (cm) örn. 20" value={seciliProje.ozellikler?.genislikCm || ""}
+                          onChange={(e) => ozellikGuncelle("genislikCm", e.target.value)} onBlur={() => metaKaydet(seciliProje)} />
+                        <input style={stil.input} placeholder="Yükseklik (cm) örn. 20" value={seciliProje.ozellikler?.yukseklikCm || ""}
+                          onChange={(e) => ozellikGuncelle("yukseklikCm", e.target.value)} onBlur={() => metaKaydet(seciliProje)} />
+                        <input style={stil.input} placeholder="Basım tarihi örn. 2026" value={seciliProje.ozellikler?.basimTarihi || ""}
+                          onChange={(e) => ozellikGuncelle("basimTarihi", e.target.value)} onBlur={() => metaKaydet(seciliProje)} />
+                      </div>
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 8 }}>
+                        <input style={stil.input} placeholder="ISBN" value={seciliProje.ozellikler?.isbn || ""}
+                          onChange={(e) => ozellikGuncelle("isbn", e.target.value)} onBlur={() => metaKaydet(seciliProje)} />
+                        <input style={stil.input} placeholder="Yayınevi" value={seciliProje.ozellikler?.yayinevi || "MST Yayıncılık"}
+                          onChange={(e) => ozellikGuncelle("yayinevi", e.target.value)} onBlur={() => metaKaydet(seciliProje)} />
+                        <input style={stil.input} placeholder="Basım adedi" value={seciliProje.ozellikler?.basimAdedi || ""}
+                          onChange={(e) => ozellikGuncelle("basimAdedi", e.target.value)} onBlur={() => metaKaydet(seciliProje)} />
+                      </div>
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 8 }}>
+                        <input style={stil.input} placeholder="İllüstrasyon (kredi)" value={seciliProje.ozellikler?.illustrasyonKredi || "MST Çocuk Stüdyo"}
+                          onChange={(e) => ozellikGuncelle("illustrasyonKredi", e.target.value)} onBlur={() => metaKaydet(seciliProje)} />
+                        <input style={stil.input} placeholder="Baskı yeri (matbaa)" value={seciliProje.ozellikler?.baskiYeri || ""}
+                          onChange={(e) => ozellikGuncelle("baskiYeri", e.target.value)} onBlur={() => metaKaydet(seciliProje)} />
+                      </div>
+                      <input style={{ ...stil.input, marginBottom: 10 }} placeholder="Ek not" value={seciliProje.ozellikler?.ekNot || ""}
+                        onChange={(e) => ozellikGuncelle("ekNot", e.target.value)} onBlur={() => metaKaydet(seciliProje)} />
+                      <button style={{ ...stil.buton, ...(kunyeUretiliyorMu ? stil.butonPasif : {}) }} disabled={kunyeUretiliyorMu} onClick={kunyeUret}>
+                        {kunyeUretiliyorMu ? "Oluşturuluyor..." : "Künye Sayfasını Oluştur"}
+                      </button>
+                      {seciliProje.kunyeGorselUrl && <img src={seciliProje.kunyeGorselUrl} style={{ maxWidth: 220, borderRadius: 8, marginTop: 12, display: "block" }} />}
+                    </div>
+
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 16 }}>
+                      <div style={{ background: "#FBF9F6", borderRadius: 16, padding: 18, border: "2px solid #F4A83E" }}>
+                        <div style={{ fontFamily: "'Fredoka', sans-serif", fontWeight: 600, fontSize: 14, marginBottom: 10 }}>Ön Kapak</div>
+                        <textarea style={{ ...stil.input, minHeight: 70 }} placeholder="Kapak görseli ne göstermeli?"
+                          value={seciliProje.onKapakSahne || ""} onChange={(e) => setSeciliProje({ ...seciliProje, onKapakSahne: e.target.value })}
+                          onBlur={() => metaKaydet(seciliProje)} />
+                        <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                          <button style={{ ...stil.buton, fontSize: 12, ...(onKapakUretiliyorMu ? stil.butonPasif : {}) }} disabled={onKapakUretiliyorMu} onClick={onKapakUret}>
+                            {onKapakUretiliyorMu ? "Üretiliyor..." : "Ön Kapağı Üret"}
+                          </button>
+                          {seciliProje.onKapakHamUrl && (
+                            <button style={{ ...stil.buton, fontSize: 12, ...(onKapakUretiliyorMu ? stil.butonPasif : {}) }} disabled={onKapakUretiliyorMu} onClick={onKapakYaziYenidenYerlestir}>
+                              Yazıyı Yenile
+                            </button>
+                          )}
+                        </div>
+                        {seciliProje.onKapakGorselUrl && <img src={seciliProje.onKapakGorselUrl} style={{ width: "100%", borderRadius: 8, marginTop: 10 }} />}
+                      </div>
+                      <div style={{ background: "#FBF9F6", borderRadius: 16, padding: 18, border: "2px solid #F4A83E" }}>
+                        <div style={{ fontFamily: "'Fredoka', sans-serif", fontWeight: 600, fontSize: 14, marginBottom: 10 }}>Arka Kapak</div>
+                        <textarea style={{ ...stil.input, minHeight: 50 }} placeholder="Arka kapak görseli (opsiyonel, boşsa düz zemin)"
+                          value={seciliProje.arkaKapakSahne || ""} onChange={(e) => setSeciliProje({ ...seciliProje, arkaKapakSahne: e.target.value })}
+                          onBlur={() => metaKaydet(seciliProje)} />
+                        <textarea style={{ ...stil.input, minHeight: 60, marginTop: 8 }} placeholder="Arka kapak yazısı"
+                          value={seciliProje.kapakArkasiYazisi || ""} onChange={(e) => setSeciliProje({ ...seciliProje, kapakArkasiYazisi: e.target.value })}
+                          onBlur={() => metaKaydet(seciliProje)} />
+                        <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                          <button style={{ ...stil.buton, fontSize: 12, ...(arkaKapakUretiliyorMu ? stil.butonPasif : {}) }} disabled={arkaKapakUretiliyorMu} onClick={arkaKapakUret}>
+                            {arkaKapakUretiliyorMu ? "Üretiliyor..." : "Arka Kapağı Üret"}
+                          </button>
+                          {seciliProje.arkaKapakHamUrl && (
+                            <button style={{ ...stil.buton, fontSize: 12, ...(arkaKapakUretiliyorMu ? stil.butonPasif : {}) }} disabled={arkaKapakUretiliyorMu} onClick={arkaKapakYaziYenidenYerlestir}>
+                              Yazıyı Yenile
+                            </button>
+                          )}
+                        </div>
+                        {seciliProje.arkaKapakGorselUrl && <img src={seciliProje.arkaKapakGorselUrl} style={{ width: "100%", borderRadius: 8, marginTop: 10 }} />}
+                      </div>
+                    </div>
+
+                    {/* EKLENDİ (14 Ağu 2026): ③ Sahneler, 3. parça — sayfa çiftleri */}
+                    <div style={{ background: "#FBF9F6", borderRadius: 16, padding: 18, border: "2px solid #F4A83E", marginBottom: 16 }}>
+                      <div style={{ fontFamily: "'Fredoka', sans-serif", fontWeight: 600, fontSize: 14, marginBottom: 6 }}>Sayfa Çiftleri</div>
+                      <div style={{ fontSize: 12, color: "#6f6f6c", marginBottom: 12 }}>
+                        Her kart bir sayfa ÇİFTİ (ör. sayfa 2-3). Tek bir geniş görsel üretilip ortadan bölünüyor, kitap açıldığında kesintisiz görünsün diye.
+                        Sayfa 1 künye sayfasıdır, çiftler 2. sayfadan başlar.
+                      </div>
+                      {(seciliProje.spreadler || []).map((s, idx) => {
+                        const { solSayfa, sagSayfa } = spreadNumaralariGetir(idx);
+                        return (
+                          <div key={idx} style={{ background: "#fff", border: "1.5px solid #E4DFD1", borderRadius: 12, padding: 14, marginBottom: 10 }}>
+                            <div style={{ fontFamily: "'Fredoka', sans-serif", fontWeight: 600, fontSize: 13, marginBottom: 8, color: "#6f6f6c" }}>Sayfa {solSayfa} — {sagSayfa}</div>
+                            <textarea style={{ ...stil.input, minHeight: 60 }} placeholder="Sahne (iki sayfaya birden yayılan tek kompozisyon)"
+                              value={s.sahne} onChange={(e) => spreadAlanGuncelle(idx, "sahne", e.target.value)} onBlur={() => metaKaydet(seciliProje)} />
+                            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginTop: 8 }}>
+                              <div>
+                                <textarea style={{ ...stil.input, minHeight: 50 }} placeholder="Sol sayfa metni" value={s.solMetin}
+                                  onChange={(e) => spreadAlanGuncelle(idx, "solMetin", e.target.value)} onBlur={() => metaKaydet(seciliProje)} />
+                                <label style={{ fontSize: 11, color: "#6f6f6c", display: "flex", alignItems: "center", gap: 4, marginTop: 4 }}>
+                                  <input type="checkbox" checked={s.solMetinsiz} onChange={(e) => metaKaydet(spreadAlanGuncelle(idx, "solMetinsiz", e.target.checked))} /> Sol sayfa metinsiz
+                                </label>
+                              </div>
+                              <div>
+                                <textarea style={{ ...stil.input, minHeight: 50 }} placeholder="Sağ sayfa metni" value={s.sagMetin}
+                                  onChange={(e) => spreadAlanGuncelle(idx, "sagMetin", e.target.value)} onBlur={() => metaKaydet(seciliProje)} />
+                                <label style={{ fontSize: 11, color: "#6f6f6c", display: "flex", alignItems: "center", gap: 4, marginTop: 4 }}>
+                                  <input type="checkbox" checked={s.sagMetinsiz} onChange={(e) => metaKaydet(spreadAlanGuncelle(idx, "sagMetinsiz", e.target.checked))} /> Sağ sayfa metinsiz
+                                </label>
+                              </div>
+                            </div>
+                            <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+                              <button style={{ ...stil.buton, fontSize: 12, ...(spreadUretiliyorIdx !== null ? stil.butonPasif : {}) }}
+                                disabled={spreadUretiliyorIdx !== null} onClick={() => spreadUret(idx)}>
+                                {spreadUretiliyorIdx === idx ? "Üretiliyor..." : "Bu Sayfa Çiftini Üret"}
+                              </button>
+                              {s.solGorselUrl && (
+                                <button style={{ ...stil.buton, fontSize: 12, ...(spreadUretiliyorIdx !== null ? stil.butonPasif : {}) }}
+                                  disabled={spreadUretiliyorIdx !== null} onClick={() => spreadMetniYenidenYerlestir(idx)}>
+                                  Metni Yenile
+                                </button>
+                              )}
+                              <span onClick={() => spreadSil(idx)} style={{ color: "#C0392B", cursor: "pointer", fontSize: 12, alignSelf: "center" }}>Sil</span>
+                            </div>
+                            {s.solGorselUrl && (
+                              <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
+                                <img src={s.solGorselUrl} style={{ width: "calc(50% - 3px)", borderRadius: 8 }} />
+                                <img src={s.sagGorselUrl} style={{ width: "calc(50% - 3px)", borderRadius: 8 }} />
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                      <button style={stil.buton} onClick={spreadEkle}>+ Sayfa Çifti Ekle</button>
+                    </div>
+
+                    {/* EKLENDİ: 4-5. parça — Üretim (tümünü üret, maliyet, PDF, önizleme) */}
+                    <div style={{ background: "#FBF9F6", borderRadius: 16, padding: 18, border: "2px solid #F4A83E" }}>
+                      <div style={{ fontFamily: "'Fredoka', sans-serif", fontWeight: 600, fontSize: 14, marginBottom: 10 }}>Üretim</div>
+                      <div style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 12, flexWrap: "wrap" }}>
+                        <div>
+                          <label style={{ fontSize: 11, color: "#6f6f6c", display: "block" }}>İstekler arası bekleme (sn)</label>
+                          <input style={{ ...stil.input, width: 80 }} value={beklemeSn} onChange={(e) => setBeklemeSn(e.target.value)} />
+                        </div>
+                        <div style={{ fontSize: 13 }}>
+                          <div style={{ fontSize: 11, color: "#6f6f6c" }}>Tahmini harcama (bu oturumda)</div>
+                          <div style={{ fontWeight: 700 }}>${toplamMaliyet.toFixed(2)} (~₺{Math.round(toplamMaliyet * 48)})</div>
+                        </div>
+                      </div>
+                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                        <button style={{ ...stil.buton, background: "#4FAF7A", ...(tumunuUretiliyorMu ? stil.butonPasif : {}) }}
+                          disabled={tumunuUretiliyorMu} onClick={tumunuUret}>
+                          {tumunuUretiliyorMu ? "Üretiliyor..." : "Eksik Olanları Üret (Sırayla)"}
+                        </button>
+                        <button style={stil.buton} disabled={kitapSayfaListesiOlustur().length === 0} onClick={kitapiOnizle}>Kitabı Önizle</button>
+                        <button style={{ ...stil.buton, ...(pdfHazirlaniyorMu ? stil.butonPasif : {}) }}
+                          disabled={pdfHazirlaniyorMu || kitapSayfaListesiOlustur().length === 0} onClick={pdfIndir}>
+                          {pdfHazirlaniyorMu ? "Hazırlanıyor..." : "PDF Olarak İndir"}
+                        </button>
+                        <button style={{ ...stil.buton, color: "#C0392B" }} onClick={uretimiSifirla}>Kalite Değişti, Yeniden Üretime Hazırla</button>
+                      </div>
+                      <p style={{ fontSize: 11, color: "#6f6f6c", marginTop: 10, lineHeight: 1.6 }}>
+                        Eksik olanları üret sadece görseli olmayanları üretir — tamamlananları tekrar üretip para harcamaz. Başarısız bir görsel otomatik olarak
+                        2 kez tekrar denenir (hız limitinde daha uzun beklenerek). PDF, doğru sayfa sırasında baskıya gönderilebilecek tek dosyadır — ama görseller
+                        ekran çözünürlüğünde (~130 DPI), gerçek baskı öncesi üst ölçekleme (upscaling) konusu ayrı konuşulmalı.
+                      </p>
+                    </div>
+
+                    {onizlemeAcikMi && (() => {
+                      const liste = kitapSayfaListesiOlustur();
+                      const sayfa = liste[Math.min(onizlemeIndex, liste.length - 1)];
+                      return (
+                        <div style={{ background: "#fff", border: "2px solid #F4A83E", borderRadius: 16, padding: 18, marginTop: 16, textAlign: "center" }}>
+                          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 10 }}>
+                            <div style={{ fontFamily: "'Fredoka', sans-serif", fontWeight: 600, fontSize: 14 }}>Kitap Önizleme</div>
+                            <span onClick={() => setOnizlemeAcikMi(false)} style={{ cursor: "pointer", fontSize: 12, color: "#6f6f6c" }}>Kapat</span>
+                          </div>
+                          {sayfa && <img src={sayfa.url} style={{ maxWidth: "100%", maxHeight: 480, borderRadius: 10, border: "1px solid #E4DFD1" }} />}
+                          <p style={{ fontWeight: 600, margin: "12px 0 8px" }}>{sayfa ? `${sayfa.etiket} · ${onizlemeIndex + 1} / ${liste.length}` : ""}</p>
+                          <div style={{ display: "flex", gap: 8, justifyContent: "center" }}>
+                            <button style={stil.buton} disabled={onizlemeIndex === 0} onClick={() => setOnizlemeIndex((i) => i - 1)}>← Önceki</button>
+                            <button style={stil.buton} disabled={onizlemeIndex >= liste.length - 1} onClick={() => setOnizlemeIndex((i) => i + 1)}>Sonraki →</button>
+                          </div>
+                        </div>
+                      );
+                    })()}
                   </div>
                 )}
               </div>
