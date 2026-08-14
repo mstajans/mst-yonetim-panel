@@ -3460,6 +3460,11 @@ function KitapStudyo({ authFetch }) {
   const [olusturuluyor, setOlusturuluyor] = React.useState(false);
   const [seciliId, setSeciliId] = React.useState(null);
   const [seciliProje, setSeciliProje] = React.useState(null);
+  // EKLENDİ (14 Ağu 2026, Stil Seçimi aşaması): hangi stil adayının şu an
+  // üretiliyor olduğunu (indeks) tutar — birden fazla eşzamanlı üretim
+  // isteğini önlemek için.
+  const [stilUretiliyorIdx, setStilUretiliyorIdx] = React.useState(null);
+  const [kaydediliyor, setKaydediliyor] = React.useState(false);
 
   const stil = {
     sayfa: { background: "#FFFFFF", borderTop: "8px solid", borderImage: "linear-gradient(90deg,#E85D75,#F4A83E,#4FAF7A,#3E8ED0) 1", padding: "28px 24px", borderRadius: 8, color: "#18181a" },
@@ -3492,6 +3497,57 @@ function KitapStudyo({ authFetch }) {
       if (d.ok) setSeciliProje(d.proje);
       else setHata(d.error || "Proje açılamadı.");
     } catch { setHata("Sunucuya ulaşılamadı."); }
+  };
+
+  // EKLENDİ (14 Ağu 2026): mevcut proje meta'sını (tüm alanları) backend'e
+  // yazar — bağımsız araçtaki projeMetaKaydet() karşılığı. guncelMeta
+  // verilmezse, o anki seciliProje state'i gönderilir.
+  const metaKaydet = async (guncelMeta, yeniAsama) => {
+    const meta = guncelMeta || seciliProje;
+    setKaydediliyor(true); setHata("");
+    try {
+      const r = await authFetch(`/api/admin/kitap-studyo/projeler/${seciliId}`, {
+        method: "PUT", body: JSON.stringify({ ...meta, asama: yeniAsama || seciliProje.asama }),
+      });
+      const d = await r.json();
+      if (!d.ok) setHata(d.error || "Kaydedilemedi.");
+      return d.ok;
+    } catch { setHata("Sunucuya ulaşılamadı."); return false; }
+    finally { setKaydediliyor(false); }
+  };
+
+  // Bir stil adayı için OpenAI'den örnek bir sahne üretir, sonucu (Vercel
+  // Blob URL'i) o adayın görselUrl alanına yazar ve kalıcı hale getirir.
+  const stilOrnegiUret = async (idx) => {
+    if (stilUretiliyorIdx !== null) return;
+    if (!seciliProje.ornekSahne?.trim()) { setHata("Önce bir örnek sahne yazın (örn. \"Küçük ayı ormanda yürüyor\")."); return; }
+    setStilUretiliyorIdx(idx); setHata("");
+    try {
+      const aday = seciliProje.stilAdaylari[idx];
+      const r = await authFetch("/api/admin/kitap-studyo/gorsel-uret", {
+        method: "POST",
+        body: JSON.stringify({
+          karakterTanimi: aday.stilTanimi, sahne: seciliProje.ornekSahne,
+          model: seciliProje.model, kalite: seciliProje.kalite, boyut: seciliProje.boyut,
+        }),
+      });
+      const d = await r.json();
+      if (!d.ok) { setHata(d.error || "Görsel üretilemedi."); return; }
+      const yeniStilAdaylari = seciliProje.stilAdaylari.map((s, i) => i === idx ? { ...s, gorselUrl: d.gorselUrl } : s);
+      const guncelMeta = { ...seciliProje, stilAdaylari: yeniStilAdaylari };
+      setSeciliProje(guncelMeta);
+      await metaKaydet(guncelMeta);
+    } catch { setHata("Sunucuya ulaşılamadı."); }
+    finally { setStilUretiliyorIdx(null); }
+  };
+
+  // Seçilen stili projeye kilitler (STYLE LOCK) ve aşamayı karaktere taşır.
+  const stiliOnayla = async (idx) => {
+    const aday = seciliProje.stilAdaylari[idx];
+    const guncelMeta = { ...seciliProje, onaylananStilEtiket: aday.etiket, stilTanimi: aday.stilTanimi };
+    setSeciliProje({ ...guncelMeta, asama: "karakter" });
+    const basarili = await metaKaydet(guncelMeta, "karakter");
+    if (basarili) await projeAc(seciliId); // güncel durumu (asama dahil) taze çek
   };
 
   const yeniProjeOlustur = async () => {
@@ -3564,13 +3620,56 @@ function KitapStudyo({ authFetch }) {
                 <div style={{ fontSize: 12, color: "#6f6f6c", marginBottom: 16 }}>
                   Aşama: <b>{{ stil: "Stil Seçimi", karakter: "Karakter", sahneler: "Sahneler" }[seciliProje.asama] || seciliProje.asama}</b>
                   {" · "}{(seciliProje.karakterler || []).length} karakter{" · "}{(seciliProje.spreadler || []).length} sayfa çifti
+                  {kaydediliyor && <span style={{ color: "#9a9a96" }}> · kaydediliyor...</span>}
                 </div>
-                <div style={{ fontSize: 13, color: "#6f6f6c", lineHeight: 1.7 }}>
-                  Bu, temel proje görünümü — görsel üretimi, stil onayı ve sahne düzenleme
-                  ekranları (bağımsız araçtaki tam akış) burada aşamalı olarak eklenecek.
-                  Şimdilik proje kalıcı olarak oluşturuldu ve veritabanında saklanıyor —
-                  temel altyapı çalışıyor.
-                </div>
+
+                {/* EKLENDİ (14 Ağu 2026): ① STİL SEÇİMİ aşaması — gerçek akış.
+                    Bağımsız araçtaki mantıkla aynı: bir örnek sahne yazılır,
+                    3 stil adayı için o sahne üretilir, biri onaylanınca
+                    "onaylananStilEtiket" + "stilTanimi" kilitlenir (STYLE
+                    LOCK) ve aşama karaktere geçer. */}
+                {seciliProje.asama === "stil" && (
+                  <div>
+                    <textarea
+                      value={seciliProje.ornekSahne || ""}
+                      onChange={(e) => setSeciliProje({ ...seciliProje, ornekSahne: e.target.value })}
+                      onBlur={() => metaKaydet()}
+                      placeholder="Örnek sahne (stil testleri için) — örn. &quot;Küçük bir kahverengi ayı yavrusu güneşli bir orman açıklığında duruyor&quot;"
+                      style={{ ...stil.input, minHeight: 60, resize: "vertical", marginBottom: 16 }}
+                    />
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 12 }}>
+                      {(seciliProje.stilAdaylari || []).map((aday, idx) => (
+                        <div key={idx} style={{ background: "#fff", border: "1.5px solid #E4DFD1", borderRadius: 12, padding: 12,
+                          ...(seciliProje.onaylananStilEtiket === aday.etiket ? { borderColor: "#4FAF7A", borderWidth: 2 } : {}) }}>
+                          <div style={{ fontFamily: "'Fredoka', sans-serif", fontWeight: 600, fontSize: 13, marginBottom: 6 }}>{aday.etiket}</div>
+                          <div style={{ fontSize: 11, color: "#6f6f6c", marginBottom: 8, lineHeight: 1.5, minHeight: 55 }}>{aday.stilTanimi}</div>
+                          {aday.gorselUrl && <img src={aday.gorselUrl} style={{ width: "100%", borderRadius: 8, marginBottom: 8 }} />}
+                          {!aday.gorselUrl ? (
+                            <button style={{ ...stil.buton, width: "100%", fontSize: 11, padding: "8px 10px",
+                              ...(stilUretiliyorIdx !== null ? stil.butonPasif : {}) }}
+                              disabled={stilUretiliyorIdx !== null} onClick={() => stilOrnegiUret(idx)}>
+                              {stilUretiliyorIdx === idx ? "Üretiliyor..." : "Örnek Üret"}
+                            </button>
+                          ) : seciliProje.onaylananStilEtiket === aday.etiket ? (
+                            <div style={{ ...stil.rozet, width: "100%", textAlign: "center", boxSizing: "border-box" }}>✓ Onaylandı</div>
+                          ) : (
+                            <button style={{ ...stil.buton, width: "100%", fontSize: 11, padding: "8px 10px", background: "#4FAF7A" }}
+                              onClick={() => stiliOnayla(idx)}>
+                              Bu Stili Onayla
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {seciliProje.asama !== "stil" && (
+                  <div style={{ fontSize: 13, color: "#6f6f6c", lineHeight: 1.7 }}>
+                    Stil onaylandı — <b>{seciliProje.onaylananStilEtiket}</b>.
+                    Karakter ve sahne üretim ekranları sırada, henüz eklenmedi.
+                  </div>
+                )}
               </div>
             )}
           </div>
