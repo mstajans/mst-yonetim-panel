@@ -3447,6 +3447,140 @@ function VersiyonSkorboard({ authFetch }) {
 }
 
 
+// ============ MST Çocuk Stüdyo — Kitap Resim Atölyesi ============
+// Bağımsız aracın (kitap-resim-araci.html) admin panele taşınmış hali —
+// kendi Neon veritabanında kalıcı, artık her yerden erişilebilir.
+// "Gökkuşağı Rafı" teması (kullanıcının 10 varyanttan seçtiği) kullanılıyor
+// — beyaz zemin, üstte gökkuşağı şeridi, Fredoka font, panel geneli koyu
+// temadan kasıtlı olarak farklı (bu, MST Çocuk Stüdyo'nun kendi kimliği).
+function KitapStudyo({ authFetch }) {
+  const [projeler, setProjeler] = React.useState(null);
+  const [hata, setHata] = React.useState("");
+  const [yeniAd, setYeniAd] = React.useState("");
+  const [olusturuluyor, setOlusturuluyor] = React.useState(false);
+  const [seciliId, setSeciliId] = React.useState(null);
+  const [seciliProje, setSeciliProje] = React.useState(null);
+
+  const stil = {
+    sayfa: { background: "#FFFFFF", borderTop: "8px solid", borderImage: "linear-gradient(90deg,#E85D75,#F4A83E,#4FAF7A,#3E8ED0) 1", padding: "28px 24px", borderRadius: 8, color: "#18181a" },
+    baslik: { fontFamily: "'Fredoka', sans-serif", fontWeight: 700, fontSize: 22, margin: "0 0 4px" },
+    alt: { fontSize: 13, color: "#6f6f6c", margin: "0 0 20px" },
+    kart: { background: "#FBF9F6", borderRadius: 16, padding: "16px 18px", border: "2px solid #F4A83E", marginBottom: 12, cursor: "pointer" },
+    kartBaslik: { fontFamily: "'Fredoka', sans-serif", fontWeight: 600, fontSize: 15, margin: "0 0 6px" },
+    rozet: { display: "inline-block", fontFamily: "'Fredoka', sans-serif", fontSize: 11, fontWeight: 600, background: "#4FAF7A", color: "#fff", padding: "3px 10px", borderRadius: 100 },
+    input: { width: "100%", padding: "10px 14px", borderRadius: 10, border: "1.5px solid #E4DFD1", fontSize: 14, boxSizing: "border-box", fontFamily: "inherit" },
+    buton: { fontFamily: "'Fredoka', sans-serif", fontWeight: 600, fontSize: 13, background: "#E85D75", color: "#fff", border: "none", padding: "10px 20px", borderRadius: 100, cursor: "pointer" },
+    butonPasif: { opacity: 0.5, cursor: "default" },
+  };
+
+  const projeleriYukle = async () => {
+    setHata("");
+    try {
+      const r = await authFetch("/api/admin/kitap-studyo/projeler");
+      const d = await r.json();
+      if (d.ok) setProjeler(d.projeler);
+      else setHata(d.error || "Projeler yüklenemedi.");
+    } catch { setHata("Sunucuya ulaşılamadı."); }
+  };
+  React.useEffect(() => { projeleriYukle(); }, []);
+
+  const projeAc = async (id) => {
+    setSeciliId(id); setSeciliProje(null); setHata("");
+    try {
+      const r = await authFetch(`/api/admin/kitap-studyo/projeler/${id}`);
+      const d = await r.json();
+      if (d.ok) setSeciliProje(d.proje);
+      else setHata(d.error || "Proje açılamadı.");
+    } catch { setHata("Sunucuya ulaşılamadı."); }
+  };
+
+  const yeniProjeOlustur = async () => {
+    if (!yeniAd.trim() || olusturuluyor) return;
+    setOlusturuluyor(true); setHata("");
+    try {
+      const r = await authFetch("/api/admin/kitap-studyo/projeler", {
+        method: "POST", body: JSON.stringify({ kitapAdi: yeniAd.trim() }),
+      });
+      const d = await r.json();
+      if (d.ok) { setYeniAd(""); await projeleriYukle(); projeAc(d.id); }
+      else setHata(d.error || "Proje oluşturulamadı.");
+    } catch { setHata("Sunucuya ulaşılamadı."); }
+    finally { setOlusturuluyor(false); }
+  };
+
+  const projeSil = async (id, e) => {
+    e.stopPropagation();
+    if (!window.confirm("Bu projeyi kalıcı olarak silmek istediğinize emin misiniz?")) return;
+    try {
+      const r = await authFetch(`/api/admin/kitap-studyo/projeler/${id}`, { method: "DELETE" });
+      const d = await r.json();
+      if (d.ok) { if (seciliId === id) { setSeciliId(null); setSeciliProje(null); } await projeleriYukle(); }
+      else setHata(d.error || "Silinemedi.");
+    } catch { setHata("Sunucuya ulaşılamadı."); }
+  };
+
+  return (
+    <div style={stil.sayfa}>
+      <h2 style={stil.baslik}>🌈 MST Çocuk Stüdyo</h2>
+      <p style={stil.alt}>Kitap resim atölyesi — projeler artık kalıcı, her cihazdan erişilebilir.</p>
+
+      {hata && <div style={{ background: "#FDECEA", color: "#C0392B", padding: "10px 14px", borderRadius: 10, marginBottom: 16, fontSize: 13 }}>{hata}</div>}
+
+      <div style={{ display: "flex", gap: 8, marginBottom: 24 }}>
+        <input style={stil.input} placeholder="Yeni kitap adı (örn. Küçük Ayı'nın Büyük Günü)"
+          value={yeniAd} onChange={(e) => setYeniAd(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && yeniProjeOlustur()} />
+        <button style={{ ...stil.buton, ...(olusturuluyor || !yeniAd.trim() ? stil.butonPasif : {}) }}
+          disabled={olusturuluyor || !yeniAd.trim()} onClick={yeniProjeOlustur}>
+          {olusturuluyor ? "Oluşturuluyor..." : "+ Yeni Proje"}
+        </button>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: seciliId ? "280px 1fr" : "1fr", gap: 20 }}>
+        <div>
+          <div style={{ fontFamily: "'Fredoka', sans-serif", fontWeight: 600, fontSize: 13, color: "#6f6f6c", marginBottom: 10 }}>
+            PROJELER {projeler ? `(${projeler.length})` : ""}
+          </div>
+          {!projeler && <div style={{ fontSize: 13, color: "#6f6f6c" }}>Yükleniyor...</div>}
+          {projeler && !projeler.length && <div style={{ fontSize: 13, color: "#6f6f6c" }}>Henüz proje yok — yukarıdan ilk kitabı oluşturun.</div>}
+          {(projeler || []).map((p) => (
+            <div key={p.id} style={{ ...stil.kart, ...(seciliId === p.id ? { borderColor: "#E85D75" } : {}) }} onClick={() => projeAc(p.id)}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                <div style={stil.kartBaslik}>{p.kitap_adi}</div>
+                <span onClick={(e) => projeSil(p.id, e)} style={{ color: "#C0392B", cursor: "pointer", fontSize: 12 }}>✕</span>
+              </div>
+              <span style={stil.rozet}>{{ stil: "Stil Seçimi", karakter: "Karakter", sahneler: "Sahneler" }[p.asama] || p.asama}</span>
+              <div style={{ fontSize: 11, color: "#9a9a96", marginTop: 6 }}>{new Date(p.guncellendi).toLocaleString("tr-TR")}</div>
+            </div>
+          ))}
+        </div>
+
+        {seciliId && (
+          <div>
+            {!seciliProje && <div style={{ fontSize: 13, color: "#6f6f6c" }}>Proje açılıyor...</div>}
+            {seciliProje && (
+              <div style={{ background: "#FBF9F6", borderRadius: 16, border: "2px solid #F4A83E", padding: 20 }}>
+                <div style={{ fontFamily: "'Fredoka', sans-serif", fontWeight: 700, fontSize: 18, marginBottom: 4 }}>{seciliProje.kitapAdi}</div>
+                <div style={{ fontSize: 12, color: "#6f6f6c", marginBottom: 16 }}>
+                  Aşama: <b>{{ stil: "Stil Seçimi", karakter: "Karakter", sahneler: "Sahneler" }[seciliProje.asama] || seciliProje.asama}</b>
+                  {" · "}{(seciliProje.karakterler || []).length} karakter{" · "}{(seciliProje.spreadler || []).length} sayfa çifti
+                </div>
+                <div style={{ fontSize: 13, color: "#6f6f6c", lineHeight: 1.7 }}>
+                  Bu, temel proje görünümü — görsel üretimi, stil onayı ve sahne düzenleme
+                  ekranları (bağımsız araçtaki tam akış) burada aşamalı olarak eklenecek.
+                  Şimdilik proje kalıcı olarak oluşturuldu ve veritabanında saklanıyor —
+                  temel altyapı çalışıyor.
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+
 function DemoHesaplar({ authFetch }) {
   const [veri, setVeri] = useState(null);
   const [yeni, setYeni] = useState({ hedefPaket: "profesyonel" });
@@ -8918,6 +9052,7 @@ export default function AdminPanel() {
     ["reklamTeklif", "Reklam Başvuruları"],
     ["eslesme", "Eşleşme Teşhisi"],
     ["isbn", "Toplu ISBN"],
+    ["kitapStudyo", "Kitap Resim Stüdyosu"],
     ["kullanicilar", "Kullanıcı Yönetimi"],
   ];
 
@@ -9064,6 +9199,7 @@ export default function AdminPanel() {
         {view === "reklamTeklif" && <ReklamBasvurulari authFetch={authFetch} />}
         {view === "eslesme" && <EslesmeTeshisi authFetch={authFetch} onSelectAuthor={(id) => { setView("authors"); setSelectedId(id); }} />}
         {view === "isbn" && <BulkIsbnUpload onSubmit={bulkIsbn} />}
+        {view === "kitapStudyo" && <KitapStudyo authFetch={authFetch} />}
         {view === "kullanicilar" && <KullaniciYonetimi authFetch={authFetch} />}
       </div>
 
