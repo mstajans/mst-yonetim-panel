@@ -3667,7 +3667,7 @@ function KitapStudyo({ authFetch }) {
     if (!seciliProje.kitapMetni?.trim()) { setHata("Önce kitap metnini yükleyin ya da yapıştırın."); return; }
     if (sahnelerDolduruluyorMu) return;
     setSahnelerDolduruluyorMu(true); setHata("");
-    setSahnelerDurumMetni("Sahnelere ayrılıyor, bu biraz sürebilir…");
+    setSahnelerDurumMetni("Sahnelere ayrılıyor ve karakterler tespit ediliyor, bu biraz sürebilir…");
     try {
       const r = await authFetch("/api/admin/kitap-studyo/metin-ayir", {
         method: "POST",
@@ -3683,13 +3683,24 @@ function KitapStudyo({ authFetch }) {
         sahne: s.sahne || "", solMetin: s.solSayfaMetni || "", sagMetin: s.sagSayfaMetni || "",
         solMetinsiz: false, sagMetinsiz: false, solGorselUrl: null, sagGorselUrl: null,
       }));
+      // EKLENDİ (14 Ağu 2026, Bedirhan'ın vizyonu: "önce karakterleri çıkarıp
+      // çiziyor"): metin-ayir artık karakterleri de tespit ediyor. Kullanıcının
+      // ② Karakter aşamasında elle eklediği karakterlerle aynı isimde olanı
+      // ikiletmemek için isme göre birleştiriyoruz — geri kalanı yeni eklenir.
+      const mevcutKarakterler = seciliProje.karakterler || [];
+      const mevcutAdlar = new Set(mevcutKarakterler.map((k) => (k.ad || "").trim().toLowerCase()));
+      const yeniCikarilanlar = (d.karakterler || [])
+        .filter((k) => k.ad && !mevcutAdlar.has(k.ad.trim().toLowerCase()))
+        .map((k) => ({ ad: k.ad, aciklama: k.aciklama || "", gorselUrl: null, ekPozlar: [] }));
       const guncelMeta = {
         ...seciliProje, spreadler: yeniSpreadler,
+        karakterler: [...mevcutKarakterler, ...yeniCikarilanlar],
         kapakArkasiYazisi: d.kapakArkasiYazisi || seciliProje.kapakArkasiYazisi || "",
       };
       setSeciliProje(guncelMeta);
       await metaKaydet(guncelMeta);
-      setSahnelerDurumMetni(`${yeniSpreadler.length} sayfa çifti oluşturuldu — üretime geçmeden önce gözden geçir.`);
+      const karakterMetni = yeniCikarilanlar.length ? ` ve ${yeniCikarilanlar.length} karakter tespit edildi (② Karakter aşamasına eklendi)` : "";
+      setSahnelerDurumMetni(`${yeniSpreadler.length} sayfa çifti oluşturuldu${karakterMetni} — üretime geçmeden önce gözden geçir.`);
     } catch { setHata("Sunucuya ulaşılamadı."); setSahnelerDurumMetni(""); }
     finally { setSahnelerDolduruluyorMu(false); }
   };
@@ -4226,6 +4237,42 @@ function KitapStudyo({ authFetch }) {
                     LOCK) ve aşama karaktere geçer. */}
                 {seciliProje.asama === "stil" && (
                   <div>
+                    {/* EKLENDİ (14 Ağu 2026, Bedirhan'ın talebi: "kitap özellikleri
+                        başta belirleniyor"): yazar adı, model/kalite ve fiziksel
+                        boyut en başta, stil testinden önce girilir. */}
+                    <div style={{ background: "#FBF9F6", borderRadius: 16, padding: 18, border: "2px solid #F4A83E", marginBottom: 16 }}>
+                      <div style={{ fontFamily: "'Fredoka', sans-serif", fontWeight: 600, fontSize: 14, marginBottom: 10 }}>Kitap Bilgileri</div>
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 8 }}>
+                        <input style={stil.input} placeholder="Yazar adı" value={seciliProje.yazarAdi || ""}
+                          onChange={(e) => setSeciliProje({ ...seciliProje, yazarAdi: e.target.value })} onBlur={() => metaKaydet(seciliProje)} />
+                        <select style={stil.input} value={seciliProje.model || "gpt-image-2"}
+                          onChange={(e) => { const gm = { ...seciliProje, model: e.target.value }; setSeciliProje(gm); metaKaydet(gm); }}>
+                          <option value="gpt-image-2">gpt-image-2 (önerilen)</option>
+                          <option value="gpt-image-1-mini">gpt-image-1-mini (ucuz/deneme)</option>
+                        </select>
+                      </div>
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 8 }}>
+                        <select style={stil.input} value={seciliProje.kalite || "low"}
+                          onChange={(e) => { const gm = { ...seciliProje, kalite: e.target.value }; setSeciliProje(gm); metaKaydet(gm); }}>
+                          <option value="low">Düşük (test için)</option>
+                          <option value="medium">Orta</option>
+                          <option value="high">Yüksek</option>
+                        </select>
+                        <select style={stil.input} value={seciliProje.boyut || "1024x1536"}
+                          onChange={(e) => { const gm = { ...seciliProje, boyut: e.target.value }; setSeciliProje(gm); metaKaydet(gm); }}>
+                          <option value="1024x1536">1024×1536 (dikey)</option>
+                          <option value="1024x1024">1024×1024 (kare)</option>
+                        </select>
+                        <input style={stil.input} placeholder="Genişlik (cm)" value={seciliProje.ozellikler?.genislikCm || ""}
+                          onChange={(e) => ozellikGuncelle("genislikCm", e.target.value)} onBlur={() => metaKaydet(seciliProje)} />
+                        <input style={stil.input} placeholder="Yükseklik (cm)" value={seciliProje.ozellikler?.yukseklikCm || ""}
+                          onChange={(e) => ozellikGuncelle("yukseklikCm", e.target.value)} onBlur={() => metaKaydet(seciliProje)} />
+                      </div>
+                      <p style={{ fontSize: 11, color: "#6f6f6c", marginTop: 8, marginBottom: 0 }}>
+                        Düşük kalite ile ucuza test edip beğendiğinde, Sahneler aşamasındaki "Kalite Değişti, Yeniden Üretime Hazırla" ile orta/yükseğe geçebilirsin.
+                        ISBN, basım tarihi gibi diğer künye bilgileri Sahneler aşamasında.
+                      </p>
+                    </div>
                     <textarea
                       value={seciliProje.ornekSahne || ""}
                       onChange={(e) => setSeciliProje({ ...seciliProje, ornekSahne: e.target.value })}
