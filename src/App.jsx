@@ -4107,7 +4107,10 @@ function KitapStudyo({ authFetch }) {
   const tumunuUret = async (hedefId) => {
     hedefId = hedefId || seciliId;
     if (aktifUretimIlerleme[hedefId]) return; // zaten üretimde
-    setAktifUretimIlerleme((m) => ({ ...m, [hedefId]: "başlıyor…" }));
+    // DEĞİŞTİRİLDİ (14 Ağu 2026, Balon Uçuşu tasarımı): ilerleme artık
+    // {mevcut, toplam} objesi olarak tutuluyor — yüzde ve balon animasyonu
+    // hesaplayabilmek için.
+    setAktifUretimIlerleme((m) => ({ ...m, [hedefId]: { mevcut: 0, toplam: 1 } }));
     if (hedefId === seciliId) { setTumunuUretiliyorMu(true); setHata(""); }
     const beklemeMs = Math.max(0, (parseFloat(beklemeSn) || 0) * 1000);
     try {
@@ -4119,10 +4122,11 @@ function KitapStudyo({ authFetch }) {
       for (let i = 0; i < toplamSpread; i++) {
         p = projeOku(hedefId);
         if (p.spreadler[i].solGorselUrl) continue;
-        setAktifUretimIlerleme((m) => ({ ...m, [hedefId]: `${i + 1}/${toplamSpread} sayfa çifti` }));
+        setAktifUretimIlerleme((m) => ({ ...m, [hedefId]: { mevcut: i, toplam: toplamSpread } }));
         await spreadUret(i, hedefId);
         if (beklemeMs) await bekle(beklemeMs);
       }
+      setAktifUretimIlerleme((m) => ({ ...m, [hedefId]: { mevcut: toplamSpread, toplam: toplamSpread } }));
     } finally {
       setAktifUretimIlerleme((m) => { const y = { ...m }; delete y[hedefId]; return y; });
       if (hedefId === seciliId) setTumunuUretiliyorMu(false);
@@ -4267,7 +4271,9 @@ function KitapStudyo({ authFetch }) {
               {/* EKLENDİ (14 Ağu 2026): projeden çıkılsa da arka planda devam
                   eden üretimi, Proje Panosunda da canlı gösterir. */}
               {aktifUretimIlerleme[p.id] && (
-                <span style={{ ...stil.rozet, background: "#3E8ED0", marginLeft: 6 }}>⏳ {aktifUretimIlerleme[p.id]}</span>
+                <span style={{ ...stil.rozet, background: "#3E8ED0", marginLeft: 6 }}>
+                  🎈 %{Math.round((aktifUretimIlerleme[p.id].mevcut / Math.max(1, aktifUretimIlerleme[p.id].toplam)) * 100)}
+                </span>
               )}
               <div style={{ fontSize: 11, color: "#9a9a96", marginTop: 6 }}>{new Date(p.guncellendi).toLocaleString("tr-TR")}</div>
             </div>
@@ -4602,6 +4608,31 @@ function KitapStudyo({ authFetch }) {
                     {/* EKLENDİ: 4-5. parça — Üretim (tümünü üret, maliyet, PDF, önizleme) */}
                     <div style={{ background: "#FBF9F6", borderRadius: 16, padding: 18, border: "2px solid #F4A83E" }}>
                       <div style={{ fontFamily: "'Fredoka', sans-serif", fontWeight: 600, fontSize: 14, marginBottom: 10 }}>Üretim</div>
+
+                      {/* EKLENDİ (14 Ağu 2026, Bedirhan'ın seçtiği "Balon Uçuşu" tasarımı):
+                          üretim aktifken, tamamlanan her görsel için bir balon gökyüzüne
+                          uçuyor, ortada büyük yüzde gösteriliyor. */}
+                      {aktifUretimIlerleme[seciliProje.id] && (() => {
+                        const ilerleme = aktifUretimIlerleme[seciliProje.id];
+                        const yuzde = Math.round((ilerleme.mevcut / Math.max(1, ilerleme.toplam)) * 100);
+                        const renkler = ["#E85D75", "#F4A83E", "#4FAF7A", "#3E8ED0", "#D4537E"];
+                        return (
+                          <div style={{ position: "relative", height: 120, borderRadius: 12, overflow: "hidden", marginBottom: 14, background: "linear-gradient(180deg,#DCEEFB,#FFFFFF)" }}>
+                            <style>{`
+                              @keyframes mstBalonUc { 0%{ bottom:-40px; opacity:0; } 10%{ opacity:1; } 90%{ opacity:1; } 100%{ bottom:130px; opacity:0; } }
+                              .mst-balon { position:absolute; width:22px; height:28px; border-radius:50% 50% 50% 50%/60% 60% 40% 40%; animation:mstBalonUc 3.2s ease-in infinite; }
+                            `}</style>
+                            {Array.from({ length: Math.max(3, Math.min(6, ilerleme.toplam)) }).map((_, i) => (
+                              <div key={i} className="mst-balon" style={{ left: `${10 + i * 16}%`, background: renkler[i % renkler.length], animationDelay: `${i * 0.6}s` }} />
+                            ))}
+                            <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
+                              <div style={{ fontFamily: "'Fredoka', sans-serif", fontWeight: 700, fontSize: 30, color: "#18181a" }}>%{yuzde}</div>
+                              <div style={{ fontSize: 12, color: "#6f6f6c", marginTop: 2 }}>{ilerleme.mevcut} / {ilerleme.toplam} sayfa çifti tamamlandı</div>
+                            </div>
+                          </div>
+                        );
+                      })()}
+
                       <div style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 12, flexWrap: "wrap" }}>
                         <div>
                           <label style={{ fontSize: 11, color: "#6f6f6c", display: "block" }}>İstekler arası bekleme (sn)</label>
@@ -4615,7 +4646,7 @@ function KitapStudyo({ authFetch }) {
                       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                         <button style={{ ...stil.buton, background: "#4FAF7A", ...(aktifUretimIlerleme[seciliProje.id] ? stil.butonPasif : {}) }}
                           disabled={!!aktifUretimIlerleme[seciliProje.id]} onClick={() => tumunuUret()}>
-                          {aktifUretimIlerleme[seciliProje.id] ? `Üretiliyor... (${aktifUretimIlerleme[seciliProje.id]})` : "Eksik Olanları Üret (Sırayla)"}
+                          {aktifUretimIlerleme[seciliProje.id] ? `Üretiliyor... (%${Math.round((aktifUretimIlerleme[seciliProje.id].mevcut / Math.max(1, aktifUretimIlerleme[seciliProje.id].toplam)) * 100)})` : "Eksik Olanları Üret (Sırayla)"}
                         </button>
                         <button style={stil.buton} disabled={kitapSayfaListesiOlustur().length === 0} onClick={kitapiOnizle}>Kitabı Önizle</button>
                         <button style={{ ...stil.buton, ...(pdfHazirlaniyorMu ? stil.butonPasif : {}) }}
