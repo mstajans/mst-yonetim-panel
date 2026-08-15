@@ -1,4 +1,9 @@
 import React, { useState, useEffect } from "react";
+// EKLENDİ (15 Ağu 2026, "413 Content Too Large" — JPEG kalitesi düşürmek
+// bile yetmedi): büyük görselleri (özellikle sayfa çiftleri) MST'nin
+// sunucusuna hiç uğratmadan doğrudan Vercel Blob'a yüklemek için. mst-yazar-app'te
+// büyük eser dosyaları için aynı desen zaten kanıtlanmış. Paket: npm install @vercel/blob.
+import { upload as blobUpload } from "@vercel/blob/client";
 
 const BACKEND_URL = "https://mst-backend-mauve.vercel.app";
 
@@ -3453,7 +3458,7 @@ function VersiyonSkorboard({ authFetch }) {
 // "Gökkuşağı Rafı" teması (kullanıcının 10 varyanttan seçtiği) kullanılıyor
 // — beyaz zemin, üstte gökkuşağı şeridi, Fredoka font, panel geneli koyu
 // temadan kasıtlı olarak farklı (bu, MST Çocuk Stüdyo'nun kendi kimliği).
-function KitapStudyo({ authFetch }) {
+function KitapStudyo({ authFetch, token }) {
   const [projeler, setProjeler] = React.useState(null);
   const [hata, setHata] = React.useState("");
   const [yeniAd, setYeniAd] = React.useState("");
@@ -3779,25 +3784,33 @@ function KitapStudyo({ authFetch }) {
 
   // Hazır bir görseli (base64/veri URL) doğrudan Blob'a yükler — künye/kapak
   // gibi OpenAI'ye hiç gitmeyen görseller için.
-  // DÜZELTİLDİ (15 Ağu 2026, "413 Content Too Large" hatası — JPEG kalitesini
-  // düşürmek tek başına yetmedi): artık (1) göndermeden önce boyutu kontrol
-  // edip Vercel'in ~4.5MB sunucu isteği sınırına yaklaşıyorsa net bir hata
-  // veriyor (önceden "Unexpected token '<'" gibi anlaşılmaz bir hataya
-  // düşüyordu), (2) cevap JSON değilse (örn. 413'ün döndürdüğü HTML sayfası)
-  // bunu da açıkça yakalayıp anlaşılır bir mesaja çeviriyor.
+  // DÜZELTİLDİ (15 Ağu 2026, "413 Content Too Large" — JPEG kalitesini
+  // düşürmek de yetmedi): artık MST'nin sunucusuna HİÇ uğramıyor. base64,
+  // tarayıcıda bir Blob nesnesine çevrilip @vercel/blob/client'ın upload()
+  // fonksiyonuyla DOĞRUDAN Vercel Blob'a gönderiliyor — Vercel'in ~4.5MB
+  // sunucu isteği sınırı bu yolda hiç devreye girmiyor (Blob'un kendi tavanı
+  // çok daha yüksek). Backend'deki yeni gorsel-blob-token ucu, tarayıcıya
+  // sadece kısa ömürlü bir yükleme izni veriyor, görsel verisini hiç görmüyor.
+  // Çağıran fonksiyonlar (kunyeUret, sayfaMetniBindir vb.) hiç değişmedi —
+  // hâlâ base64 veriyorlar, dönüşüm burada, tek yerde yapılıyor.
   const gorselYukle = async (b64, onEki) => {
-    const tahminiMb = (b64.length * 0.75) / (1024 * 1024); // base64 → ham byte tahmini
-    if (tahminiMb > 4) {
-      throw new Error(`Görsel çok büyük (~${tahminiMb.toFixed(1)}MB) — sunucunun 4.5MB sınırını aşıyor. Kaliteyi düşürüp tekrar dene.`);
+    const ikili = atob(b64);
+    const bayt = new Uint8Array(ikili.length);
+    for (let i = 0; i < ikili.length; i++) bayt[i] = ikili.charCodeAt(i);
+    const mime = b64.startsWith("/9j/") ? "image/jpeg" : "image/png"; // JPEG'ler hep bu imzayla başlar
+    const blob = new Blob([bayt], { type: mime });
+    const uzanti = mime === "image/jpeg" ? "jpg" : "png";
+    const dosyaAdi = `kitap-studyo/${onEki || "gorsel"}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${uzanti}`;
+    try {
+      const sonuc = await blobUpload(dosyaAdi, blob, {
+        access: "public",
+        handleUploadUrl: `${BACKEND_URL}/api/admin/kitap-studyo/gorsel-blob-token`,
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      return sonuc.url;
+    } catch (err) {
+      throw new Error("Görsel yüklenemedi: " + (err?.message || "bilinmeyen hata"));
     }
-    const r = await authFetch("/api/admin/kitap-studyo/gorsel-yukle", { method: "POST", body: JSON.stringify({ gorselB64: b64, dosyaOnEki: onEki }) });
-    if (!r.ok) {
-      if (r.status === 413) throw new Error("Görsel sunucunun kabul edebileceğinden büyük (413). Kaliteyi düşürüp tekrar dene.");
-      throw new Error(`Yükleme başarısız (HTTP ${r.status}).`);
-    }
-    const d = await r.json();
-    if (!d.ok) throw new Error(d.error || "Görsel yüklenemedi.");
-    return d.gorselUrl;
   };
 
   const ozellikGuncelle = (alan, deger) => {
@@ -10458,7 +10471,7 @@ export default function AdminPanel() {
         {view === "reklamTeklif" && <ReklamBasvurulari authFetch={authFetch} />}
         {view === "eslesme" && <EslesmeTeshisi authFetch={authFetch} onSelectAuthor={(id) => { setView("authors"); setSelectedId(id); }} />}
         {view === "isbn" && <BulkIsbnUpload onSubmit={bulkIsbn} />}
-        {view === "kitapStudyo" && <KitapStudyo authFetch={authFetch} />}
+        {view === "kitapStudyo" && <KitapStudyo authFetch={authFetch} token={session?.token} />}
         {view === "kullanicilar" && <KullaniciYonetimi authFetch={authFetch} />}
       </div>
 
