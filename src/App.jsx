@@ -3779,8 +3779,22 @@ function KitapStudyo({ authFetch }) {
 
   // Hazır bir görseli (base64/veri URL) doğrudan Blob'a yükler — künye/kapak
   // gibi OpenAI'ye hiç gitmeyen görseller için.
+  // DÜZELTİLDİ (15 Ağu 2026, "413 Content Too Large" hatası — JPEG kalitesini
+  // düşürmek tek başına yetmedi): artık (1) göndermeden önce boyutu kontrol
+  // edip Vercel'in ~4.5MB sunucu isteği sınırına yaklaşıyorsa net bir hata
+  // veriyor (önceden "Unexpected token '<'" gibi anlaşılmaz bir hataya
+  // düşüyordu), (2) cevap JSON değilse (örn. 413'ün döndürdüğü HTML sayfası)
+  // bunu da açıkça yakalayıp anlaşılır bir mesaja çeviriyor.
   const gorselYukle = async (b64, onEki) => {
+    const tahminiMb = (b64.length * 0.75) / (1024 * 1024); // base64 → ham byte tahmini
+    if (tahminiMb > 4) {
+      throw new Error(`Görsel çok büyük (~${tahminiMb.toFixed(1)}MB) — sunucunun 4.5MB sınırını aşıyor. Kaliteyi düşürüp tekrar dene.`);
+    }
     const r = await authFetch("/api/admin/kitap-studyo/gorsel-yukle", { method: "POST", body: JSON.stringify({ gorselB64: b64, dosyaOnEki: onEki }) });
+    if (!r.ok) {
+      if (r.status === 413) throw new Error("Görsel sunucunun kabul edebileceğinden büyük (413). Kaliteyi düşürüp tekrar dene.");
+      throw new Error(`Yükleme başarısız (HTTP ${r.status}).`);
+    }
     const d = await r.json();
     if (!d.ok) throw new Error(d.error || "Görsel yüklenemedi.");
     return d.gorselUrl;
@@ -3832,7 +3846,7 @@ function KitapStudyo({ authFetch }) {
       // (0.92) — Vercel'in sunucu isteği boyut sınırını (4.5MB) aşmamak için.
       // İçerik illüstrasyon/metin olduğu için JPEG kalite kaybı gözle
       // görülmüyor, dosya boyutu ise 3-6 kat küçülüyor.
-      const b64 = canvas.toDataURL("image/jpeg", 0.92).split(",")[1];
+      const b64 = canvas.toDataURL("image/jpeg", 0.72).split(",")[1];
       const url = await gorselYukle(b64, "kunye");
       const guncelMeta = { ...p, kunyeGorselUrl: url };
       await projeGuncelle(hedefId, guncelMeta);
@@ -3890,7 +3904,7 @@ function KitapStudyo({ authFetch }) {
           ctx.font = `${Math.round(img.width * 0.036)}px Capriola, Georgia, serif`;
           ctx.fillText(p.yazarAdi, img.width / 2, Math.max(sonY + img.width * 0.07, img.height - img.height * 0.05));
         }
-        resolve(canvas.toDataURL("image/jpeg", 0.92).split(",")[1]);
+        resolve(canvas.toDataURL("image/jpeg", 0.72).split(",")[1]);
       };
       img.src = "data:image/png;base64," + hamB64;
     });
@@ -3911,7 +3925,7 @@ function KitapStudyo({ authFetch }) {
         ctx.fillStyle = "#18181a"; ctx.textAlign = "left";
         ctx.font = `${Math.round(img.width * 0.032)}px Capriola, Georgia, serif`;
         metniSar(ctx, yazi, img.width * 0.12, kutuY + img.width * 0.06, img.width * 0.76, img.width * 0.045);
-        resolve(canvas.toDataURL("image/jpeg", 0.92).split(",")[1]);
+        resolve(canvas.toDataURL("image/jpeg", 0.72).split(",")[1]);
       };
       img.src = "data:image/png;base64," + hamB64;
     });
@@ -4097,7 +4111,7 @@ function KitapStudyo({ authFetch }) {
           ctx.font = `${Math.round(img.width * 0.03)}px Capriola, Georgia, serif`;
           ctx.fillText(String(sayfaNo), img.width / 2, img.height - img.width * 0.025);
         }
-        resolve(canvas.toDataURL("image/jpeg", 0.92).split(",")[1]);
+        resolve(canvas.toDataURL("image/jpeg", 0.72).split(",")[1]);
       };
       img.src = "data:image/png;base64," + hamB64;
     });
