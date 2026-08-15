@@ -3827,7 +3827,12 @@ function KitapStudyo({ authFetch }) {
         oz.ekNot || null,
         "Tüm hakları saklıdır.",
       ].filter(Boolean).forEach((satir) => { ctx.fillText(satir, w * 0.14, y); y += w * 0.045; });
-      const b64 = canvas.toDataURL("image/png").split(",")[1];
+      // DÜZELTİLDİ (15 Ağu 2026, "413 Content Too Large" hatası): gorsel-yukle
+      // ucuna giden ÇIKTI görselleri artık PNG yerine yüksek kaliteli JPEG
+      // (0.92) — Vercel'in sunucu isteği boyut sınırını (4.5MB) aşmamak için.
+      // İçerik illüstrasyon/metin olduğu için JPEG kalite kaybı gözle
+      // görülmüyor, dosya boyutu ise 3-6 kat küçülüyor.
+      const b64 = canvas.toDataURL("image/jpeg", 0.92).split(",")[1];
       const url = await gorselYukle(b64, "kunye");
       const guncelMeta = { ...p, kunyeGorselUrl: url };
       await projeGuncelle(hedefId, guncelMeta);
@@ -3885,7 +3890,7 @@ function KitapStudyo({ authFetch }) {
           ctx.font = `${Math.round(img.width * 0.036)}px Capriola, Georgia, serif`;
           ctx.fillText(p.yazarAdi, img.width / 2, Math.max(sonY + img.width * 0.07, img.height - img.height * 0.05));
         }
-        resolve(canvas.toDataURL("image/png").split(",")[1]);
+        resolve(canvas.toDataURL("image/jpeg", 0.92).split(",")[1]);
       };
       img.src = "data:image/png;base64," + hamB64;
     });
@@ -3906,7 +3911,7 @@ function KitapStudyo({ authFetch }) {
         ctx.fillStyle = "#18181a"; ctx.textAlign = "left";
         ctx.font = `${Math.round(img.width * 0.032)}px Capriola, Georgia, serif`;
         metniSar(ctx, yazi, img.width * 0.12, kutuY + img.width * 0.06, img.width * 0.76, img.width * 0.045);
-        resolve(canvas.toDataURL("image/png").split(",")[1]);
+        resolve(canvas.toDataURL("image/jpeg", 0.92).split(",")[1]);
       };
       img.src = "data:image/png;base64," + hamB64;
     });
@@ -4092,7 +4097,7 @@ function KitapStudyo({ authFetch }) {
           ctx.font = `${Math.round(img.width * 0.03)}px Capriola, Georgia, serif`;
           ctx.fillText(String(sayfaNo), img.width / 2, img.height - img.width * 0.025);
         }
-        resolve(canvas.toDataURL("image/png").split(",")[1]);
+        resolve(canvas.toDataURL("image/jpeg", 0.92).split(",")[1]);
       };
       img.src = "data:image/png;base64," + hamB64;
     });
@@ -4303,7 +4308,8 @@ function KitapStudyo({ authFetch }) {
           {!projeler && <div style={{ fontSize: 13, color: "#6f6f6c" }}>Yükleniyor...</div>}
           {projeler && !projeler.length && <div style={{ fontSize: 13, color: "#6f6f6c" }}>Henüz proje yok — yukarıdan ilk kitabı oluşturun.</div>}
           {(projeler || []).map((p) => (
-            <div key={p.id} style={{ ...stil.kart, ...(seciliId === p.id ? { borderColor: "#E85D75" } : {}) }} onClick={() => projeAc(p.id)}>
+            <div key={p.id} style={{ ...stil.kart, ...(seciliId === p.id ? { borderColor: "#E85D75" } : {}) }}
+              onClick={() => { if (seciliId === p.id) { setSeciliId(null); setSeciliProje(null); } else { projeAc(p.id); } }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
                 <div style={stil.kartBaslik}>{p.kitap_adi}</div>
                 <span onClick={(e) => projeSil(p.id, e)} style={{ color: "#C0392B", cursor: "pointer", fontSize: 12 }}>✕</span>
@@ -4326,6 +4332,15 @@ function KitapStudyo({ authFetch }) {
             {!seciliProje && <div style={{ fontSize: 13, color: "#6f6f6c" }}>Proje açılıyor...</div>}
             {seciliProje && (
               <div style={{ background: "#FBF9F6", borderRadius: 16, border: "2px solid #F4A83E", padding: 20 }}>
+                {/* EKLENDİ (15 Ağu 2026, Bedirhan'ın bildirdiği hata: "projenin
+                    üstüne tıkladığımda kapanmıyor, sayfa küçülmesi olmuyor yeni
+                    projeye geçmek için"): açık, tıklanır "panoya dön" linki —
+                    proje kartına tekrar tıklamanın (yukarıda toggle edildi)
+                    yanı sıra ikinci bir yol. */}
+                <span onClick={() => { setSeciliId(null); setSeciliProje(null); }}
+                  style={{ fontSize: 12, color: "#6f6f6c", cursor: "pointer", display: "inline-block", marginBottom: 10 }}>
+                  ← Proje Panosuna Dön
+                </span>
                 <div style={{ fontFamily: "'Fredoka', sans-serif", fontWeight: 700, fontSize: 18, marginBottom: 4 }}>{seciliProje.kitapAdi}</div>
                 <div style={{ fontSize: 12, color: "#6f6f6c", marginBottom: 16 }}>
                   Aşama: <b>{{ metin: "Metin ve Sahneler", stil: "Stil Seçimi", karakter: "Karakter", uretim: "Kitap Üretimi" }[seciliProje.asama] || seciliProje.asama}</b>
