@@ -3485,6 +3485,13 @@ function KitapStudyo({ authFetch, token }) {
   // güvenilirlik katmanı (bekleme/yeniden deneme/maliyet), PDF+önizleme,
   // karakter ek poz için state'ler.
   const [spreadUretiliyorIdx, setSpreadUretiliyorIdx] = React.useState(null);
+  // EKLENDİ (16 Ağu 2026): tam ekran görüntüleyici — baskı kalitesini
+  // küçük önizlemeden değerlendirmek mümkün değildi.
+  const [buyukGorsel, setBuyukGorsel] = React.useState(null); // {url, baslik}
+  // EKLENDİ (16 Ağu 2026): metin stili düzenleyici (hangi sayfa çifti açık)
+  const [stilDuzenleIdx, setStilDuzenleIdx] = React.useState(null);
+  const [stilTaslak, setStilTaslak] = React.useState(null);
+  const [stilUyguluyor, setStilUyguluyor] = React.useState(false);
   const [tumunuUretiliyorMu, setTumunuUretiliyorMu] = React.useState(false);
   const [beklemeSn, setBeklemeSn] = React.useState("4");
   const [toplamMaliyet, setToplamMaliyet] = React.useState(0);
@@ -4172,11 +4179,64 @@ function KitapStudyo({ authFetch, token }) {
   //
   // Punto otomatiği korundu: metin sığana kadar küçülür, hiçbir cümle
   // kırpılmaz (ekran görüntülerindeki "...korku ve" hatası buradan geliyordu).
-  const METIN_BANDI = 0.30;   // gradyanın başladığı yükseklik (alttan oran)
+  // ═══════════════════════════════════════════════════════════════
+  // METİN KATMANI — düzenlenebilir tipografi
+  //
+  // YENİDEN YAZILDI (16 Ağu 2026, Bedirhan: "yazı yerlerini rengini vs her
+  // şeyini ben yapabilmeliyim, tıpkı Canva gibi" + "bazısının boyutu büyük
+  // bazısının küçük"):
+  //
+  // Punto neden tutarsızdı: her sayfada metin uzunluğuna göre OTOMATİK
+  // küçülüyordu. Kırpılmayı önlüyordu ama kitap boyunca punto oynuyordu.
+  // Artık otomatik SEÇENEK; kapatılıp sabit punto verilebiliyor ve tek
+  // tıkla tüm kitaba uygulanabiliyor.
+  //
+  // Her değer sayfa genişliğinin YÜZDESİ olarak tutuluyor — böylece aynı
+  // ayar hem 1920 px'lik baskı çıktısında hem küçük önizlemede aynı görünür.
+  const VARSAYILAN_METIN_STILI = {
+    otomatikPunto: true,
+    punto: 3.0,        // % — sayfa genişliğine oran
+    enKucukPunto: 2.3, // % — otomatik küçülmenin tabanı
+    maksSatir: 4,
+    renk: "#fffdf5",
+    hiza: "center",    // left | center | right
+    x: 50,             // % — metin kutusunun yatay merkezi
+    y: 88,             // % — metin bloğunun DİKEY MERKEZİ
+    genislik: 84,      // % — satır sarma genişliği
+    satirAraligi: 1.42,
+    golge: 62,         // 0-100 — harflerin çevresindeki yumuşaklık
+    bant: 58,          // 0-100 — alt geçişin yoğunluğu (0 = geçiş yok)
+    bantYuksekligi: 30,// % — geçişin başladığı yükseklik
+    sayfaNoGoster: true,
+  };
+  const metinStiliCoz = (s) => ({ ...VARSAYILAN_METIN_STILI, ...(s || {}) });
+
   const SAYFA_NO_SERIDI = 0.045;
 
-  const sayfaMetniBindir = async (hamB64, metin, sayfaNo) => {
+  // Metni verilen stile göre satırlara böler ve kullanılacak puntoyu döndürür.
+  // Hem canvas çizimi hem canlı HTML önizlemesi AYNI bu fonksiyonu kullanır —
+  // önizleme ile çıktı arasında fark kalmasın diye.
+  const metinYerlesimiHesapla = (ctx, metin, G, st) => {
+    const maxG = G * (st.genislik / 100);
+    const tavan = Math.round(G * (st.punto / 100));
+    const taban = Math.round(G * (st.enKucukPunto / 100));
+    let punto = tavan, satirlar = [];
+    if (st.otomatikPunto) {
+      while (punto >= taban) {
+        ctx.font = `${punto}px Capriola, Georgia, serif`;
+        satirlar = metniSatirlaraBol(ctx, metin, maxG);
+        if (satirlar.length <= st.maksSatir) break;
+        punto -= 1;
+      }
+    }
+    ctx.font = `${punto}px Capriola, Georgia, serif`;
+    if (!satirlar.length) satirlar = metniSatirlaraBol(ctx, metin, maxG);
+    return { punto, satirlar, satirAraligi: punto * st.satirAraligi };
+  };
+
+  const sayfaMetniBindir = async (hamB64, metin, sayfaNo, stilGirdi) => {
     await fontHazirla(28, "Capriola");
+    const st = metinStiliCoz(stilGirdi);
     return new Promise((resolve) => {
       const img = new Image();
       img.onload = () => {
@@ -4189,48 +4249,38 @@ function KitapStudyo({ authFetch, token }) {
         const numaraSeridi = Y * SAYFA_NO_SERIDI;
         const metniVar = !!(metin && metin.trim());
 
-        // ── 1 · Yumuşak alt geçiş (kutu DEĞİL) ──
-        // Üstte tamamen şeffaf başlar; ara duraklar eğriyi yumuşatır, böylece
-        // gradyanın başladığı yerde görünür bir çizgi oluşmaz.
-        const bantUstu = Y * (1 - METIN_BANDI);
-        const gr = ctx.createLinearGradient(0, bantUstu, 0, Y);
-        gr.addColorStop(0.00, "rgba(26,18,6,0)");
-        gr.addColorStop(0.35, "rgba(26,18,6,0.14)");
-        gr.addColorStop(0.65, "rgba(26,18,6,0.36)");
-        gr.addColorStop(1.00, "rgba(26,18,6,0.58)");
-        ctx.fillStyle = gr;
-        ctx.fillRect(0, bantUstu, G, Y - bantUstu);
+        // ── Yumuşak alt geçiş (KUTU DEĞİL) — yoğunluğu ayarlanabilir ──
+        if (st.bant > 0) {
+          const ust = Y * (1 - st.bantYuksekligi / 100);
+          const en = st.bant / 100;
+          const gr = ctx.createLinearGradient(0, ust, 0, Y);
+          gr.addColorStop(0.00, "rgba(26,18,6,0)");
+          gr.addColorStop(0.35, `rgba(26,18,6,${(en * 0.24).toFixed(3)})`);
+          gr.addColorStop(0.65, `rgba(26,18,6,${(en * 0.62).toFixed(3)})`);
+          gr.addColorStop(1.00, `rgba(26,18,6,${en.toFixed(3)})`);
+          ctx.fillStyle = gr;
+          ctx.fillRect(0, ust, G, Y - ust);
+        }
 
-        // ── 2 · Metin ──
         if (metniVar) {
-          const maxG = G * 0.84;
-          let punto = Math.round(G * 0.034);
-          const enKucuk = Math.round(G * 0.023);
-          let satirlar = [];
-          while (punto >= enKucuk) {
-            ctx.font = `${punto}px Capriola, Georgia, serif`;
-            satirlar = metniSatirlaraBol(ctx, metin, maxG);
-            if (satirlar.length <= 4) break;
-            punto -= 1;
-          }
-          ctx.font = `${punto}px Capriola, Georgia, serif`;
-          if (!satirlar.length) satirlar = metniSatirlaraBol(ctx, metin, maxG);
-
-          const satirAraligi = punto * 1.42;
+          const { punto, satirlar, satirAraligi } = metinYerlesimiHesapla(ctx, metin, G, st);
           const blok = satirlar.length * satirAraligi;
-          const ilkSatirY = Y - numaraSeridi - blok + satirAraligi * 0.76;
+          // st.y metin bloğunun MERKEZİ — sürükleyerek konumlandırma böyle
+          // daha sezgisel oluyor (kutuyu tutup taşıyorsun, üst kenarını değil).
+          const merkezY = Y * (st.y / 100);
+          const ilkSatirY = merkezY - blok / 2 + satirAraligi * 0.78;
+          const x = G * (st.x / 100);
 
-          ctx.textAlign = "center";
-          ctx.fillStyle = "#fffdf5";
-          ctx.shadowColor = "rgba(0,0,0,0.62)";
-          ctx.shadowBlur = Math.max(3, punto * 0.42);
+          ctx.textAlign = st.hiza;
+          ctx.fillStyle = st.renk;
+          ctx.shadowColor = `rgba(0,0,0,${(st.golge / 100).toFixed(2)})`;
+          ctx.shadowBlur = Math.max(3, punto * 0.42 * (st.golge / 62));
           ctx.shadowOffsetY = Math.max(1, punto * 0.05);
-          satirlar.forEach((s, i) => ctx.fillText(s, G / 2, ilkSatirY + i * satirAraligi));
+          satirlar.forEach((sr, i) => ctx.fillText(sr, x, ilkSatirY + i * satirAraligi));
           ctx.shadowColor = "transparent"; ctx.shadowBlur = 0; ctx.shadowOffsetY = 0;
         }
 
-        // ── 3 · Sayfa numarası — kendi şeridinde, metne girmez ──
-        if (sayfaNo) {
+        if (sayfaNo && st.sayfaNoGoster) {
           ctx.textAlign = "center";
           ctx.font = `${Math.round(G * 0.019)}px Capriola, Georgia, serif`;
           ctx.fillStyle = "rgba(255,253,245,0.78)";
@@ -4239,35 +4289,14 @@ function KitapStudyo({ authFetch, token }) {
           ctx.fillText(String(sayfaNo), G / 2, Y - numaraSeridi * 0.34);
           ctx.shadowColor = "transparent"; ctx.shadowBlur = 0;
         }
-        resolve(canvas.toDataURL("image/jpeg", 0.86).split(",")[1]);
+        // Baskı çıktısı: 0.86 → 0.92. 1920 px'lik sayfada JPEG artefaktı
+        // basımda görünür hâle geliyordu.
+        resolve(canvas.toDataURL("image/jpeg", 0.92).split(",")[1]);
       };
       img.src = "data:image/png;base64," + hamB64;
     });
   };
 
-  // YENİDEN YAZILDI (16 Ağu 2026, Bedirhan: "sol sayfa ve sağ sayfa
-  // devamlılığı yok, tek 1 görsel gibi görünmeli ve tam devam gibi
-  // görünmeli"):
-  //
-  // Bir önceki tur İKİ AYRI 1024x1024 görsel üretiyordu (sol ve sağ ayrı
-  // çağrı), sağ sayfaya sol görseli referans vererek sürekliliği yakalamaya
-  // çalışıyordu. ÇALIŞMADI ve çalışması da mümkün değildi: görsel modeli her
-  // çağrıda sahneyi SIFIRDAN çiziyor, "bu sahnenin sağ yarısını göster"
-  // talimatını uygulamıyor — sahnenin tamamını yeniden kuruyor. Üstüne sol
-  // görselin referans verilmesi modeli birebir kopyaya İTİYORDU. Sonuç:
-  // yan yana iki neredeyse aynı resim, ortada hiçbir devamlılık yok.
-  //
-  // Süreklilik matematiksel olarak tek bir üretimden gelmek zorunda. Bu
-  // yüzden TEK GENİŞ (1536x1024) görsel üretilip ortadan ikiye bölünüyor —
-  // ufuk çizgisi, ışık, renk ve karakterler cilt payında kesintisiz devam
-  // ediyor, çünkü fiziksel olarak aynı resmin iki parçası.
-  //
-  // ÇÖZÜNÜRLÜK BEDELİ (açıkça yazıyorum): her sayfa 768x1024 oluyor, iki ayrı
-  // kare üretimdeki 1024x1024'ten düşük. Ama modelin izin verdiği en geniş
-  // boyut 1536x1024 ve süreklilik ancak tek üretimle mümkün — ikisi aynı anda
-  // olmuyor. Not: 1024x1024 de zaten baskı çözünürlüğü DEĞİL (20 cm'lik bir
-  // sayfa 300 dpi'da ~2360 px ister). Baskı için görseller sonradan ayrıca
-  // büyütülmeli; bu, seçilen yöntemden bağımsız bir sınır.
   const spreadUret = async (idx, hedefId) => {
     hedefId = hedefId || seciliId;
     const p = projeOku(hedefId);
@@ -4277,52 +4306,175 @@ function KitapStudyo({ authFetch, token }) {
     try {
       const { solSayfa, sagSayfa } = spreadNumaralariGetir(idx);
 
-      // Metin artık beyaz bir kutunun içinde değil, doğrudan illüstrasyonun
-      // üstünde duruyor. Bunun okunaklı olması için modelin o alanı SAKİN
-      // bırakması gerekiyor — yani metne yer, kompozisyonun bir parçası
-      // olarak baştan planlanıyor ("görsel metnin üstüne inşa edilmiş gibi").
-      // SEÇİLEN DÜZEN — KONSEPT 1 ("tam kanama, yazı resmin üstünde").
-      // Bu düzen kompozisyondan bir şey TALEP EDER: alt bantta sakin alan.
-      // Metin oraya, kutu olmadan oturacak. Model bu alanı bırakmazsa yazı
-      // kalabalığın içinde kaybolur — o yüzden prompt'ta açıkça isteniyor.
-      // (Canvas tarafındaki yumuşak koyulaşma ikinci güvence; ilk güvence bu.)
       const metinAlaniNotu = (s.solMetinsiz && s.sagMetinsiz)
         ? ""
-        : "\n\nMETİN ALANI (ÖNEMLİ): Görselin ALT %28'lik bandında, hem sol hem sağ yarıda, SAKİN ve AZ DETAYLI bir alan bırak — düz toprak, yumuşak çayır, sığ su, gölgeli zemin, sisli ön plan gibi. Bu bandın üzerine sonradan kitap metni yerleştirilecek. Oraya karakter yüzü, gözler, keskin kontrast, yoğun desen veya hikâyenin kritik detayı KOYMA. Bu bant boş bir şerit ya da kesilmiş bir alan gibi DURMASIN; manzaranın doğal ve yumuşak bir devamı olsun, ışığı yukarıya göre biraz daha alçak olsun.";
+        : "\n\nMETİN ALANI (ÖNEMLİ): Görselin ALT %28'lik bandında, hem sol hem sağ yarıda, SAKİN ve AZ DETAYLI bir alan bırak — düz toprak, yumuşak çayır, sığ su, gölgeli zemin, sisli ön plan gibi. Bu bandın üzerine sonradan kitap metni yerleştirilecek. Oraya karakter yüzü, gözler, keskin kontrast, yoğun desen veya hikâyenin kritik detayı KOYMA. Bu bant boş bir şerit ya da kesilmiş bir alan gibi DURMASIN; manzaranın doğal ve yumuşak bir devamı olsun.";
 
       const spreadSahne =
         `${s.sahne.trim()}\n\n` +
         "BU TEK BİR KESİNTİSİZ ÇİFT SAYFA İLLÜSTRASYONUDUR (double-page spread). " +
-        "Görsel tam ortadan ikiye bölünüp bir kitabın sol ve sağ sayfası olarak basılacak. " +
-        "Bu yüzden: ufuk çizgisi, zemin, gökyüzü, ışık yönü ve renk geçişleri soldan sağa KESİNTİSİZ devam etmeli — " +
+        "Görsel tam ortadan ikiye bölünüp bir kitabın sol ve sağ sayfası olarak basılacak; " +
+        "her sayfa KARE (20x20 cm) olacak, yani kompozisyon 2:1 oranında geniş bir alandır. " +
+        "Ufuk çizgisi, zemin, gökyüzü, ışık yönü ve renk geçişleri soldan sağa KESİNTİSİZ devam etmeli — " +
         "iki ayrı sahne yan yana konmuş gibi DEĞİL, tek bir geniş manzara gibi. " +
         "Tam ortada (cilt payı) ana karakterin yüzü, gözü veya hikâyenin kritik detayı BULUNMASIN; " +
         "orta bölge manzaranın sakin bir parçası olsun. " +
-        "Kompozisyon geniş açılı ve panoramik olsun; yakın plan portre değil. " +
+        "Her iki yarı da kendi başına dengeli bir kare kompozisyon oluşturmalı. " +
         "Görselin içinde HİÇBİR yazı, harf, rakam, imza veya filigran olmasın." +
         metinAlaniNotu;
 
-      // TEK üretim → süreklilik garantili (aynı resmin iki parçası).
+      // BASKI ÇÖZÜNÜRLÜĞÜ (16 Ağu 2026, Bedirhan: "baskıya uygun olmaz,
+      // her sayfa 20x20 olmalı"):
+      //
+      // Önceki boyut 1536x1024'tü; ortadan bölününce sayfa başına 768 px
+      // kalıyordu — 20 cm'lik bir sayfada 98 dpi, yani baskıda kullanılamaz.
+      //
+      // gpt-image-2 artık 3840x2160'a kadar serbest boyut kabul ediyor.
+      // 3840x1920 seçildi: tam 2:1, yani ortadan bölününce iki adet
+      // 1920x1920 KARE sayfa çıkıyor — 20x20 cm'de 244 dpi.
+      //
+      // Neden 300 dpi değil: 300 dpi 2363 px/sayfa, yani 4726 px'lik bir
+      // yayılım ister; model 3840'ta duruyor. 244 dpi bu modelden
+      // SÜREKLİLİĞİ BOZMADAN alınabilecek en yüksek değer. Sayfaları ayrı
+      // ayrı üretmek 2160x2160'a (274 dpi) çıkarırdı ama süreklilik giderdi —
+      // asıl şikâyet oydu, o yüzden tercih edilmedi.
+      const YAYILIM_BOYUTU = p.yayilimBoyutu || "3840x1920";
+
       const genisUrl = await gorselIsteYenidenDeneyerek({
         karakterTanimi: p.stilTanimi, sahne: spreadSahne, model: p.model,
-        kalite: p.kalite, boyut: "1536x1024", referansGorseller: referansHavuzuTopla(hedefId),
+        kalite: p.kalite, boyut: YAYILIM_BOYUTU, referansGorseller: referansHavuzuTopla(hedefId),
       });
       const genisB64 = await urlDenB64Al(genisUrl);
       const { sol: solHamB64, sag: sagHamB64 } = await gorseliIkiyeBol(genisB64);
 
-      const solFinal = await sayfaMetniBindir(solHamB64, s.solMetinsiz ? "" : s.solMetin, solSayfa);
-      const sagFinal = await sayfaMetniBindir(sagHamB64, s.sagMetinsiz ? "" : s.sagMetin, sagSayfa);
+      // HAM GÖRSELLER ARTIK SAKLANIYOR (önceden atılıyordu).
+      // Sebep: metin görselin İÇİNE basılıyor. Ham kopya olmadan puntoyu,
+      // rengi ya da konumu değiştirmek için sahnenin YENİDEN ÜRETİLMESİ
+      // gerekiyordu — hem para harcıyor hem de resim değişiyordu. Artık
+      // ham kare bir kez üretiliyor, tipografi üstüne istendiği kadar
+      // yeniden diziliyor.
+      const solHamUrl = await gorselYukle(solHamB64, "ham-sayfa");
+      const sagHamUrl = await gorselYukle(sagHamB64, "ham-sayfa");
+
+      const stil = s.metinStili || p.metinStili;
+      const solFinal = await sayfaMetniBindir(solHamB64, s.solMetinsiz ? "" : s.solMetin, solSayfa, stil);
+      const sagFinal = await sayfaMetniBindir(sagHamB64, s.sagMetinsiz ? "" : s.sagMetin, sagSayfa, stil);
       const solUrl = await gorselYukle(solFinal, "sayfa");
       const sagUrl = await gorselYukle(sagFinal, "sayfa");
-      // p.spreadler yerine EN GÜNCEL kopyayı (projeOku ile) tekrar okuyoruz —
-      // arka planda üretim sırasında bu spread'e ait metin/sahne başka bir
-      // adımda değişmiş olabilir.
+
       const guncelP = projeOku(hedefId);
-      const yeniSpreadler = guncelP.spreadler.map((sp, i) => i === idx ? { ...sp, solGorselUrl: solUrl, sagGorselUrl: sagUrl } : sp);
+      const yeniSpreadler = guncelP.spreadler.map((sp, i) => i === idx
+        ? { ...sp, solGorselUrl: solUrl, sagGorselUrl: sagUrl, solHamUrl, sagHamUrl }
+        : sp);
       const guncelMeta = { ...guncelP, spreadler: yeniSpreadler };
       await projeGuncelle(hedefId, guncelMeta);
     } catch (err) { if (hedefId === seciliId) setHata("Hata: " + err.message); }
     finally { if (hedefId === seciliId) setSpreadUretiliyorIdx(null); }
+  };
+
+  // Metni YENİDEN DİZ — sahneyi yeniden üretmeden.
+  // Ham görseller saklandığı için AI'ya hiç gidilmiyor: para harcanmıyor,
+  // resim değişmiyor, saniyeler içinde bitiyor. Stil düzenleyicideki
+  // "Uygula" bunu çağırır.
+  // ═══════════════════════════════════════════════════════════════
+  // METİN STİLİ DÜZENLEYİCİ — canlı önizleme, sürükle-bırak konumlandırma
+  //
+  // Neden HTML önizleme, canvas değil: her ayar değişikliğinde 1920x1920'lik
+  // bir canvas'ı yeniden çizmek ağır ve takılmalı olurdu. Önizleme, ham
+  // görselin üstüne konumlanmış bir <div> — anında tepki veriyor. "Uygula"ya
+  // basınca AYNI değerlerle canvas'ta baskı çıktısı üretiliyor.
+  //
+  // Yerleşim hesabı iki tarafta da metinYerlesimiHesapla ile yapılıyor, yani
+  // önizlemede gördüğün satır bölünmesi ve punto çıktıdakiyle aynı.
+  const MetinStiliDuzenleyici = ({ spread, sayfaNo, stil, setStil, tarafAdi }) => {
+    const kutuRef = React.useRef(null);
+    const [surukluyor, setSurukluyor] = React.useState(false);
+    const st = metinStiliCoz(stil);
+    const metin = tarafAdi === "sol"
+      ? (spread.solMetinsiz ? "" : spread.solMetin)
+      : (spread.sagMetinsiz ? "" : spread.sagMetin);
+    const hamUrl = tarafAdi === "sol" ? spread.solHamUrl : spread.sagHamUrl;
+
+    // Önizlemedeki punto/satır bölünmesi, çıktıdakiyle birebir aynı hesaptan
+    // gelsin diye ölçüm canvas'ı kullanılıyor.
+    const yerlesim = React.useMemo(() => {
+      if (!metin?.trim()) return null;
+      const c = document.createElement("canvas");
+      const ctx = c.getContext("2d");
+      return metinYerlesimiHesapla(ctx, metin, 1000, st);
+    }, [metin, st.punto, st.enKucukPunto, st.otomatikPunto, st.genislik, st.maksSatir, st.satirAraligi]);
+
+    const surukle = (e) => {
+      if (!surukluyor || !kutuRef.current) return;
+      const r = kutuRef.current.getBoundingClientRect();
+      const nokta = e.touches ? e.touches[0] : e;
+      const x = Math.max(4, Math.min(96, ((nokta.clientX - r.left) / r.width) * 100));
+      const y = Math.max(6, Math.min(96, ((nokta.clientY - r.top) / r.height) * 100));
+      setStil({ ...st, x: Math.round(x), y: Math.round(y) });
+    };
+
+    return (
+      <div
+        ref={kutuRef}
+        onMouseMove={surukle} onMouseUp={() => setSurukluyor(false)} onMouseLeave={() => setSurukluyor(false)}
+        onTouchMove={surukle} onTouchEnd={() => setSurukluyor(false)}
+        style={{ position: "relative", width: "100%", aspectRatio: "1 / 1", borderRadius: 8,
+                 overflow: "hidden", background: "#2a2118", userSelect: "none",
+                 // containerType BURADA olmalı: cqw birimi en yakın ÜST
+                 // kapsayıcıya göre ölçülür, kendi üstünde tanımlıysa çalışmaz.
+                 containerType: "inline-size",
+                 cursor: surukluyor ? "grabbing" : "default" }}>
+        {hamUrl && <img src={hamUrl} alt="" draggable={false}
+          style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }} />}
+        {st.bant > 0 && (
+          <div style={{ position: "absolute", left: 0, right: 0, bottom: 0, height: `${st.bantYuksekligi}%`,
+            background: `linear-gradient(to bottom, rgba(26,18,6,0) 0%, rgba(26,18,6,${(st.bant / 100 * 0.24).toFixed(3)}) 35%, rgba(26,18,6,${(st.bant / 100 * 0.62).toFixed(3)}) 65%, rgba(26,18,6,${(st.bant / 100).toFixed(3)}) 100%)` }} />
+        )}
+        {yerlesim && (
+          <div
+            onMouseDown={() => setSurukluyor(true)} onTouchStart={() => setSurukluyor(true)}
+            title="Sürükleyerek taşı"
+            style={{
+              position: "absolute", left: `${st.x}%`, top: `${st.y}%`,
+              transform: `translate(${st.hiza === "center" ? "-50%" : st.hiza === "right" ? "-100%" : "0"}, -50%)`,
+              width: `${st.genislik}%`, textAlign: st.hiza, cursor: "grab",
+              color: st.renk, fontFamily: "Capriola, Georgia, serif",
+              fontSize: `${(yerlesim.punto / 1000) * 100}cqw`,
+              lineHeight: st.satirAraligi,
+              textShadow: `0 1px 3px rgba(0,0,0,${(st.golge / 100).toFixed(2)}), 0 0 10px rgba(0,0,0,${(st.golge / 160).toFixed(2)})`,
+              outline: surukluyor ? "1px dashed rgba(255,255,255,.65)" : "none",
+            }}>
+            {yerlesim.satirlar.map((sr, i) => <div key={i}>{sr}</div>)}
+          </div>
+        )}
+        {st.sayfaNoGoster && (
+          <div style={{ position: "absolute", left: 0, right: 0, bottom: "1.6%", textAlign: "center",
+            color: "rgba(255,253,245,.78)", fontFamily: "Capriola, Georgia, serif", fontSize: "1.9cqw",
+            textShadow: "0 1px 2px rgba(0,0,0,.5)" }}>{sayfaNo}</div>
+        )}
+      </div>
+    );
+  };
+
+  const spreadMetniYenidenDiz = async (idx, hedefId, stilUstuneYaz) => {
+    hedefId = hedefId || seciliId;
+    const p = projeOku(hedefId);
+    const s = p.spreadler[idx];
+    if (!s.solHamUrl || !s.sagHamUrl) {
+      setHata("Bu sayfa çiftinin ham görseli yok — eski bir üretim. Metni yeniden dizmek için bir kez daha üretilmeli.");
+      return false;
+    }
+    const { solSayfa, sagSayfa } = spreadNumaralariGetir(idx);
+    const stil = stilUstuneYaz || s.metinStili || p.metinStili;
+    const [solHamB64, sagHamB64] = await Promise.all([urlDenB64Al(s.solHamUrl), urlDenB64Al(s.sagHamUrl)]);
+    const solFinal = await sayfaMetniBindir(solHamB64, s.solMetinsiz ? "" : s.solMetin, solSayfa, stil);
+    const sagFinal = await sayfaMetniBindir(sagHamB64, s.sagMetinsiz ? "" : s.sagMetin, sagSayfa, stil);
+    const [solUrl, sagUrl] = await Promise.all([gorselYukle(solFinal, "sayfa"), gorselYukle(sagFinal, "sayfa")]);
+    const guncelP = projeOku(hedefId);
+    const yeniSpreadler = guncelP.spreadler.map((sp, i) => i === idx
+      ? { ...sp, solGorselUrl: solUrl, sagGorselUrl: sagUrl, metinStili: stil } : sp);
+    await projeGuncelle(hedefId, { ...guncelP, spreadler: yeniSpreadler });
+    return true;
   };
 
   const spreadMetniYenidenYerlestir = async (idx) => {
@@ -4502,10 +4654,60 @@ function KitapStudyo({ authFetch, token }) {
     } catch { setHata("Sunucuya ulaşılamadı."); }
   };
 
+  // EKLENDİ (16 Ağu 2026): ESC ile tam ekranı kapat.
+  React.useEffect(() => {
+    if (!buyukGorsel) return;
+    const kapat = (e) => { if (e.key === "Escape") setBuyukGorsel(null); };
+    window.addEventListener("keydown", kapat);
+    return () => window.removeEventListener("keydown", kapat);
+  }, [buyukGorsel]);
+
   return (
     <div style={stil.sayfa}>
       <h2 style={stil.baslik}>🌈 MST Çocuk Stüdyo</h2>
       <p style={stil.alt}>Kitap resim atölyesi — projeler artık kalıcı, her cihazdan erişilebilir.</p>
+
+      {/* ── TAM EKRAN GÖRÜNTÜLEYİCİ ──────────────────────────────
+          Baskı kalitesi küçük önizlemeden değerlendirilemiyordu.
+          İki mod var: "sığdır" (tüm sayfayı gör) ve "1:1" (gerçek
+          piksel — asıl kalite kontrolü bu, tarayıcı ölçekleme yapmaz). */}
+      {buyukGorsel && (
+        <div onClick={() => setBuyukGorsel(null)}
+          style={{ position: "fixed", inset: 0, zIndex: 9999, background: "rgba(10,9,7,.95)",
+                   display: "flex", flexDirection: "column", cursor: "zoom-out" }}>
+          <div onClick={(e) => e.stopPropagation()}
+            style={{ display: "flex", alignItems: "center", gap: 14, padding: "12px 18px",
+                     color: "#efe9da", fontSize: 13, cursor: "default", flexShrink: 0,
+                     borderBottom: "1px solid rgba(255,255,255,.1)" }}>
+            <b style={{ fontFamily: "'Fredoka', sans-serif" }}>{buyukGorsel.baslik}</b>
+            <span style={{ color: "#a09a89" }}>
+              {buyukGorsel.olcu ? `${buyukGorsel.olcu.g}×${buyukGorsel.olcu.y} px · 20×20 cm'de ${Math.round(buyukGorsel.olcu.g / (20 / 2.54))} dpi` : "ölçülüyor…"}
+            </span>
+            <button onClick={() => setBuyukGorsel({ ...buyukGorsel, birebir: !buyukGorsel.birebir })}
+              style={{ padding: "5px 12px", fontSize: 12, borderRadius: 7, cursor: "pointer", color: "#efe9da",
+                       border: "1px solid rgba(255,255,255,.25)",
+                       background: buyukGorsel.birebir ? "rgba(244,168,62,.2)" : "transparent" }}>
+              {buyukGorsel.birebir ? "Sığdır" : "1:1 gerçek piksel"}
+            </button>
+            <a href={buyukGorsel.url} target="_blank" rel="noreferrer"
+              style={{ color: "#9fb6cd", fontSize: 12 }}>Yeni sekmede aç</a>
+            <span style={{ marginLeft: "auto", color: "#8e897a", fontSize: 12 }}>ESC ile kapat</span>
+          </div>
+          <div style={{ flex: 1, overflow: "auto", display: "flex",
+                        alignItems: buyukGorsel.birebir ? "flex-start" : "center",
+                        justifyContent: buyukGorsel.birebir ? "flex-start" : "center", padding: 18 }}>
+            <img src={buyukGorsel.url} alt=""
+              onClick={(e) => e.stopPropagation()}
+              onLoad={(e) => {
+                const g = e.target.naturalWidth, y = e.target.naturalHeight;
+                setBuyukGorsel((b) => (b && b.url === buyukGorsel.url && !b.olcu) ? { ...b, olcu: { g, y } } : b);
+              }}
+              style={buyukGorsel.birebir
+                ? { width: "auto", maxWidth: "none", imageRendering: "auto", cursor: "default" }
+                : { maxWidth: "100%", maxHeight: "100%", objectFit: "contain", cursor: "default" }} />
+          </div>
+        </div>
+      )}
 
       {hata && <div style={{ background: "#FDECEA", color: "#C0392B", padding: "10px 14px", borderRadius: 10, marginBottom: 16, fontSize: 13 }}>{hata}</div>}
 
@@ -4942,14 +5144,165 @@ function KitapStudyo({ authFetch, token }) {
                             </div>
                             {s.solGorselUrl && (
                               <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
-                                <div style={{ width: "calc(50% - 3px)" }}>
-                                  <img src={s.solGorselUrl} style={{ width: "100%", borderRadius: 8 }} />
-                                  <span onClick={() => gorselIndir(s.solGorselUrl, `sayfa-${solSayfa}`)} style={{ fontSize: 11, color: "#3E8ED0", cursor: "pointer", display: "inline-block", marginTop: 4 }}>⬇ İndir</span>
-                                </div>
-                                <div style={{ width: "calc(50% - 3px)" }}>
-                                  <img src={s.sagGorselUrl} style={{ width: "100%", borderRadius: 8 }} />
-                                  <span onClick={() => gorselIndir(s.sagGorselUrl, `sayfa-${sagSayfa}`)} style={{ fontSize: 11, color: "#3E8ED0", cursor: "pointer", display: "inline-block", marginTop: 4 }}>⬇ İndir</span>
-                                </div>
+                                {[["sol", s.solGorselUrl, solSayfa], ["sag", s.sagGorselUrl, sagSayfa]].map(([taraf, url, no]) => (
+                                  <div key={taraf} style={{ width: "calc(50% - 3px)" }}>
+                                    {/* Tıklayınca tam ekran — baskı kalitesi küçük
+                                        önizlemeden değerlendirilemiyordu. */}
+                                    <img src={url} title="Tam ekran açmak için tıkla"
+                                      onClick={() => setBuyukGorsel({ url, baslik: `Sayfa ${no}` })}
+                                      style={{ width: "100%", borderRadius: 8, cursor: "zoom-in", display: "block" }} />
+                                    <div style={{ display: "flex", gap: 10, marginTop: 4 }}>
+                                      <span onClick={() => setBuyukGorsel({ url, baslik: `Sayfa ${no}` })}
+                                        style={{ fontSize: 11, color: "#3E8ED0", cursor: "pointer" }}>⤢ Tam ekran</span>
+                                      <span onClick={() => gorselIndir(url, `sayfa-${no}`)}
+                                        style={{ fontSize: 11, color: "#3E8ED0", cursor: "pointer" }}>⬇ İndir</span>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+
+                            {/* ── TASARIM DÜZENLEYİCİ ────────────────────────── */}
+                            {s.solGorselUrl && (
+                              <div style={{ marginTop: 10 }}>
+                                {stilDuzenleIdx !== idx ? (
+                                  <button style={{ ...stil.buton, fontSize: 12, background: "#5B7FA6" }}
+                                    onClick={() => { setStilDuzenleIdx(idx); setStilTaslak(metinStiliCoz(s.metinStili || seciliProje.metinStili)); }}>
+                                    ✎ Yazı Tasarımını Düzenle
+                                  </button>
+                                ) : (
+                                  <div style={{ background: "#221d16", borderRadius: 12, padding: 14, color: "#efe9da" }}>
+                                    {!s.solHamUrl ? (
+                                      <div style={{ fontSize: 12.5, lineHeight: 1.6 }}>
+                                        Bu sayfa çifti, ham görsellerin saklanmaya başlamasından <b>önce</b> üretilmiş.
+                                        Yazıyı yeniden dizebilmek için önce <b>“Bu Sayfa Çiftini Üret”</b>e bir kez daha basılmalı.
+                                        <div style={{ marginTop: 8 }}>
+                                          <span onClick={() => setStilDuzenleIdx(null)} style={{ color: "#9fb6cd", cursor: "pointer", fontSize: 12 }}>Kapat</span>
+                                        </div>
+                                      </div>
+                                    ) : (
+                                      <>
+                                        <div style={{ fontSize: 12, color: "#a09a89", marginBottom: 10 }}>
+                                          Yazıyı <b style={{ color: "#efe9da" }}>tutup sürükleyerek</b> taşıyabilirsin. Değişiklikler anında önizlemede görünür;
+                                          “Uygula” demeden baskı çıktısı değişmez. <b style={{ color: "#efe9da" }}>Resim yeniden üretilmez</b> — AI çağrısı yok, ücret yok.
+                                        </div>
+                                        <div style={{ display: "flex", gap: 8 }}>
+                                          {["sol", "sag"].map((taraf) => (
+                                            <div key={taraf} style={{ width: "calc(50% - 4px)" }}>
+                                              <MetinStiliDuzenleyici spread={s} tarafAdi={taraf}
+                                                sayfaNo={taraf === "sol" ? solSayfa : sagSayfa}
+                                                stil={stilTaslak} setStil={setStilTaslak} />
+                                            </div>
+                                          ))}
+                                        </div>
+
+                                        {(() => {
+                                          const st = metinStiliCoz(stilTaslak);
+                                          const g = (alan, deger) => setStilTaslak({ ...st, [alan]: deger });
+                                          const kaydirici = (etiket, alan, min, max, adim, birim) => (
+                                            <label style={{ display: "block", fontSize: 11.5, color: "#c9c2ae", marginTop: 9 }}>
+                                              <span style={{ display: "flex", justifyContent: "space-between" }}>
+                                                <span>{etiket}</span>
+                                                <span style={{ color: "#8e897a" }}>{st[alan]}{birim || ""}</span>
+                                              </span>
+                                              <input type="range" min={min} max={max} step={adim} value={st[alan]}
+                                                onChange={(e) => g(alan, Number(e.target.value))}
+                                                style={{ width: "100%", accentColor: "#F4A83E" }} />
+                                            </label>
+                                          );
+                                          return (
+                                            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 16px", marginTop: 10 }}>
+                                              <div>
+                                                <label style={{ fontSize: 11.5, color: "#c9c2ae", display: "flex", alignItems: "center", gap: 6 }}>
+                                                  <input type="checkbox" checked={st.otomatikPunto} onChange={(e) => g("otomatikPunto", e.target.checked)} />
+                                                  Punto otomatik küçülsün (uzun metin sığsın)
+                                                </label>
+                                                {kaydirici(st.otomatikPunto ? "Punto — üst sınır" : "Punto", "punto", 1.6, 6, 0.1, "%")}
+                                                {st.otomatikPunto && kaydirici("Punto — alt sınır", "enKucukPunto", 1.2, 4, 0.1, "%")}
+                                                {kaydirici("Metin kutusu genişliği", "genislik", 40, 96, 1, "%")}
+                                                {kaydirici("Satır aralığı", "satirAraligi", 1, 2.2, 0.02, "×")}
+                                                <label style={{ display: "block", fontSize: 11.5, color: "#c9c2ae", marginTop: 9 }}>
+                                                  Hizalama
+                                                  <div style={{ display: "flex", gap: 5, marginTop: 4 }}>
+                                                    {[["left", "Sola"], ["center", "Ortala"], ["right", "Sağa"]].map(([v, ad]) => (
+                                                      <button key={v} onClick={() => g("hiza", v)}
+                                                        style={{ flex: 1, padding: "5px 0", fontSize: 11, borderRadius: 6, cursor: "pointer",
+                                                          border: st.hiza === v ? "1px solid #F4A83E" : "1px solid rgba(255,255,255,.16)",
+                                                          background: st.hiza === v ? "rgba(244,168,62,.16)" : "transparent", color: "#efe9da" }}>{ad}</button>
+                                                    ))}
+                                                  </div>
+                                                </label>
+                                              </div>
+                                              <div>
+                                                <label style={{ display: "block", fontSize: 11.5, color: "#c9c2ae" }}>
+                                                  Yazı rengi
+                                                  <div style={{ display: "flex", gap: 5, marginTop: 4, alignItems: "center" }}>
+                                                    {["#fffdf5", "#f7e9c8", "#20201a", "#7a2f1e"].map((c) => (
+                                                      <span key={c} onClick={() => g("renk", c)} title={c}
+                                                        style={{ width: 22, height: 22, borderRadius: 5, background: c, cursor: "pointer",
+                                                          border: st.renk === c ? "2px solid #F4A83E" : "1px solid rgba(255,255,255,.25)" }} />
+                                                    ))}
+                                                    <input type="color" value={st.renk} onChange={(e) => g("renk", e.target.value)}
+                                                      style={{ width: 30, height: 24, background: "none", border: "none", cursor: "pointer" }} />
+                                                  </div>
+                                                </label>
+                                                {kaydirici("Yazı gölgesi (okunurluk)", "golge", 0, 100, 1, "")}
+                                                {kaydirici("Alt geçiş yoğunluğu", "bant", 0, 100, 1, "")}
+                                                {kaydirici("Alt geçiş yüksekliği", "bantYuksekligi", 8, 60, 1, "%")}
+                                                {kaydirici("Dikey konum", "y", 6, 96, 1, "%")}
+                                                {kaydirici("Yatay konum", "x", 4, 96, 1, "%")}
+                                                <label style={{ fontSize: 11.5, color: "#c9c2ae", display: "flex", alignItems: "center", gap: 6, marginTop: 9 }}>
+                                                  <input type="checkbox" checked={st.sayfaNoGoster} onChange={(e) => g("sayfaNoGoster", e.target.checked)} />
+                                                  Sayfa numarası görünsün
+                                                </label>
+                                              </div>
+                                            </div>
+                                          );
+                                        })()}
+
+                                        <div style={{ display: "flex", gap: 8, marginTop: 14, flexWrap: "wrap", alignItems: "center" }}>
+                                          <button style={{ ...stil.buton, fontSize: 12, ...(stilUyguluyor ? stil.butonPasif : {}) }}
+                                            disabled={stilUyguluyor}
+                                            onClick={async () => {
+                                              setStilUyguluyor(true); setHata("");
+                                              try { await spreadMetniYenidenDiz(idx, seciliId, stilTaslak); setStilDuzenleIdx(null); }
+                                              catch (e) { setHata("Yazı yeniden dizilemedi: " + e.message); }
+                                              finally { setStilUyguluyor(false); }
+                                            }}>
+                                            {stilUyguluyor ? "Uygulanıyor..." : "Uygula (bu sayfa çifti)"}
+                                          </button>
+                                          <button style={{ ...stil.buton, fontSize: 12, background: "#5B7FA6", ...(stilUyguluyor ? stil.butonPasif : {}) }}
+                                            disabled={stilUyguluyor}
+                                            onClick={async () => {
+                                              // TÜM KİTABA UYGULA — "bazısının puntosu büyük bazısının küçük"
+                                              // şikâyetinin asıl çözümü bu: tek bir stil, bütün sayfalarda.
+                                              const p0 = projeOku(seciliId);
+                                              const hedefler = (p0.spreadler || []).map((sp, i) => ({ sp, i })).filter(({ sp }) => sp.solHamUrl);
+                                              const hamsiz = (p0.spreadler || []).length - hedefler.length;
+                                              if (!window.confirm(
+                                                `Bu stil ${hedefler.length} sayfa çiftine uygulanacak.` +
+                                                (hamsiz ? `\n\n${hamsiz} sayfa çifti ATLANACAK — ham görselleri yok (eski üretim), önce yeniden üretilmeleri gerekiyor.` : "") +
+                                                `\n\nResimler yeniden üretilmez, yalnız yazı yeniden dizilir.`)) return;
+                                              setStilUyguluyor(true); setHata("");
+                                              try {
+                                                await projeGuncelle(seciliId, { ...projeOku(seciliId), metinStili: stilTaslak });
+                                                for (const { i } of hedefler) await spreadMetniYenidenDiz(i, seciliId, stilTaslak);
+                                                setStilDuzenleIdx(null);
+                                                if (hamsiz) setHata(`Bitti. ${hamsiz} sayfa çifti atlandı — ham görselleri yok, yeniden üretilmeleri gerekiyor.`);
+                                              } catch (e) { setHata("Toplu uygulama yarıda kaldı: " + e.message); }
+                                              finally { setStilUyguluyor(false); }
+                                            }}>
+                                            Tüm kitaba uygula
+                                          </button>
+                                          <span onClick={() => setStilTaslak({ ...VARSAYILAN_METIN_STILI })}
+                                            style={{ color: "#9fb6cd", cursor: "pointer", fontSize: 12 }}>Varsayılana dön</span>
+                                          <span onClick={() => setStilDuzenleIdx(null)}
+                                            style={{ color: "#8e897a", cursor: "pointer", fontSize: 12 }}>Vazgeç</span>
+                                        </div>
+                                      </>
+                                    )}
+                                  </div>
+                                )}
                               </div>
                             )}
                           </div>
