@@ -4157,6 +4157,15 @@ function KitapStudyo({ authFetch, token }) {
     });
   };
 
+  // DEĞİŞTİRİLDİ (16 Ağu 2026, Bedirhan'ın ısrarlı talebi: "tek 1 görsel
+  // üretilip 2ye bölünüyor, belki problem orda — sol sayfa ayrı sağ sayfa
+  // ayrı çizilmeli, baskı kalitesi için 1024x1024 kare önerilmişti"): artık
+  // tek geniş (1536x1024) görsel üretip ortadan bölmek yerine, İKİ AYRI
+  // 1024x1024 (kare) görsel üretiyor. Sağ sayfa, sürekliliği korumak için
+  // SOL SAYFANIN KENDİ GÖRSELİNİ de (diğer referanslara ek olarak) alıyor —
+  // "images/edits" çoklu referans desteğini kullanarak. İkisi de artık
+  // kendi kompozisyonunun tamamını (768px'e bölünmüş yarı değil) 1024px
+  // genişlikte alıyor — daha yüksek çözünürlük.
   const spreadUret = async (idx, hedefId) => {
     hedefId = hedefId || seciliId;
     const p = projeOku(hedefId);
@@ -4164,18 +4173,24 @@ function KitapStudyo({ authFetch, token }) {
     if (!s.sahne?.trim()) { if (hedefId === seciliId) setHata("Önce bu sayfa çifti için bir sahne yaz."); return; }
     if (hedefId === seciliId) { setSpreadUretiliyorIdx(idx); setHata(""); }
     try {
-      // EKLENDİ (16 Ağu 2026, Bedirhan'ın talebi: "çizimler geniş
-      // perspektiflerden alınmalı"): sahne metnine kompozisyon direktifi
-      // ekleniyor — yakın plan/portre değil, geniş açılı, tüm sahneyi
-      // gösteren bir kadraj isteniyor. Sadece sayfa çiftlerinde (kapak/
-      // karakter referansları için uygun değil).
-      const genisliginSahnesi = `${s.sahne.trim()}\n\nKompozisyon: geniş açılı, sahnenin tamamını gösteren bir kadraj — yakın plan veya portre değil, çift sayfaya yayılan bir manzara/ortam hissi.`;
-      const genisUrl = await gorselIsteYenidenDeneyerek({ karakterTanimi: p.stilTanimi, sahne: genisliginSahnesi, model: p.model, kalite: p.kalite, boyut: "1536x1024", referansGorseller: referansHavuzuTopla(hedefId) });
-      const genisB64 = await urlDenB64Al(genisUrl);
-      const { sol, sag } = await gorseliIkiyeBol(genisB64);
       const { solSayfa, sagSayfa } = spreadNumaralariGetir(idx);
-      const solFinal = await sayfaMetniBindir(sol, s.solMetinsiz ? "" : s.solMetin, solSayfa);
-      const sagFinal = await sayfaMetniBindir(sag, s.sagMetinsiz ? "" : s.sagMetin, sagSayfa);
+      const kompozisyonNotu = "Kompozisyon: geniş açılı, sahnenin tamamını gösteren bir kadraj — yakın plan veya portre değil, tüm sahne/ortam net görünsün.";
+
+      // 1) SOL SAYFA — tüm karakter/stil referanslarıyla, tek kare görsel.
+      const solSahne = `${s.sahne.trim()}\n\nBu, iki sayfaya yayılan bir sahnenin SOL YARISI — kompozisyonun sol tarafını göster (sahnenin başlangıcı/sol taraftaki unsurlar). ${kompozisyonNotu}`;
+      const solHamUrl = await gorselIsteYenidenDeneyerek({ karakterTanimi: p.stilTanimi, sahne: solSahne, model: p.model, kalite: p.kalite, boyut: "1024x1024", referansGorseller: referansHavuzuTopla(hedefId) });
+      const solHamB64 = await urlDenB64Al(solHamUrl);
+
+      // 2) SAĞ SAYFA — aynı referanslara EK olarak, sol sayfanın kendi
+      // görselini de referans veriyoruz (aynı sahne, ışık, karakter
+      // pozisyonlarıyla sürekliliği korumak için).
+      const sagSahne = `${s.sahne.trim()}\n\nBu, iki sayfaya yayılan bir sahnenin SAĞ YARISI — kompozisyonun sağ tarafını göster, verilen SOL SAYFA görseliyle aynı sahnenin doğrudan devamı olmalı (aynı ışık, aynı an, aynı atmosfer, karakterlerin konumları tutarlı). ${kompozisyonNotu}`;
+      const sagReferanslar = [...referansHavuzuTopla(hedefId), solHamUrl];
+      const sagHamUrl = await gorselIsteYenidenDeneyerek({ karakterTanimi: p.stilTanimi, sahne: sagSahne, model: p.model, kalite: p.kalite, boyut: "1024x1024", referansGorseller: sagReferanslar });
+      const sagHamB64 = await urlDenB64Al(sagHamUrl);
+
+      const solFinal = await sayfaMetniBindir(solHamB64, s.solMetinsiz ? "" : s.solMetin, solSayfa);
+      const sagFinal = await sayfaMetniBindir(sagHamB64, s.sagMetinsiz ? "" : s.sagMetin, sagSayfa);
       const solUrl = await gorselYukle(solFinal, "sayfa");
       const sagUrl = await gorselYukle(sagFinal, "sayfa");
       // p.spreadler yerine EN GÜNCEL kopyayı (projeOku ile) tekrar okuyoruz —
