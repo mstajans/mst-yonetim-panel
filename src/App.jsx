@@ -3657,7 +3657,21 @@ function KitapStudyo({ authFetch, token }) {
   // DEĞİŞTİRİLDİ (15 Ağu 2026, yeni akış: metin → stil → karakter → uretim):
   // ismi "sahnelereGec"ten "kitapUretimineGec"e çevrildi, artık son aşama
   // olan "uretim"e geçiyor (künye/kapak/sayfa görselleri burada üretiliyor).
+  // DÜZELTİLDİ (16 Ağu 2026, "karakter devamlılığı yok" sorunu): referans
+  // görseli olmayan (hiç "Referans Üret" yapılmamış) karakterler varsa,
+  // kitap üretimine geçmeden önce açıkça uyarıyor — çünkü sayfa üretimi
+  // sırasında bu karakterler için hiçbir görsel referansı gönderilemez,
+  // her sayfada farklı görünmelerinin asıl sebebi bu.
   const kitapUretimineGec = async () => {
+    const referanssiz = (seciliProje.karakterler || []).filter((k) => !k.gorselUrl).map((k) => k.ad);
+    if (referanssiz.length) {
+      const onay = window.confirm(
+        `Şu karakterlerin henüz referans görseli yok: ${referanssiz.join(", ")}. ` +
+        `Bu karakterler kitap üretiminde HER SAYFADA FARKLI görünecek (görsel referansı olmadığı için). ` +
+        `Önce ② Karakter aşamasında her biri için "Referans Üret"e basmanı öneririm. Yine de devam etmek istiyor musun?`
+      );
+      if (!onay) return;
+    }
     setSeciliProje({ ...seciliProje, asama: "uretim" });
     const basarili = await metaKaydet(seciliProje, "uretim");
     if (basarili) await projeAc(seciliId);
@@ -3948,12 +3962,24 @@ function KitapStudyo({ authFetch, token }) {
     return canvas.toDataURL("image/png").split(",")[1];
   };
 
-  const referansHavuzuTopla = (hedefId) => (projeOku(hedefId).karakterler || []).flatMap((k) => {
+  // DÜZELTİLDİ (16 Ağu 2026, Bedirhan'ın bildirdiği kritik kalite sorunu:
+  // "karakter devamlılığı yok, stil devamlılığı yok"): önceden SADECE
+  // karakter referans görselleri gönderiliyordu, onaylanan stilin KENDİ
+  // örnek görseli hiç referans olarak gitmiyordu — sadece metin tanımına
+  // (stilTanimi) güveniliyordu, ki bu tek başına yeterli görsel tutarlılık
+  // sağlamıyor. Artık onaylanan stil adayının görseli, listenin EN BAŞINA
+  // (en güçlü referans) ekleniyor.
+  const referansHavuzuTopla = (hedefId) => {
+    const p = projeOku(hedefId);
     const liste = [];
-    if (k.gorselUrl) liste.push(k.gorselUrl);
-    (k.ekPozlar || []).forEach((e) => liste.push(e.gorselUrl));
+    const onayliStil = (p.stilAdaylari || []).find((a) => a.etiket === p.onaylananStilEtiket);
+    if (onayliStil?.gorselUrl) liste.push(onayliStil.gorselUrl);
+    (p.karakterler || []).forEach((k) => {
+      if (k.gorselUrl) liste.push(k.gorselUrl);
+      (k.ekPozlar || []).forEach((e) => liste.push(e.gorselUrl));
+    });
     return liste;
-  });
+  };
 
   // ---- Güvenilirlik katmanı: maliyet tahmini + yeniden deneme ----
   const FIYAT_TABLOSU = {
@@ -4099,6 +4125,9 @@ function KitapStudyo({ authFetch, token }) {
   // KRİTİK ÖZELLİK (bağımsız araçta sonradan eklenen en önemli düzeltme):
   // sayfa metnini ve sayfa numarasını görsele canvas ile bindirir — önceden
   // sadece veride tutulup görsele hiç basılmıyordu.
+  // DÜZELTİLDİ (16 Ağu 2026, Bedirhan'ın talebi: "yazılar çok, punto 12 falan
+  // olmalı"): font oranı ~%6.2'den ~%3.2'ye düşürüldü, metin bandı da (%20'den
+  // %14'e) küçültüldü — daha az yer kaplasın, görsele daha uygun boyutta olsun.
   const sayfaMetniBindir = async (hamB64, metin, sayfaNo) => {
     await fontHazirla(28, "Capriola");
     return new Promise((resolve) => {
@@ -4110,17 +4139,17 @@ function KitapStudyo({ authFetch, token }) {
         ctx.drawImage(img, 0, 0);
         const metniVar = metin && metin.trim();
         if (metniVar) {
-          const bantH = img.height * 0.2;
+          const bantH = img.height * 0.14;
           ctx.fillStyle = "rgba(255,255,255,0.9)"; ctx.fillRect(0, img.height - bantH, img.width, bantH);
           ctx.fillStyle = "#18181a"; ctx.textAlign = "center";
-          ctx.font = `${Math.round(img.width * 0.062)}px Capriola, Georgia, serif`;
-          metniSar(ctx, metin.trim(), img.width / 2, img.height - bantH + img.width * 0.085, img.width * 0.86, img.width * 0.075);
+          ctx.font = `${Math.round(img.width * 0.032)}px Capriola, Georgia, serif`;
+          metniSar(ctx, metin.trim(), img.width / 2, img.height - bantH + img.width * 0.05, img.width * 0.88, img.width * 0.042);
         }
         if (sayfaNo) {
           ctx.textAlign = "center";
           ctx.fillStyle = metniVar ? "#6f6f6c" : "rgba(0,0,0,0.55)";
-          ctx.font = `${Math.round(img.width * 0.03)}px Capriola, Georgia, serif`;
-          ctx.fillText(String(sayfaNo), img.width / 2, img.height - img.width * 0.025);
+          ctx.font = `${Math.round(img.width * 0.02)}px Capriola, Georgia, serif`;
+          ctx.fillText(String(sayfaNo), img.width / 2, img.height - img.width * 0.018);
         }
         resolve(canvas.toDataURL("image/jpeg", 0.72).split(",")[1]);
       };
@@ -4135,7 +4164,13 @@ function KitapStudyo({ authFetch, token }) {
     if (!s.sahne?.trim()) { if (hedefId === seciliId) setHata("Önce bu sayfa çifti için bir sahne yaz."); return; }
     if (hedefId === seciliId) { setSpreadUretiliyorIdx(idx); setHata(""); }
     try {
-      const genisUrl = await gorselIsteYenidenDeneyerek({ karakterTanimi: p.stilTanimi, sahne: s.sahne, model: p.model, kalite: p.kalite, boyut: "1536x1024", referansGorseller: referansHavuzuTopla(hedefId) });
+      // EKLENDİ (16 Ağu 2026, Bedirhan'ın talebi: "çizimler geniş
+      // perspektiflerden alınmalı"): sahne metnine kompozisyon direktifi
+      // ekleniyor — yakın plan/portre değil, geniş açılı, tüm sahneyi
+      // gösteren bir kadraj isteniyor. Sadece sayfa çiftlerinde (kapak/
+      // karakter referansları için uygun değil).
+      const genisliginSahnesi = `${s.sahne.trim()}\n\nKompozisyon: geniş açılı, sahnenin tamamını gösteren bir kadraj — yakın plan veya portre değil, çift sayfaya yayılan bir manzara/ortam hissi.`;
+      const genisUrl = await gorselIsteYenidenDeneyerek({ karakterTanimi: p.stilTanimi, sahne: genisliginSahnesi, model: p.model, kalite: p.kalite, boyut: "1536x1024", referansGorseller: referansHavuzuTopla(hedefId) });
       const genisB64 = await urlDenB64Al(genisUrl);
       const { sol, sag } = await gorseliIkiyeBol(genisB64);
       const { solSayfa, sagSayfa } = spreadNumaralariGetir(idx);
