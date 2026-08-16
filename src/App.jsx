@@ -3495,6 +3495,8 @@ function KitapStudyo({ authFetch, token }) {
   const [tumunuUretiliyorMu, setTumunuUretiliyorMu] = React.useState(false);
   const [beklemeSn, setBeklemeSn] = React.useState("4");
   const [toplamMaliyet, setToplamMaliyet] = React.useState(0);
+  // Kur artık sabit kodlu değil — elle düzeltilebiliyor (bkz. maliyet kutusu).
+  const [kurTL, setKurTL] = React.useState("48");
   const [onizlemeAcikMi, setOnizlemeAcikMi] = React.useState(false);
   const [onizlemeIndex, setOnizlemeIndex] = React.useState(0);
   const [pdfHazirlaniyorMu, setPdfHazirlaniyorMu] = React.useState(false);
@@ -3520,15 +3522,29 @@ function KitapStudyo({ authFetch, token }) {
   // Projeyi günceller: ref'e yazar, backend'e PUT eder, ekranda hâlâ o proje
   // açıksa state'i de günceller. Tüm üretim fonksiyonları artık setSeciliProje
   // + metaKaydet yerine bunu kullanıyor.
-  const projeGuncelle = async (hedefId, guncelMeta) => {
+  // gorselSilmeyiOnayla: backend, kayıtlı bir görseli düşüren yazmayı 409 ile
+  // durduruyor (16 Ağu 2026'daki görsel kaybının kalıcı koruması). Kullanıcının
+  // BİLEREK sildiği durumlarda (uretimiSifirla, tumunuYenidenUret — ikisi de
+  // zaten onay soruyor) bu bayrak açıkça gönderilir.
+  const projeGuncelle = async (hedefId, guncelMeta, gorselSilmeyiOnayla) => {
     aktifUretimVerisiRef.current[hedefId] = guncelMeta;
     if (hedefId === seciliId) setSeciliProje(guncelMeta);
     try {
       const r = await authFetch(`/api/admin/kitap-studyo/projeler/${hedefId}`, {
-        method: "PUT", body: JSON.stringify({ ...guncelMeta, asama: guncelMeta.asama || "uretim" }),
+        method: "PUT",
+        body: JSON.stringify({
+          ...guncelMeta,
+          asama: guncelMeta.asama || "uretim",
+          ...(gorselSilmeyiOnayla ? { gorselSilmeyiOnayla: true } : {}),
+        }),
       });
       const d = await r.json();
-      if (!d.ok && hedefId === seciliId) setHata(d.error || "Kaydedilemedi.");
+      if (!d.ok && hedefId === seciliId) {
+        // Koruma devreye girdiyse sebebi net söyle — sessiz "Kaydedilemedi" değil.
+        setHata(d.kod === "gorsel_kaybi"
+          ? `KAYIT DURDURULDU — bu işlem ${d.kaybolanSayisi} üretilmiş görseli silecekti. Bir hata olabilir; sayfayı yenileyip tekrar deneyin. Gerçekten silmek istiyorsanız "Üretimi sıfırla" düğmesini kullanın.`
+          : (d.error || "Kaydedilemedi."));
+      }
       return d.ok;
     } catch { if (hedefId === seciliId) setHata("Sunucuya ulaşılamadı."); return false; }
   };
@@ -3561,8 +3577,17 @@ function KitapStudyo({ authFetch, token }) {
     try {
       const r = await authFetch(`/api/admin/kitap-studyo/projeler/${id}`);
       const d = await r.json();
-      if (d.ok) setSeciliProje(d.proje);
-      else setHata(d.error || "Proje açılamadı.");
+      if (d.ok) {
+        setSeciliProje(d.proje);
+        // DÜZELTİLDİ (16 Ağu 2026 — GÖRSEL KAYBININ KÖK NEDENİ):
+        // Burada YALNIZCA ekran state'i tazeleniyordu; aktifUretimVerisiRef
+        // dokunulmadan kalıyordu. projeOku() ise ÖNCE o ref'e bakıyor. Yani
+        // panel kapatılıp açıldığında ekranda güncel veri görünse bile,
+        // sonraki her üretim/kayıt ref'teki ESKİ kopyayı sunucuya geri
+        // yazıyor ve arada üretilmiş tüm görseller siliniyordu.
+        // Artık sunucudan ne geldiyse ref de o oluyor.
+        aktifUretimVerisiRef.current[id] = d.proje;
+      } else setHata(d.error || "Proje açılamadı.");
     } catch { setHata("Sunucuya ulaşılamadı."); }
   };
 
@@ -3571,13 +3596,23 @@ function KitapStudyo({ authFetch, token }) {
   // verilmezse, o anki seciliProje state'i gönderilir.
   const metaKaydet = async (guncelMeta, yeniAsama) => {
     const meta = guncelMeta || seciliProje;
+    // DÜZELTİLDİ (16 Ağu 2026): İKİ AYRI KAYIT YOLU vardı — projeGuncelle
+    // ref'e yazıyordu, metaKaydet yazmıyordu. Bu yüzden bir form alanı
+    // değiştirildiğinde ref ile sunucu birbirinden ayrışıyor, sonraki üretim
+    // ref'teki eski kopyayı temel alıp az önceki değişikliği siliyordu.
+    // Artık her kayıt ikisini birden günceller.
+    if (seciliId) aktifUretimVerisiRef.current[seciliId] = meta;
     setKaydediliyor(true); setHata("");
     try {
       const r = await authFetch(`/api/admin/kitap-studyo/projeler/${seciliId}`, {
         method: "PUT", body: JSON.stringify({ ...meta, asama: yeniAsama || seciliProje.asama }),
       });
       const d = await r.json();
-      if (!d.ok) setHata(d.error || "Kaydedilemedi.");
+      if (!d.ok) {
+        setHata(d.kod === "gorsel_kaybi"
+          ? `KAYIT DURDURULDU — bu işlem ${d.kaybolanSayisi} üretilmiş görseli silecekti. Sayfayı yenileyip tekrar deneyin.`
+          : (d.error || "Kaydedilemedi."));
+      }
       return d.ok;
     } catch { setHata("Sunucuya ulaşılamadı."); return false; }
     finally { setKaydediliyor(false); }
@@ -3994,11 +4029,30 @@ function KitapStudyo({ authFetch, token }) {
     "gpt-image-1.5": { kare: { low: .009, medium: .034, high: .133 }, diger: { low: .013, medium: .05, high: .20 } },
     "gpt-image-1-mini": { kare: { low: .005, medium: .02, high: .052 }, diger: { low: .005, medium: .025, high: .06 } },
   };
+  // DÜZELTİLDİ (16 Ağu 2026): çarpan TEK BİR BOYUTA sabitlenmişti —
+  //   if (boyut === "1536x1024") fiyat *= 1.3;
+  // Baskı çözünürlüğüne (3840x1920) geçilince bu koşul hiç tutmadı ve 4.7
+  // katlık piksel artışı fiyata YANSIMADI. Panel "tüm kitap ~7 ₺" gibi
+  // gerçeğin çok altında bir rakam gösteriyordu.
+  //
+  // Görsel çıktısı token üzerinden faturalanır, token sayısı da piksel
+  // sayısıyla artar. Bu yüzden fiyat artık megapiksel oranıyla ölçekleniyor.
+  // Referans boyut 1536x1024 (1.57 MP) — fiyat tablosundaki değerler bu
+  // ölçek civarı için yayımlanmış.
+  const REFERANS_MP = (1536 * 1024) / 1e6;
+  const boyutMP = (boyut) => {
+    const m = String(boyut || "").match(/^(\d+)x(\d+)$/);
+    return m ? (Number(m[1]) * Number(m[2])) / 1e6 : REFERANS_MP;
+  };
   const maliyetTahminiEkle = (model, boyut, kalite, referansliMi) => {
     const tablo = FIYAT_TABLOSU[model] || FIYAT_TABLOSU["gpt-image-2"];
-    const grup = boyut === "1024x1024" ? tablo.kare : tablo.diger;
+    const kareMi = boyutMP(boyut) > 0 && (() => {
+      const m = String(boyut || "").match(/^(\d+)x(\d+)$/);
+      return m ? m[1] === m[2] : false;
+    })();
+    const grup = kareMi ? tablo.kare : tablo.diger;
     let fiyat = grup[kalite] ?? grup.medium;
-    if (boyut === "1536x1024") fiyat *= 1.3;
+    fiyat *= boyutMP(boyut) / REFERANS_MP;   // piksel sayısıyla ölçekle
     if (referansliMi) fiyat *= 1.15;
     setToplamMaliyet((t) => t + fiyat);
   };
@@ -4356,15 +4410,20 @@ function KitapStudyo({ authFetch, token }) {
       const solHamUrl = await gorselYukle(solHamB64, "ham-sayfa");
       const sagHamUrl = await gorselYukle(sagHamB64, "ham-sayfa");
 
-      const stil = s.metinStili || p.metinStili;
-      const solFinal = await sayfaMetniBindir(solHamB64, s.solMetinsiz ? "" : s.solMetin, solSayfa, stil);
-      const sagFinal = await sayfaMetniBindir(sagHamB64, s.sagMetinsiz ? "" : s.sagMetin, sagSayfa, stil);
-      const solUrl = await gorselYukle(solFinal, "sayfa");
-      const sagUrl = await gorselYukle(sagFinal, "sayfa");
-
+      // DEĞİŞTİRİLDİ (16 Ağu 2026, Bedirhan: "şu anda görsel yazılı şekilde mi
+      // üretiliyor? eğer öyleyse yazılı üretilmesin, yazıyı biz ekleyelim"):
+      //
+      // Burada üretimin hemen ardından metin canvas ile görselin İÇİNE
+      // basılıyordu. Yani her yeni üretim, daha bakılmadan yazılı geliyordu ve
+      // yazının yeri/puntosu yanlışsa düzeltmenin tek yolu yeniden üretimdi.
+      //
+      // Artık üretim TEMİZ GÖRSEL bırakıyor. Metin ayrı bir adım: "Yazı
+      // Tasarımını Düzenle" ile konumlandırılıp "Uygula" denince basılıyor.
+      // Gösterilen görsel (solGorselUrl) başlangıçta ham görselin kendisidir —
+      // fazladan yükleme yapılmıyor, aynı Blob adresi kullanılıyor.
       const guncelP = projeOku(hedefId);
       const yeniSpreadler = guncelP.spreadler.map((sp, i) => i === idx
-        ? { ...sp, solGorselUrl: solUrl, sagGorselUrl: sagUrl, solHamUrl, sagHamUrl }
+        ? { ...sp, solHamUrl, sagHamUrl, solGorselUrl: solHamUrl, sagGorselUrl: sagHamUrl, yaziBasildi: false }
         : sp);
       const guncelMeta = { ...guncelP, spreadler: yeniSpreadler };
       await projeGuncelle(hedefId, guncelMeta);
@@ -4472,8 +4531,21 @@ function KitapStudyo({ authFetch, token }) {
     const [solUrl, sagUrl] = await Promise.all([gorselYukle(solFinal, "sayfa"), gorselYukle(sagFinal, "sayfa")]);
     const guncelP = projeOku(hedefId);
     const yeniSpreadler = guncelP.spreadler.map((sp, i) => i === idx
-      ? { ...sp, solGorselUrl: solUrl, sagGorselUrl: sagUrl, metinStili: stil } : sp);
+      ? { ...sp, solGorselUrl: solUrl, sagGorselUrl: sagUrl, metinStili: stil, yaziBasildi: true } : sp);
     await projeGuncelle(hedefId, { ...guncelP, spreadler: yeniSpreadler });
+    return true;
+  };
+
+  // Basılı yazıyı KALDIR — ham görsele geri dön. Yeniden üretim yok, AI çağrısı
+  // yok; sadece gösterilen görsel ham kopyaya işaret ediyor.
+  const spreadYaziyiKaldir = async (idx, hedefId) => {
+    hedefId = hedefId || seciliId;
+    const p = projeOku(hedefId);
+    const s = p.spreadler[idx];
+    if (!s.solHamUrl) { setHata("Ham görsel yok — bu sayfa çifti bir kez daha üretilmeli."); return false; }
+    const yeniSpreadler = p.spreadler.map((sp, i) => i === idx
+      ? { ...sp, solGorselUrl: sp.solHamUrl, sagGorselUrl: sp.sagHamUrl, yaziBasildi: false } : sp);
+    await projeGuncelle(hedefId, { ...p, spreadler: yeniSpreadler });
     return true;
   };
 
@@ -4538,7 +4610,7 @@ function KitapStudyo({ authFetch, token }) {
     const p = projeOku(hedefId);
     const yeniSpreadler = (p.spreadler || []).map((s) => ({ ...s, solGorselUrl: null, sagGorselUrl: null }));
     const guncelMeta = { ...p, spreadler: yeniSpreadler, onKapakGorselUrl: null, onKapakHamUrl: null, arkaKapakGorselUrl: null, arkaKapakHamUrl: null };
-    await projeGuncelle(hedefId, guncelMeta);
+    await projeGuncelle(hedefId, guncelMeta, true);  // bilinçli silme — onay yukarıda alındı
   };
 
   // EKLENDİ (16 Ağu 2026, Bedirhan'ın talebi: "tek tuşta tümünü yeniden
@@ -4550,7 +4622,7 @@ function KitapStudyo({ authFetch, token }) {
     const p = projeOku(hedefId);
     const yeniSpreadler = (p.spreadler || []).map((s) => ({ ...s, solGorselUrl: null, sagGorselUrl: null }));
     const guncelMeta = { ...p, spreadler: yeniSpreadler, onKapakGorselUrl: null, onKapakHamUrl: null, arkaKapakGorselUrl: null, arkaKapakHamUrl: null };
-    await projeGuncelle(hedefId, guncelMeta);
+    await projeGuncelle(hedefId, guncelMeta, true);  // bilinçli silme — onay yukarıda alındı
     await tumunuUret(hedefId);
   };
 
@@ -4797,9 +4869,9 @@ function KitapStudyo({ authFetch, token }) {
                       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 8 }}>
                         <select style={stil.input} value={seciliProje.kalite || "low"}
                           onChange={(e) => { const gm = { ...seciliProje, kalite: e.target.value }; setSeciliProje(gm); metaKaydet(gm); }}>
-                          <option value="low">Düşük (test için)</option>
-                          <option value="medium">Orta</option>
-                          <option value="high">Yüksek</option>
+                          <option value="low">Düşük — sadece taslak</option>
+                          <option value="medium">Orta — baskı için asgari</option>
+                          <option value="high">Yüksek — baskı önerilen</option>
                         </select>
                         <select style={stil.input} value={seciliProje.boyut || "1024x1536"}
                           onChange={(e) => { const gm = { ...seciliProje, boyut: e.target.value }; setSeciliProje(gm); metaKaydet(gm); }}>
@@ -4811,7 +4883,36 @@ function KitapStudyo({ authFetch, token }) {
                         <input style={stil.input} placeholder="Yükseklik (cm)" value={seciliProje.ozellikler?.yukseklikCm || ""}
                           onChange={(e) => ozellikGuncelle("yukseklikCm", e.target.value)} onBlur={() => metaKaydet(seciliProje)} />
                       </div>
-                      <p style={{ fontSize: 11, color: "#6f6f6c", marginTop: 8, marginBottom: 0 }}>
+
+                      {/* EKLENDİ (16 Ağu 2026): "en ucuzu seçtik ama görseller
+                          kalitesiz geldi" — sebebi buydu. "Düşük" ayarı test
+                          içindir; basılacak bir kitapta yetersiz kalır. Seçim
+                          engellenmiyor, ama SONUCU ÖNCEDEN yazılıyor. */}
+                      {(seciliProje.kalite || "low") === "low" && (
+                        <div style={{ marginTop: 8, padding: "9px 12px", borderRadius: 8, fontSize: 12, lineHeight: 1.55,
+                                      background: "#FFF4E5", border: "1px solid #F0C48A", color: "#7A4A12" }}>
+                          <b>Kalite “Düşük” — baskı için yetersiz.</b> Bu ayar sahne ve metin yerleşimini ucuza denemek içindir;
+                          çıkan görsellerde detay kaybı ve bulanıklık normaldir. Basılacak sayfalar için <b>Orta</b> ya da <b>Yüksek</b> seçilmeli.
+                          {(() => {
+                            const b = seciliProje.yayilimBoyutu || "3840x1920";
+                            const t = FIYAT_TABLOSU[seciliProje.model] || FIYAT_TABLOSU["gpt-image-2"];
+                            const olcek = boyutMP(b) / REFERANS_MP;
+                            const adet = (seciliProje.spreadler || []).length || 1;
+                            const hesap = (k) => (t.diger[k] * olcek * 1.15 * adet);
+                            return (
+                              <div style={{ marginTop: 6, color: "#6b4a20" }}>
+                                {adet} sayfa çifti · {b} için tahmini toplam —
+                                {" "}düşük <b>${hesap("low").toFixed(2)}</b> ·
+                                {" "}orta <b>${hesap("medium").toFixed(2)}</b> ·
+                                {" "}yüksek <b>${hesap("high").toFixed(2)}</b>
+                                <div style={{ fontSize: 11, marginTop: 3, color: "#8a6a3a" }}>
+                                  Liste fiyatlarından hesaplanmış tahmindir, fatura değildir.
+                                </div>
+                              </div>
+                            );
+                          })()}
+                        </div>
+                      )}                      <p style={{ fontSize: 11, color: "#6f6f6c", marginTop: 8, marginBottom: 0 }}>
                         Düşük kalite ile ucuza test edip beğendiğinde, Kitap Üretimi aşamasındaki "🔄 Tümünü Yeniden Üret" ile orta/yükseğe geçebilirsin.
                         ISBN, basım tarihi gibi diğer künye bilgileri Kitap Üretimi aşamasında.
                       </p>
@@ -5166,10 +5267,24 @@ function KitapStudyo({ authFetch, token }) {
                             {s.solGorselUrl && (
                               <div style={{ marginTop: 10 }}>
                                 {stilDuzenleIdx !== idx ? (
-                                  <button style={{ ...stil.buton, fontSize: 12, background: "#5B7FA6" }}
-                                    onClick={() => { setStilDuzenleIdx(idx); setStilTaslak(metinStiliCoz(s.metinStili || seciliProje.metinStili)); }}>
-                                    ✎ Yazı Tasarımını Düzenle
-                                  </button>
+                                  <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                                    <button style={{ ...stil.buton, fontSize: 12, background: "#5B7FA6" }}
+                                      onClick={() => { setStilDuzenleIdx(idx); setStilTaslak(metinStiliCoz(s.metinStili || seciliProje.metinStili)); }}>
+                                      ✎ Yazı Tasarımını Düzenle
+                                    </button>
+                                    {/* Üretim artık TEMİZ görsel bırakıyor; yazının basılıp
+                                        basılmadığı açıkça görünsün. */}
+                                    <span style={{ fontSize: 11.5, padding: "3px 10px", borderRadius: 20,
+                                      background: s.yaziBasildi ? "#E8F3EC" : "#FFF4E5",
+                                      color: s.yaziBasildi ? "#2E7D32" : "#7A4A12",
+                                      border: `1px solid ${s.yaziBasildi ? "#A8D5B8" : "#F0C48A"}` }}>
+                                      {s.yaziBasildi ? "Yazı basılı" : "Yazısız — temiz görsel"}
+                                    </span>
+                                    {s.yaziBasildi && (
+                                      <span onClick={async () => { setStilUyguluyor(true); try { await spreadYaziyiKaldir(idx); } finally { setStilUyguluyor(false); } }}
+                                        style={{ fontSize: 12, color: "#B0663A", cursor: "pointer" }}>Yazıyı kaldır</span>
+                                    )}
+                                  </div>
                                 ) : (
                                   <div style={{ background: "#221d16", borderRadius: 12, padding: 14, color: "#efe9da" }}>
                                     {!s.solHamUrl ? (
@@ -5344,9 +5459,26 @@ function KitapStudyo({ authFetch, token }) {
                           <label style={{ fontSize: 11, color: "#6f6f6c", display: "block" }}>İstekler arası bekleme (sn)</label>
                           <input style={{ ...stil.input, width: 80 }} value={beklemeSn} onChange={(e) => setBeklemeSn(e.target.value)} />
                         </div>
+                        {/* DÜZELTİLDİ (16 Ağu 2026): kur `* 48` olarak SABİT
+                            KODLANMIŞTI ve rakam kesinmiş gibi gösteriliyordu.
+                            Çalışma kuralları madde 9: "Tahmin edilen sonuç
+                            kesin gibi gösterilmez", "hesaplanan sayı ile
+                            doğrulanmış sayı ayrılır". Fatura zaten dolar
+                            üzerinden kesiliyor — dolar öne alındı, TL
+                            karşılığı kullanılan kur AÇIKÇA yazılarak veriliyor
+                            ve kur elle düzeltilebiliyor. */}
                         <div style={{ fontSize: 13 }}>
                           <div style={{ fontSize: 11, color: "#6f6f6c" }}>Tahmini harcama (bu oturumda)</div>
-                          <div style={{ fontWeight: 700 }}>${toplamMaliyet.toFixed(2)} (~₺{Math.round(toplamMaliyet * 48)})</div>
+                          <div style={{ fontWeight: 700 }}>${toplamMaliyet.toFixed(3)}</div>
+                          <div style={{ fontSize: 10.5, color: "#8e897a", display: "flex", alignItems: "center", gap: 4, marginTop: 2 }}>
+                            ≈ ₺{(toplamMaliyet * (Number(kurTL) || 0)).toFixed(0)} · kur
+                            <input value={kurTL} onChange={(e) => setKurTL(e.target.value)}
+                              style={{ width: 44, fontSize: 10.5, padding: "1px 4px", borderRadius: 4, border: "1px solid #d8d2c4" }} />
+                          </div>
+                          <div style={{ fontSize: 10.5, color: "#b0663a", marginTop: 3, maxWidth: 260, lineHeight: 1.45 }}>
+                            Yayımlanmış liste fiyatlarından <b>hesaplanmış tahmindir</b>, fatura değildir.
+                            Gerçek tutar için OpenAI → Usage.
+                          </div>
                         </div>
                       </div>
                       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
