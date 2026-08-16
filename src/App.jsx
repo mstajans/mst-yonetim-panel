@@ -1,9 +1,4 @@
 import React, { useState, useEffect } from "react";
-// EKLENDİ (15 Ağu 2026, "413 Content Too Large" — JPEG kalitesi düşürmek
-// bile yetmedi): büyük görselleri (özellikle sayfa çiftleri) MST'nin
-// sunucusuna hiç uğratmadan doğrudan Vercel Blob'a yüklemek için. mst-yazar-app'te
-// büyük eser dosyaları için aynı desen zaten kanıtlanmış. Paket: npm install @vercel/blob.
-import { upload as blobUpload } from "@vercel/blob/client";
 
 const BACKEND_URL = "https://mst-backend-mauve.vercel.app";
 
@@ -3784,33 +3779,36 @@ function KitapStudyo({ authFetch, token }) {
 
   // Hazır bir görseli (base64/veri URL) doğrudan Blob'a yükler — künye/kapak
   // gibi OpenAI'ye hiç gitmeyen görseller için.
-  // DÜZELTİLDİ (15 Ağu 2026, "413 Content Too Large" — JPEG kalitesini
-  // düşürmek de yetmedi): artık MST'nin sunucusuna HİÇ uğramıyor. base64,
-  // tarayıcıda bir Blob nesnesine çevrilip @vercel/blob/client'ın upload()
-  // fonksiyonuyla DOĞRUDAN Vercel Blob'a gönderiliyor — Vercel'in ~4.5MB
-  // sunucu isteği sınırı bu yolda hiç devreye girmiyor (Blob'un kendi tavanı
-  // çok daha yüksek). Backend'deki yeni gorsel-blob-token ucu, tarayıcıya
-  // sadece kısa ömürlü bir yükleme izni veriyor, görsel verisini hiç görmüyor.
-  // Çağıran fonksiyonlar (kunyeUret, sayfaMetniBindir vb.) hiç değişmedi —
-  // hâlâ base64 veriyorlar, dönüşüm burada, tek yerde yapılıyor.
+  // DÜZELTİLDİ (15 Ağu 2026, "413 Content Too Large" — client-side Blob
+  // upload da başarısız oldu, kaynak koddan doğrulandı: @vercel/blob/client'ın
+  // handleUpload()'ı statik BLOB_READ_WRITE_TOKEN gerektiriyor, storeId/OIDC
+  // ile çalışmıyor — kitap görselleri store'unun ise hiç statik token'ı yok):
+  // client-side Blob upload tamamen terk edildi. Yerine, ZATEN ÇALIŞAN sunucu
+  // tarafı yükleme (OIDC ile) korunuyor — ama artık görsel küçük parçalara
+  // bölünüp sırayla gönderiliyor, her istek Vercel'in 4.5MB sınırının çok
+  // altında kalıyor. Backend son parçada hepsini birleştirip Blob'a yüklüyor.
   const gorselYukle = async (b64, onEki) => {
-    const ikili = atob(b64);
-    const bayt = new Uint8Array(ikili.length);
-    for (let i = 0; i < ikili.length; i++) bayt[i] = ikili.charCodeAt(i);
     const mime = b64.startsWith("/9j/") ? "image/jpeg" : "image/png"; // JPEG'ler hep bu imzayla başlar
-    const blob = new Blob([bayt], { type: mime });
     const uzanti = mime === "image/jpeg" ? "jpg" : "png";
-    const dosyaAdi = `kitap-studyo/${onEki || "gorsel"}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${uzanti}`;
-    try {
-      const sonuc = await blobUpload(dosyaAdi, blob, {
-        access: "public",
-        handleUploadUrl: `${BACKEND_URL}/api/admin/kitap-studyo/gorsel-blob-token`,
-        headers: { Authorization: `Bearer ${token}` },
+    const PARCA_BOYUTU = 1_400_000; // base64 karakter sayısı — ~1MB ham veri, JSON sarmalıyla birlikte güvenle 4.5MB'ın altında
+    const toplamParca = Math.max(1, Math.ceil(b64.length / PARCA_BOYUTU));
+    const anahtar = `${onEki || "gorsel"}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+    let sonCevap = null;
+    for (let i = 0; i < toplamParca; i++) {
+      const parcaVerisi = b64.slice(i * PARCA_BOYUTU, (i + 1) * PARCA_BOYUTU);
+      const r = await authFetch("/api/admin/kitap-studyo/gorsel-parca-yukle", {
+        method: "POST",
+        body: JSON.stringify({ anahtar, parcaNo: i, toplamParca, parcaVerisi, dosyaOnEki: onEki, uzanti }),
       });
-      return sonuc.url;
-    } catch (err) {
-      throw new Error("Görsel yüklenemedi: " + (err?.message || "bilinmeyen hata"));
+      if (!r.ok) {
+        let mesaj = `Yükleme başarısız (HTTP ${r.status}).`;
+        try { const d = await r.json(); if (d?.error) mesaj = d.error; } catch { /* HTML dönmüş olabilir, mesajı koru */ }
+        throw new Error(mesaj);
+      }
+      sonCevap = await r.json();
     }
+    if (!sonCevap?.tamamlandi || !sonCevap?.gorselUrl) throw new Error("Görsel yüklenemedi (son parça tamamlanmadı).");
+    return sonCevap.gorselUrl;
   };
 
   const ozellikGuncelle = (alan, deger) => {
