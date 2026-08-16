@@ -4236,13 +4236,36 @@ function KitapStudyo({ authFetch, token }) {
     }
   };
 
-  const uretimiSifirla = async () => {
-    if (!window.confirm('Tüm sayfa çiftlerinin ve kapakların "tamamlandı" durumu sıfırlanacak (metinler korunur). Onaylıyor musun?')) return;
-    const yeniSpreadler = (seciliProje.spreadler || []).map((s) => ({ ...s, solGorselUrl: null, sagGorselUrl: null }));
-    const guncelMeta = { ...seciliProje, spreadler: yeniSpreadler, onKapakGorselUrl: null, onKapakHamUrl: null, arkaKapakGorselUrl: null, arkaKapakHamUrl: null };
-    setSeciliProje(guncelMeta);
-    await metaKaydet(guncelMeta);
+  // DÜZELTİLDİ (16 Ağu 2026, Bedirhan'ın bildirdiği kritik bug: "ne
+  // silebiliyorum ne de baştan üretme mekanizmasını devreye sokabiliyorum"):
+  // bu fonksiyon 14 Ağu'daki paralel üretim refactor'una hiç dahil
+  // edilmemişti — setSeciliProje+metaKaydet kullanıyordu, aktifUretimVerisiRef'i
+  // (tumunuUret/spreadUret'in GERÇEKTEN okuduğu kaynak) hiç güncellemiyordu.
+  // Sonuç: "sil"e basılsa bile, arka plandaki üretim fonksiyonları hâlâ eski
+  // (silinmemiş) veriyi görüp "zaten tamam" sanıyor, hiçbir şey üretmiyordu.
+  // Artık projeGuncelle kullanıyor (diğer üretim fonksiyonlarıyla aynı desen).
+  const uretimiSifirla = async (hedefId) => {
+    hedefId = hedefId || seciliId;
+    if (hedefId === seciliId && !window.confirm('Tüm sayfa çiftlerinin ve kapakların "tamamlandı" durumu sıfırlanacak (metinler korunur). Onaylıyor musun?')) return;
+    const p = projeOku(hedefId);
+    const yeniSpreadler = (p.spreadler || []).map((s) => ({ ...s, solGorselUrl: null, sagGorselUrl: null }));
+    const guncelMeta = { ...p, spreadler: yeniSpreadler, onKapakGorselUrl: null, onKapakHamUrl: null, arkaKapakGorselUrl: null, arkaKapakHamUrl: null };
+    await projeGuncelle(hedefId, guncelMeta);
   };
+
+  // EKLENDİ (16 Ağu 2026, Bedirhan'ın talebi: "tek tuşta tümünü yeniden
+  // üret olmalı"): uretimiSifirla + tumunuUret'i tek adımda birleştiriyor —
+  // önce onay alıp temizliyor, hemen ardından üretimi otomatik başlatıyor.
+  const tumunuYenidenUret = async (hedefId) => {
+    hedefId = hedefId || seciliId;
+    if (!window.confirm('Tüm sayfa çiftleri ve kapaklar SİLİNİP baştan üretilecek (metinler korunur, kredi harcanır). Onaylıyor musun?')) return;
+    const p = projeOku(hedefId);
+    const yeniSpreadler = (p.spreadler || []).map((s) => ({ ...s, solGorselUrl: null, sagGorselUrl: null }));
+    const guncelMeta = { ...p, spreadler: yeniSpreadler, onKapakGorselUrl: null, onKapakHamUrl: null, arkaKapakGorselUrl: null, arkaKapakHamUrl: null };
+    await projeGuncelle(hedefId, guncelMeta);
+    await tumunuUret(hedefId);
+  };
+
 
   // ================= EKLENDİ: 5. parça — kitap listesi, çevirerek önizleme,
   // PDF çıktısı ================= 
@@ -4451,7 +4474,7 @@ function KitapStudyo({ authFetch, token }) {
                           onChange={(e) => ozellikGuncelle("yukseklikCm", e.target.value)} onBlur={() => metaKaydet(seciliProje)} />
                       </div>
                       <p style={{ fontSize: 11, color: "#6f6f6c", marginTop: 8, marginBottom: 0 }}>
-                        Düşük kalite ile ucuza test edip beğendiğinde, Kitap Üretimi aşamasındaki "Kalite Değişti, Yeniden Üretime Hazırla" ile orta/yükseğe geçebilirsin.
+                        Düşük kalite ile ucuza test edip beğendiğinde, Kitap Üretimi aşamasındaki "🔄 Tümünü Yeniden Üret" ile orta/yükseğe geçebilirsin.
                         ISBN, basım tarihi gibi diğer künye bilgileri Kitap Üretimi aşamasında.
                       </p>
                     </div>
@@ -4847,7 +4870,14 @@ function KitapStudyo({ authFetch, token }) {
                           disabled={pdfHazirlaniyorMu || kitapSayfaListesiOlustur().length === 0} onClick={pdfIndir}>
                           {pdfHazirlaniyorMu ? "Hazırlanıyor..." : "PDF Olarak İndir"}
                         </button>
-                        <button style={{ ...stil.buton, color: "#C0392B" }} onClick={uretimiSifirla}>Kalite Değişti, Yeniden Üretime Hazırla</button>
+                        {/* EKLENDİ (16 Ağu 2026, Bedirhan'ın talebi: "tek tuşta
+                            tümünü yeniden üret olmalı, ne silebiliyorum ne de
+                            baştan üretebiliyorum"): tek tıkla sil+baştan üret. */}
+                        <button style={{ ...stil.buton, background: "#C0392B", ...(aktifUretimIlerleme[seciliProje.id] ? stil.butonPasif : {}) }}
+                          disabled={!!aktifUretimIlerleme[seciliProje.id]} onClick={() => tumunuYenidenUret()}>
+                          🔄 Tümünü Yeniden Üret
+                        </button>
+                        <button style={{ ...stil.buton, color: "#C0392B" }} onClick={() => uretimiSifirla()}>Sadece Sıfırla (Üretme)</button>
                       </div>
                       <p style={{ fontSize: 11, color: "#6f6f6c", marginTop: 10, lineHeight: 1.6 }}>
                         Eksik olanları üret sadece görseli olmayanları üretir — tamamlananları tekrar üretip para harcamaz. Başarısız bir görsel otomatik olarak
