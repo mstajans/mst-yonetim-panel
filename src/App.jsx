@@ -3492,6 +3492,12 @@ function KitapStudyo({ authFetch, token }) {
   const [stilDuzenleIdx, setStilDuzenleIdx] = React.useState(null);
   const [stilTaslak, setStilTaslak] = React.useState(null);
   const [stilUyguluyor, setStilUyguluyor] = React.useState(false);
+  // EKLENDİ (16 Ağu 2026): Görsel Deposu — kaybolan üretimlerin kurtarılması.
+  // depoAcik: null | {mod:"gozat"} | {mod:"ata", idx, taraf}
+  const [depoAcik, setDepoAcik] = React.useState(null);
+  const [depoVeri, setDepoVeri] = React.useState(null);
+  const [depoYukleniyor, setDepoYukleniyor] = React.useState(false);
+  const [depoSadeceBagsiz, setDepoSadeceBagsiz] = React.useState(false);
   const [tumunuUretiliyorMu, setTumunuUretiliyorMu] = React.useState(false);
   const [beklemeSn, setBeklemeSn] = React.useState("4");
   const [toplamMaliyet, setToplamMaliyet] = React.useState(0);
@@ -3547,6 +3553,30 @@ function KitapStudyo({ authFetch, token }) {
       }
       return d.ok;
     } catch { if (hedefId === seciliId) setHata("Sunucuya ulaşılamadı."); return false; }
+  };
+
+  // Depoyu yükler. Salt okunur — hiçbir şey silinmez.
+  const depoYukle = async () => {
+    setDepoYukleniyor(true); setHata("");
+    try {
+      const r = await authFetch("/api/admin/kitap-studyo/depo?limit=500");
+      const d = await r.json();
+      if (d.ok) setDepoVeri(d);
+      else setHata(d.error || "Depo listelenemedi.");
+    } catch { setHata("Sunucuya ulaşılamadı."); }
+    finally { setDepoYukleniyor(false); }
+  };
+
+  // Depodaki bir görseli bir sayfa yuvasına GERİ BAĞLAR. Yeniden üretim yok,
+  // AI çağrısı yok — kaybolan yalnızca bağlantıydı, dosya zaten duruyor.
+  const depodanAta = async (idx, taraf, url) => {
+    const p = projeOku(seciliId);
+    const hamAlan = taraf === "sol" ? "solHamUrl" : "sagHamUrl";
+    const gorAlan = taraf === "sol" ? "solGorselUrl" : "sagGorselUrl";
+    const yeniSpreadler = (p.spreadler || []).map((sp, i) => i === idx
+      ? { ...sp, [hamAlan]: sp[hamAlan] || url, [gorAlan]: url } : sp);
+    const ok = await projeGuncelle(seciliId, { ...p, spreadler: yeniSpreadler });
+    if (ok) setDepoAcik(null);
   };
 
   const stil = {
@@ -4739,6 +4769,84 @@ function KitapStudyo({ authFetch, token }) {
       <h2 style={stil.baslik}>🌈 MST Çocuk Stüdyo</h2>
       <p style={stil.alt}>Kitap resim atölyesi — projeler artık kalıcı, her cihazdan erişilebilir.</p>
 
+      {/* ── GÖRSEL DEPOSU — KURTARMA ────────────────────────────
+          Kaybolan üretimlerde silinen şey dosyalar değil, dosyaların hangi
+          sayfaya ait olduğu bilgisiydi. Depodaki her görsel hâlâ duruyor;
+          buradan görülüp istenen sayfaya geri bağlanabiliyor. */}
+      {depoAcik && (
+        <div onClick={() => setDepoAcik(null)}
+          style={{ position: "fixed", inset: 0, zIndex: 9998, background: "rgba(10,9,7,.9)", display: "flex", padding: 24 }}>
+          <div onClick={(e) => e.stopPropagation()}
+            style={{ background: "#1c1a15", color: "#efe9da", borderRadius: 14, width: "100%", maxWidth: 1100,
+                     margin: "auto", maxHeight: "90vh", display: "flex", flexDirection: "column",
+                     border: "1px solid rgba(255,255,255,.12)" }}>
+            <div style={{ padding: "16px 20px", borderBottom: "1px solid rgba(255,255,255,.1)" }}>
+              <div style={{ fontFamily: "'Fredoka', sans-serif", fontWeight: 600, fontSize: 16 }}>
+                🗂 Görsel Deposu {depoAcik.mod === "ata" && `— Sayfa ${spreadNumaralariGetir(depoAcik.idx)[depoAcik.taraf === "sol" ? "solSayfa" : "sagSayfa"]} için seç`}
+              </div>
+              <div style={{ fontSize: 12, color: "#a09a89", marginTop: 4, lineHeight: 1.5 }}>
+                Şimdiye kadar üretilmiş <b style={{ color: "#efe9da" }}>tüm</b> görseller burada — hiçbiri silinmedi.
+                {" "}<b style={{ color: "#e0ac79" }}>Bağsız</b> olanlar hiçbir projede kullanılmıyor; kaybolan üretimler bunlardır.
+                {depoAcik.mod === "ata" && " Bir görsele tıklayınca o sayfaya bağlanır."}
+              </div>
+              <div style={{ display: "flex", gap: 12, alignItems: "center", marginTop: 10, flexWrap: "wrap", fontSize: 12 }}>
+                <button style={{ ...stil.buton, fontSize: 12, ...(depoYukleniyor ? stil.butonPasif : {}) }}
+                  disabled={depoYukleniyor} onClick={depoYukle}>
+                  {depoYukleniyor ? "Yükleniyor..." : depoVeri ? "Yenile" : "Depoyu Listele"}
+                </button>
+                {depoVeri && (
+                  <>
+                    <label style={{ display: "flex", alignItems: "center", gap: 5, color: "#c9c2ae" }}>
+                      <input type="checkbox" checked={depoSadeceBagsiz} onChange={(e) => setDepoSadeceBagsiz(e.target.checked)} />
+                      Sadece bağsız olanlar
+                    </label>
+                    <span style={{ color: "#8e897a" }}>
+                      {depoVeri.toplam} görsel · {depoVeri.bagliSayisi} bağlı · {depoVeri.toplam - depoVeri.bagliSayisi} bağsız
+                    </span>
+                  </>
+                )}
+                <span onClick={() => setDepoAcik(null)} style={{ marginLeft: "auto", color: "#8e897a", cursor: "pointer" }}>Kapat</span>
+              </div>
+            </div>
+            <div style={{ overflow: "auto", padding: 16 }}>
+              {!depoVeri && !depoYukleniyor && (
+                <div style={{ color: "#a09a89", fontSize: 13, padding: 20, textAlign: "center" }}>
+                  “Depoyu Listele”ye bas — Vercel Blob'daki tüm kitap görselleri taranacak.
+                </div>
+              )}
+              {depoVeri && (() => {
+                const liste = depoVeri.gorseller.filter((g) => !depoSadeceBagsiz || !g.projeyeBagli);
+                if (!liste.length) return <div style={{ color: "#a09a89", fontSize: 13, padding: 20, textAlign: "center" }}>Bu filtreyle görsel yok.</div>;
+                return (
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(160px,1fr))", gap: 12 }}>
+                    {liste.map((g) => (
+                      <div key={g.goruntuUrl}
+                        onClick={() => depoAcik.mod === "ata"
+                          ? depodanAta(depoAcik.idx, depoAcik.taraf, g.goruntuUrl)
+                          : setBuyukGorsel({ url: g.goruntuUrl, baslik: g.yol.split("/").pop() })}
+                        style={{ background: "#12110d", borderRadius: 9, overflow: "hidden", cursor: "pointer",
+                                 border: g.projeyeBagli ? "1px solid rgba(255,255,255,.12)" : "1px solid #B0663A" }}>
+                        <img src={g.goruntuUrl} alt="" loading="lazy"
+                          style={{ width: "100%", aspectRatio: "1/1", objectFit: "cover", display: "block" }} />
+                        <div style={{ padding: "6px 8px", fontSize: 10.5, lineHeight: 1.45 }}>
+                          <div style={{ color: g.projeyeBagli ? "#8e897a" : "#e0ac79", fontWeight: 600 }}>
+                            {g.projeyeBagli ? "bağlı" : "BAĞSIZ"} · {g.etiket}
+                          </div>
+                          <div style={{ color: "#6f6a5c" }}>
+                            {g.yuklendi ? new Date(g.yuklendi).toLocaleString("tr-TR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : ""}
+                            {g.boyutBayt ? ` · ${Math.round(g.boyutBayt / 1024)} KB` : ""}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── TAM EKRAN GÖRÜNTÜLEYİCİ ──────────────────────────────
           Baskı kalitesi küçük önizlemeden değerlendirilemiyordu.
           İki mod var: "sığdır" (tüm sayfayı gör) ve "1:1" (gerçek
@@ -4973,7 +5081,15 @@ function KitapStudyo({ authFetch, token }) {
                             </div>
                           );
                         })}
+                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
                         <button style={stil.buton} onClick={spreadEkle}>+ Sayfa Çifti Ekle</button>
+                        {/* Kaybolan görseller buradan bulunur — depodaki hiçbir
+                            dosya silinmedi, yalnız sayfa bağlantıları gitti. */}
+                        <button style={{ ...stil.buton, background: "#8A6A38" }}
+                          onClick={() => { setDepoAcik({ mod: "gozat" }); if (!depoVeri) depoYukle(); }}>
+                          🗂 Görsel Deposu (eski üretimler)
+                        </button>
+                      </div>
                       </div>
                     )}
 
@@ -5230,11 +5346,25 @@ function KitapStudyo({ authFetch, token }) {
                                 </label>
                               </div>
                             </div>
-                            <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+                            <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
                               <button style={{ ...stil.buton, fontSize: 12, ...(spreadUretiliyorIdx !== null ? stil.butonPasif : {}) }}
                                 disabled={spreadUretiliyorIdx !== null} onClick={() => spreadUret(idx)}>
                                 {spreadUretiliyorIdx === idx ? "Üretiliyor..." : "Bu Sayfa Çiftini Üret"}
                               </button>
+                              {/* Görseli olmayan sayfa için kurtarma yolu: depoda
+                                  duran eski üretimi yeniden bağla — ücret yok. */}
+                              {!s.solGorselUrl && (
+                                <>
+                                  <button style={{ ...stil.buton, fontSize: 12, background: "#8A6A38" }}
+                                    onClick={() => { setDepoAcik({ mod: "ata", idx, taraf: "sol" }); if (!depoVeri) depoYukle(); }}>
+                                    🗂 Sol sayfayı depodan seç
+                                  </button>
+                                  <button style={{ ...stil.buton, fontSize: 12, background: "#8A6A38" }}
+                                    onClick={() => { setDepoAcik({ mod: "ata", idx, taraf: "sag" }); if (!depoVeri) depoYukle(); }}>
+                                    🗂 Sağ sayfayı depodan seç
+                                  </button>
+                                </>
+                              )}
                               {s.solGorselUrl && (
                                 <button style={{ ...stil.buton, fontSize: 12, ...(spreadUretiliyorIdx !== null ? stil.butonPasif : {}) }}
                                   disabled={spreadUretiliyorIdx !== null} onClick={() => spreadMetniYenidenYerlestir(idx)}>
