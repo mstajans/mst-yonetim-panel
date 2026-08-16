@@ -4122,12 +4122,59 @@ function KitapStudyo({ authFetch, token }) {
     img.src = "data:image/png;base64," + b64Genis;
   });
 
-  // KRİTİK ÖZELLİK (bağımsız araçta sonradan eklenen en önemli düzeltme):
-  // sayfa metnini ve sayfa numarasını görsele canvas ile bindirir — önceden
-  // sadece veride tutulup görsele hiç basılmıyordu.
-  // DÜZELTİLDİ (16 Ağu 2026, Bedirhan'ın talebi: "yazılar çok, punto 12 falan
-  // olmalı"): font oranı ~%6.2'den ~%3.2'ye düşürüldü, metin bandı da (%20'den
-  // %14'e) küçültüldü — daha az yer kaplasın, görsele daha uygun boyutta olsun.
+  // Metni verilen genişlikte satırlara böler — ÇİZMEDEN, sadece ölçer.
+  // (metniSar hem ölçüp hem çizdiği için otomatik punto ayarında kullanılamıyor.)
+  const metniSatirlaraBol = (ctx, metin, maxGenislik) => {
+    const satirlar = []; let satir = "";
+    for (const kelime of (metin || "").trim().split(/\s+/)) {
+      const test = satir ? satir + " " + kelime : kelime;
+      if (ctx.measureText(test).width > maxGenislik && satir) { satirlar.push(satir); satir = kelime; }
+      else satir = test;
+    }
+    if (satir) satirlar.push(satir);
+    return satirlar;
+  };
+
+  // Bir bölgenin ortalama parlaklığını ölçer (0 = simsiyah, 1 = bembeyaz).
+  // Yazının o bölgede açık mı koyu mu olması gerektiğine buna bakarak karar
+  // veriyoruz — sabit renk, gökyüzünde okunurken toprakta kayboluyordu.
+  const bolgeParlakligi = (ctx, x, y, g, y2) => {
+    try {
+      const d = ctx.getImageData(Math.max(0, x | 0), Math.max(0, y | 0), Math.max(1, g | 0), Math.max(1, y2 | 0)).data;
+      let toplam = 0, adet = 0;
+      for (let i = 0; i < d.length; i += 4 * 37) { // her 37. pikseli örnekle — yeterli ve hızlı
+        toplam += (0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2]) / 255; adet++;
+      }
+      return adet ? toplam / adet : 0.5;
+    } catch { return 0.5; }
+  };
+
+  // SEÇİLEN DÜZEN — KONSEPT 1: "Tam kanama, yazı resmin üstünde"
+  // (16 Ağu 2026, 10 konsept sunuldu, Bedirhan 1'i seçti.)
+  //
+  // Kural: illüstrasyon iki sayfayı da uçtan uca kaplar, metin AYRI BİR KUTUDA
+  // DEĞİL doğrudan resmin üstünde durur, ve resmin bir parçası gibi görünür.
+  //
+  // Onaylanan mockup'a birebir oturtmak için üç şey:
+  //
+  //  1. ALT BANT YUMUŞAKÇA KOYULAŞIR — kutu değil, GEÇİŞ. Şeffaftan başlayıp
+  //     alta doğru koyulaşan sıcak bir gradyan; kenarı yok, nerede başladığı
+  //     görünmüyor, akşam ışığının yere düşen gölgesi gibi okunuyor. Bu,
+  //     "yazı kutunun içinde" hissi vermeden okunurluğu GARANTİ altına alır —
+  //     prompt modelden sakin alan istese de model her zaman uymayabilir.
+  //  2. YAZI RENGİ KİTAP BOYUNCA SABİT (açık krem). Önceki turda zemine göre
+  //     açık/koyu seçiliyordu; bu, sayfa sayfa değişen bir tipografi demekti —
+  //     bir kitapta tutarsız durur. Gradyan zaten koyu zemini garanti ettiği
+  //     için artık her sayfada aynı ton kullanılıyor.
+  //  3. GÖLGE, KALIN DIŞ ÇİZGİ DEĞİL. Mockup'taki text-shadow'un canvas
+  //     karşılığı (shadowBlur) kullanılıyor — strokeText kalın ve "sticker"
+  //     gibi duruyordu.
+  //
+  // Punto otomatiği korundu: metin sığana kadar küçülür, hiçbir cümle
+  // kırpılmaz (ekran görüntülerindeki "...korku ve" hatası buradan geliyordu).
+  const METIN_BANDI = 0.30;   // gradyanın başladığı yükseklik (alttan oran)
+  const SAYFA_NO_SERIDI = 0.045;
+
   const sayfaMetniBindir = async (hamB64, metin, sayfaNo) => {
     await fontHazirla(28, "Capriola");
     return new Promise((resolve) => {
@@ -4137,35 +4184,90 @@ function KitapStudyo({ authFetch, token }) {
         canvas.width = img.width; canvas.height = img.height;
         const ctx = canvas.getContext("2d");
         ctx.drawImage(img, 0, 0);
-        const metniVar = metin && metin.trim();
+
+        const G = img.width, Y = img.height;
+        const numaraSeridi = Y * SAYFA_NO_SERIDI;
+        const metniVar = !!(metin && metin.trim());
+
+        // ── 1 · Yumuşak alt geçiş (kutu DEĞİL) ──
+        // Üstte tamamen şeffaf başlar; ara duraklar eğriyi yumuşatır, böylece
+        // gradyanın başladığı yerde görünür bir çizgi oluşmaz.
+        const bantUstu = Y * (1 - METIN_BANDI);
+        const gr = ctx.createLinearGradient(0, bantUstu, 0, Y);
+        gr.addColorStop(0.00, "rgba(26,18,6,0)");
+        gr.addColorStop(0.35, "rgba(26,18,6,0.14)");
+        gr.addColorStop(0.65, "rgba(26,18,6,0.36)");
+        gr.addColorStop(1.00, "rgba(26,18,6,0.58)");
+        ctx.fillStyle = gr;
+        ctx.fillRect(0, bantUstu, G, Y - bantUstu);
+
+        // ── 2 · Metin ──
         if (metniVar) {
-          const bantH = img.height * 0.14;
-          ctx.fillStyle = "rgba(255,255,255,0.9)"; ctx.fillRect(0, img.height - bantH, img.width, bantH);
-          ctx.fillStyle = "#18181a"; ctx.textAlign = "center";
-          ctx.font = `${Math.round(img.width * 0.032)}px Capriola, Georgia, serif`;
-          metniSar(ctx, metin.trim(), img.width / 2, img.height - bantH + img.width * 0.05, img.width * 0.88, img.width * 0.042);
+          const maxG = G * 0.84;
+          let punto = Math.round(G * 0.034);
+          const enKucuk = Math.round(G * 0.023);
+          let satirlar = [];
+          while (punto >= enKucuk) {
+            ctx.font = `${punto}px Capriola, Georgia, serif`;
+            satirlar = metniSatirlaraBol(ctx, metin, maxG);
+            if (satirlar.length <= 4) break;
+            punto -= 1;
+          }
+          ctx.font = `${punto}px Capriola, Georgia, serif`;
+          if (!satirlar.length) satirlar = metniSatirlaraBol(ctx, metin, maxG);
+
+          const satirAraligi = punto * 1.42;
+          const blok = satirlar.length * satirAraligi;
+          const ilkSatirY = Y - numaraSeridi - blok + satirAraligi * 0.76;
+
+          ctx.textAlign = "center";
+          ctx.fillStyle = "#fffdf5";
+          ctx.shadowColor = "rgba(0,0,0,0.62)";
+          ctx.shadowBlur = Math.max(3, punto * 0.42);
+          ctx.shadowOffsetY = Math.max(1, punto * 0.05);
+          satirlar.forEach((s, i) => ctx.fillText(s, G / 2, ilkSatirY + i * satirAraligi));
+          ctx.shadowColor = "transparent"; ctx.shadowBlur = 0; ctx.shadowOffsetY = 0;
         }
+
+        // ── 3 · Sayfa numarası — kendi şeridinde, metne girmez ──
         if (sayfaNo) {
           ctx.textAlign = "center";
-          ctx.fillStyle = metniVar ? "#6f6f6c" : "rgba(0,0,0,0.55)";
-          ctx.font = `${Math.round(img.width * 0.02)}px Capriola, Georgia, serif`;
-          ctx.fillText(String(sayfaNo), img.width / 2, img.height - img.width * 0.018);
+          ctx.font = `${Math.round(G * 0.019)}px Capriola, Georgia, serif`;
+          ctx.fillStyle = "rgba(255,253,245,0.78)";
+          ctx.shadowColor = "rgba(0,0,0,0.5)";
+          ctx.shadowBlur = Math.max(2, G * 0.005);
+          ctx.fillText(String(sayfaNo), G / 2, Y - numaraSeridi * 0.34);
+          ctx.shadowColor = "transparent"; ctx.shadowBlur = 0;
         }
-        resolve(canvas.toDataURL("image/jpeg", 0.72).split(",")[1]);
+        resolve(canvas.toDataURL("image/jpeg", 0.86).split(",")[1]);
       };
       img.src = "data:image/png;base64," + hamB64;
     });
   };
 
-  // DEĞİŞTİRİLDİ (16 Ağu 2026, Bedirhan'ın ısrarlı talebi: "tek 1 görsel
-  // üretilip 2ye bölünüyor, belki problem orda — sol sayfa ayrı sağ sayfa
-  // ayrı çizilmeli, baskı kalitesi için 1024x1024 kare önerilmişti"): artık
-  // tek geniş (1536x1024) görsel üretip ortadan bölmek yerine, İKİ AYRI
-  // 1024x1024 (kare) görsel üretiyor. Sağ sayfa, sürekliliği korumak için
-  // SOL SAYFANIN KENDİ GÖRSELİNİ de (diğer referanslara ek olarak) alıyor —
-  // "images/edits" çoklu referans desteğini kullanarak. İkisi de artık
-  // kendi kompozisyonunun tamamını (768px'e bölünmüş yarı değil) 1024px
-  // genişlikte alıyor — daha yüksek çözünürlük.
+  // YENİDEN YAZILDI (16 Ağu 2026, Bedirhan: "sol sayfa ve sağ sayfa
+  // devamlılığı yok, tek 1 görsel gibi görünmeli ve tam devam gibi
+  // görünmeli"):
+  //
+  // Bir önceki tur İKİ AYRI 1024x1024 görsel üretiyordu (sol ve sağ ayrı
+  // çağrı), sağ sayfaya sol görseli referans vererek sürekliliği yakalamaya
+  // çalışıyordu. ÇALIŞMADI ve çalışması da mümkün değildi: görsel modeli her
+  // çağrıda sahneyi SIFIRDAN çiziyor, "bu sahnenin sağ yarısını göster"
+  // talimatını uygulamıyor — sahnenin tamamını yeniden kuruyor. Üstüne sol
+  // görselin referans verilmesi modeli birebir kopyaya İTİYORDU. Sonuç:
+  // yan yana iki neredeyse aynı resim, ortada hiçbir devamlılık yok.
+  //
+  // Süreklilik matematiksel olarak tek bir üretimden gelmek zorunda. Bu
+  // yüzden TEK GENİŞ (1536x1024) görsel üretilip ortadan ikiye bölünüyor —
+  // ufuk çizgisi, ışık, renk ve karakterler cilt payında kesintisiz devam
+  // ediyor, çünkü fiziksel olarak aynı resmin iki parçası.
+  //
+  // ÇÖZÜNÜRLÜK BEDELİ (açıkça yazıyorum): her sayfa 768x1024 oluyor, iki ayrı
+  // kare üretimdeki 1024x1024'ten düşük. Ama modelin izin verdiği en geniş
+  // boyut 1536x1024 ve süreklilik ancak tek üretimle mümkün — ikisi aynı anda
+  // olmuyor. Not: 1024x1024 de zaten baskı çözünürlüğü DEĞİL (20 cm'lik bir
+  // sayfa 300 dpi'da ~2360 px ister). Baskı için görseller sonradan ayrıca
+  // büyütülmeli; bu, seçilen yöntemden bağımsız bir sınır.
   const spreadUret = async (idx, hedefId) => {
     hedefId = hedefId || seciliId;
     const p = projeOku(hedefId);
@@ -4174,20 +4276,39 @@ function KitapStudyo({ authFetch, token }) {
     if (hedefId === seciliId) { setSpreadUretiliyorIdx(idx); setHata(""); }
     try {
       const { solSayfa, sagSayfa } = spreadNumaralariGetir(idx);
-      const kompozisyonNotu = "Kompozisyon: geniş açılı, sahnenin tamamını gösteren bir kadraj — yakın plan veya portre değil, tüm sahne/ortam net görünsün.";
 
-      // 1) SOL SAYFA — tüm karakter/stil referanslarıyla, tek kare görsel.
-      const solSahne = `${s.sahne.trim()}\n\nBu, iki sayfaya yayılan bir sahnenin SOL YARISI — kompozisyonun sol tarafını göster (sahnenin başlangıcı/sol taraftaki unsurlar). ${kompozisyonNotu}`;
-      const solHamUrl = await gorselIsteYenidenDeneyerek({ karakterTanimi: p.stilTanimi, sahne: solSahne, model: p.model, kalite: p.kalite, boyut: "1024x1024", referansGorseller: referansHavuzuTopla(hedefId) });
-      const solHamB64 = await urlDenB64Al(solHamUrl);
+      // Metin artık beyaz bir kutunun içinde değil, doğrudan illüstrasyonun
+      // üstünde duruyor. Bunun okunaklı olması için modelin o alanı SAKİN
+      // bırakması gerekiyor — yani metne yer, kompozisyonun bir parçası
+      // olarak baştan planlanıyor ("görsel metnin üstüne inşa edilmiş gibi").
+      // SEÇİLEN DÜZEN — KONSEPT 1 ("tam kanama, yazı resmin üstünde").
+      // Bu düzen kompozisyondan bir şey TALEP EDER: alt bantta sakin alan.
+      // Metin oraya, kutu olmadan oturacak. Model bu alanı bırakmazsa yazı
+      // kalabalığın içinde kaybolur — o yüzden prompt'ta açıkça isteniyor.
+      // (Canvas tarafındaki yumuşak koyulaşma ikinci güvence; ilk güvence bu.)
+      const metinAlaniNotu = (s.solMetinsiz && s.sagMetinsiz)
+        ? ""
+        : "\n\nMETİN ALANI (ÖNEMLİ): Görselin ALT %28'lik bandında, hem sol hem sağ yarıda, SAKİN ve AZ DETAYLI bir alan bırak — düz toprak, yumuşak çayır, sığ su, gölgeli zemin, sisli ön plan gibi. Bu bandın üzerine sonradan kitap metni yerleştirilecek. Oraya karakter yüzü, gözler, keskin kontrast, yoğun desen veya hikâyenin kritik detayı KOYMA. Bu bant boş bir şerit ya da kesilmiş bir alan gibi DURMASIN; manzaranın doğal ve yumuşak bir devamı olsun, ışığı yukarıya göre biraz daha alçak olsun.";
 
-      // 2) SAĞ SAYFA — aynı referanslara EK olarak, sol sayfanın kendi
-      // görselini de referans veriyoruz (aynı sahne, ışık, karakter
-      // pozisyonlarıyla sürekliliği korumak için).
-      const sagSahne = `${s.sahne.trim()}\n\nBu, iki sayfaya yayılan bir sahnenin SAĞ YARISI — kompozisyonun sağ tarafını göster, verilen SOL SAYFA görseliyle aynı sahnenin doğrudan devamı olmalı (aynı ışık, aynı an, aynı atmosfer, karakterlerin konumları tutarlı). ${kompozisyonNotu}`;
-      const sagReferanslar = [...referansHavuzuTopla(hedefId), solHamUrl];
-      const sagHamUrl = await gorselIsteYenidenDeneyerek({ karakterTanimi: p.stilTanimi, sahne: sagSahne, model: p.model, kalite: p.kalite, boyut: "1024x1024", referansGorseller: sagReferanslar });
-      const sagHamB64 = await urlDenB64Al(sagHamUrl);
+      const spreadSahne =
+        `${s.sahne.trim()}\n\n` +
+        "BU TEK BİR KESİNTİSİZ ÇİFT SAYFA İLLÜSTRASYONUDUR (double-page spread). " +
+        "Görsel tam ortadan ikiye bölünüp bir kitabın sol ve sağ sayfası olarak basılacak. " +
+        "Bu yüzden: ufuk çizgisi, zemin, gökyüzü, ışık yönü ve renk geçişleri soldan sağa KESİNTİSİZ devam etmeli — " +
+        "iki ayrı sahne yan yana konmuş gibi DEĞİL, tek bir geniş manzara gibi. " +
+        "Tam ortada (cilt payı) ana karakterin yüzü, gözü veya hikâyenin kritik detayı BULUNMASIN; " +
+        "orta bölge manzaranın sakin bir parçası olsun. " +
+        "Kompozisyon geniş açılı ve panoramik olsun; yakın plan portre değil. " +
+        "Görselin içinde HİÇBİR yazı, harf, rakam, imza veya filigran olmasın." +
+        metinAlaniNotu;
+
+      // TEK üretim → süreklilik garantili (aynı resmin iki parçası).
+      const genisUrl = await gorselIsteYenidenDeneyerek({
+        karakterTanimi: p.stilTanimi, sahne: spreadSahne, model: p.model,
+        kalite: p.kalite, boyut: "1536x1024", referansGorseller: referansHavuzuTopla(hedefId),
+      });
+      const genisB64 = await urlDenB64Al(genisUrl);
+      const { sol: solHamB64, sag: sagHamB64 } = await gorseliIkiyeBol(genisB64);
 
       const solFinal = await sayfaMetniBindir(solHamB64, s.solMetinsiz ? "" : s.solMetin, solSayfa);
       const sagFinal = await sayfaMetniBindir(sagHamB64, s.sagMetinsiz ? "" : s.sagMetin, sagSayfa);
