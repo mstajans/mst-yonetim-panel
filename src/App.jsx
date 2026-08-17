@@ -457,54 +457,158 @@ const ASISTAN_HAZIR_SORULAR = [
 // VERİ DÜRÜSTLÜĞÜ: rakamlar gerçek sipariş kaydından değil, başlangıç stoğu
 // ile güncel stok FARKINDAN hesaplanıyor. Bu, 4 Ağustos'taki hayali 1000
 // satış olayının kaynağıydı — o yüzden uyarı her zaman görünür (madde 9).
+// DEĞİŞTİRİLDİ (17 Ağu 2026, Bedirhan: "sadece son gelen sipariş görünse
+// yeterli. stok düşmüş, nereden düşmüş, niye düşmüş bilelim yeter"):
+//
+// Önceki hâl 69 kitaplık tam tabloyu açıyordu — istenen bu değildi. Artık
+// varsayılan görünüm SON HAREKETLER: hangi kitap, hangi platform, kaç adet,
+// neden. Tam döküm hâlâ var ama kapalı duruyor.
+//
+// Hareketler, book_stock üzerindeki veritabanı tetikleyicisinden gelir —
+// yani gerçekten olmuş olaylar. Satış dağılımı ise hesaplanmış rakam;
+// ikisi ayrı ayrı ve farklı etiketlerle gösteriliyor (madde 9).
 function SatisDagilimi({ authFetch }) {
   const [veri, setVeri] = useState(null);
+  const [hareket, setHareket] = useState(null);
   const [yukleniyor, setYukleniyor] = useState(true);
-  const [acik, setAcik] = useState(false);
+  const [dokumAcik, setDokumAcik] = useState(false);
+  const [tumHareket, setTumHareket] = useState(false);
   const [hata, setHata] = useState("");
 
-  useEffect(() => {
-    let iptal = false;
-    (async () => {
-      try {
-        const r = await authFetch("/api/admin/satis-dagilimi");
-        const d = await r.json();
-        if (iptal) return;
-        if (d.ok) setVeri(d); else setHata(d.error || "Satış dağılımı alınamadı.");
-      } catch { if (!iptal) setHata("Sunucuya ulaşılamadı."); }
-      finally { if (!iptal) setYukleniyor(false); }
-    })();
-    return () => { iptal = true; };
-  }, []);
+  const yenile = async () => {
+    try {
+      const [rh, rv] = await Promise.all([
+        authFetch("/api/admin/stok-hareketleri?limit=50"),
+        authFetch("/api/admin/satis-dagilimi"),
+      ]);
+      const [dh, dv] = await Promise.all([rh.json(), rv.json()]);
+      if (dh.ok) setHareket(dh);
+      if (dv.ok) setVeri(dv); else if (!dh.ok) setHata(dv.error || "Veri alınamadı.");
+    } catch { setHata("Sunucuya ulaşılamadı."); }
+    finally { setYukleniyor(false); }
+  };
+
+  useEffect(() => { yenile(); }, []);
 
   if (yukleniyor) return null;
   if (hata) return (
     <div style={{ marginTop: 18, background: THEME.panelBg, border: `1px solid ${THEME.border}`, borderRadius: 8, padding: "12px 16px", fontSize: 12, color: THEME.textMuted }}>
-      Satış dağılımı yüklenemedi: {hata}
+      Stok bilgisi yüklenemedi: {hata}
     </div>
   );
-  if (!veri || !veri.kitaplar.length) return null;
 
-  const enCok = veri.kitaplar[0]?.toplamSatis || 1;
-  const gosterilen = acik ? veri.kitaplar : veri.kitaplar.slice(0, 8);
+  const zaman = (t) => {
+    if (!t) return "";
+    const d = new Date(t), fark = (Date.now() - d.getTime()) / 1000;
+    if (fark < 60) return "az önce";
+    if (fark < 3600) return `${Math.floor(fark / 60)} dk önce`;
+    if (fark < 86400) return `${Math.floor(fark / 3600)} saat önce`;
+    return d.toLocaleString("tr-TR", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
+  };
+
+  const hepsi = hareket?.hareketler || [];
+  const liste = tumHareket ? hepsi : hepsi.slice(0, 6);
+  const son = hepsi[0];
 
   return (
     <div style={{ marginTop: 18, background: THEME.panelBg, border: `1px solid ${THEME.border}`, borderRadius: 8, padding: "16px 18px" }}>
       <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
-        <div style={{ color: THEME.textLight, fontWeight: 700, fontSize: 14 }}>Satış Dağılımı</div>
-        <div style={{ fontSize: 11.5, color: THEME.textMuted }}>
-          {veri.kitapSayisi} kitap · toplam {veri.genelToplam.toLocaleString("tr-TR")} adet
-        </div>
+        <div style={{ color: THEME.textLight, fontWeight: 700, fontSize: 14 }}>Stok Hareketi</div>
+        <div style={{ fontSize: 11.5, color: THEME.textMuted }}>stok nereden, niye düştü</div>
+        <div onClick={yenile} style={{ marginLeft: "auto", fontSize: 11.5, color: "#3E8ED0", cursor: "pointer" }}>⟳ Yenile</div>
       </div>
 
+      {/* ---- SON HAREKET: tek bakışta cevap ---- */}
+      {son ? (
+        <div style={{ marginTop: 12, background: THEME.bg, border: `1px solid ${THEME.border}`, borderRadius: 8, padding: "12px 14px" }}>
+          <div style={{ fontSize: 10.5, color: THEME.textMuted, letterSpacing: ".05em", textTransform: "uppercase" }}>Son hareket · {zaman(son.tarih)}</div>
+          <div style={{ marginTop: 6, fontSize: 15, color: THEME.textLight, fontWeight: 700 }}>
+            {son.kitap}
+            <span style={{ fontWeight: 400, color: THEME.textMuted, fontSize: 13 }}> — {son.platformAdi}</span>
+          </div>
+          <div style={{ marginTop: 6, display: "flex", gap: 18, flexWrap: "wrap", alignItems: "baseline" }}>
+            <div style={{ fontFamily: FONT_MONO, fontSize: 14, color: THEME.textLight }}>
+              Stok {son.oncekiStok == null ? "—" : son.oncekiStok} → {son.yeniStok}
+              {son.degisim != null && son.degisim !== 0 && (
+                <b style={{ marginLeft: 8, color: son.degisim < 0 ? "#E06C6C" : "#4FAF7A" }}>
+                  {son.degisim > 0 ? "+" : ""}{son.degisim}
+                </b>
+              )}
+            </div>
+            {son.satisDegisim ? (
+              <div style={{ fontFamily: FONT_MONO, fontSize: 13, color: THEME.textMuted }}>
+                Satış {son.satisDegisim > 0 ? "+" : ""}{son.satisDegisim}
+              </div>
+            ) : null}
+          </div>
+          <div style={{ marginTop: 8, fontSize: 12, color: son.sebepBilinmiyor ? "#e0ac79" : THEME.textLight }}>
+            <span style={{ color: THEME.textMuted }}>Neden: </span>
+            {son.sebepBilinmiyor ? "kaynak kaydedilmemiş — bu değişikliği yapan yol henüz sebep yazmıyor" : son.sebep}
+          </div>
+        </div>
+      ) : (
+        <div style={{ marginTop: 12, padding: "11px 13px", borderRadius: 7, fontSize: 12, lineHeight: 1.55,
+          background: "rgba(62,142,208,.07)", border: "1px solid rgba(62,142,208,.25)", color: "#9dc6e8" }}>
+          <b>Henüz hareket kaydı yok.</b> Stok geçmişi 17 Ağustos 2026'da tutulmaya başladı; öncesine ait kayıt yok.
+          İlk stok değişikliğinden (sipariş, senkron ya da elle giriş) sonra burada görünecek.
+        </div>
+      )}
+
+      {/* ---- Önceki hareketler ---- */}
+      {hepsi.length > 1 && (
+        <div style={{ marginTop: 10 }}>
+          {liste.slice(1).map((h) => (
+            <div key={h.id} style={{ display: "flex", gap: 10, alignItems: "baseline", padding: "7px 2px", borderTop: `1px solid ${THEME.border}`, fontSize: 12 }}>
+              <div style={{ minWidth: 74, color: THEME.textMuted, fontSize: 11 }}>{zaman(h.tarih)}</div>
+              <div style={{ flex: 1, color: THEME.textLight }}>
+                {h.kitap} <span style={{ color: THEME.textMuted }}>· {h.platformAdi}</span>
+                {h.sebep && <div style={{ fontSize: 11, color: THEME.textMuted, marginTop: 2 }}>{h.sebep}</div>}
+              </div>
+              <div style={{ fontFamily: FONT_MONO, color: h.degisim < 0 ? "#E06C6C" : h.degisim > 0 ? "#4FAF7A" : THEME.textMuted }}>
+                {h.degisim == null ? "yeni kayıt" : `${h.degisim > 0 ? "+" : ""}${h.degisim}`}
+              </div>
+              <div style={{ fontFamily: FONT_MONO, color: THEME.textMuted, minWidth: 46, textAlign: "right" }}>→ {h.yeniStok}</div>
+            </div>
+          ))}
+          {hepsi.length > 6 && (
+            <div onClick={() => setTumHareket(!tumHareket)} style={{ marginTop: 8, fontSize: 12, color: "#3E8ED0", cursor: "pointer" }}>
+              {tumHareket ? "▴ Daha az" : `▾ Son ${hepsi.length} hareketin tamamı`}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ---- Tam döküm: artık kapalı geliyor ---- */}
+      {veri && veri.kitaplar.length > 0 && (
+        <div style={{ marginTop: 14, borderTop: `1px solid ${THEME.border}`, paddingTop: 12 }}>
+          <div onClick={() => setDokumAcik(!dokumAcik)} style={{ fontSize: 12.5, color: "#3E8ED0", cursor: "pointer" }}>
+            {dokumAcik ? "▴ Tam satış dökümünü gizle" : `▾ Tam satış dökümü (${veri.kitapSayisi} kitap, ${veri.genelToplam.toLocaleString("tr-TR")} adet)`}
+          </div>
+
+          {dokumAcik && <SatisDokumu veri={veri} />}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Tam döküm — istendiğinde açılır. İçerik değişmedi, sadece varsayılan
+// olarak kapalı.
+function SatisDokumu({ veri }) {
+  const [hepsi, setHepsi] = useState(false);
+  const enCok = veri.kitaplar[0]?.toplamSatis || 1;
+  const gosterilen = hepsi ? veri.kitaplar : veri.kitaplar.slice(0, 8);
+
+  return (
+    <div style={{ marginTop: 10 }}>
       {/* Hesaplanan sayı, doğrulanmış sayı gibi gösterilmiyor. */}
-      <div style={{ marginTop: 8, padding: "8px 11px", borderRadius: 6, fontSize: 11, lineHeight: 1.5,
+      <div style={{ padding: "8px 11px", borderRadius: 6, fontSize: 11, lineHeight: 1.5,
         background: "rgba(255,138,61,.08)", border: "1px solid rgba(255,138,61,.28)", color: "#e0ac79" }}>
         <b>Hesaplanmış rakam — gerçek sipariş kaydı değil.</b> Başlangıç stoğu ile güncel stok farkından türetilir.
         Bir pazaryerinde ürün yayından kalkarsa stok 0 döner ve sahte satış görünebilir.
+        Yukarıdaki "Stok Hareketi" listesi ise gerçek olaylardır.
       </div>
 
-      {/* Platform kırılımı */}
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 12 }}>
         {veri.platformlar.map((pl) => (
           <div key={pl.platform} style={{ background: THEME.bg, border: `1px solid ${THEME.border}`, borderRadius: 7, padding: "8px 12px", minWidth: 110 }}>
@@ -514,7 +618,6 @@ function SatisDagilimi({ authFetch }) {
         ))}
       </div>
 
-      {/* Kitap kırılımı */}
       <div style={{ marginTop: 14, overflowX: "auto" }}>
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
           <thead>
@@ -563,8 +666,8 @@ function SatisDagilimi({ authFetch }) {
       </div>
 
       {veri.kitaplar.length > 8 && (
-        <div onClick={() => setAcik(!acik)} style={{ marginTop: 10, fontSize: 12, color: "#3E8ED0", cursor: "pointer" }}>
-          {acik ? "▴ Daha az göster" : `▾ Tüm ${veri.kitaplar.length} kitabı göster`}
+        <div onClick={() => setHepsi(!hepsi)} style={{ marginTop: 10, fontSize: 12, color: "#3E8ED0", cursor: "pointer" }}>
+          {hepsi ? "▴ Daha az göster" : `▾ Tüm ${veri.kitaplar.length} kitabı göster`}
         </div>
       )}
     </div>
@@ -3635,6 +3738,12 @@ function KitapStudyo({ authFetch, token }) {
   const [tumunuUretiliyorMu, setTumunuUretiliyorMu] = React.useState(false);
   const [beklemeSn, setBeklemeSn] = React.useState("4");
   const [toplamMaliyet, setToplamMaliyet] = React.useState(0);
+  // EKLENDİ (17 Ağu 2026, "hiçbir şey tahmini olmamalı"): ölçülen harcama
+  // tahmin edilenden AYRI tutuluyor. İkisi asla toplanmıyor, ekranda da ayrı
+  // ayrı ve farklı etiketlerle gösteriliyor.
+  const [olculenMaliyet, setOlculenMaliyet] = React.useState(0);
+  const [olculenSayi, setOlculenSayi] = React.useState(0);
+  const [sonOlcum, setSonOlcum] = React.useState(null);
   // Kur artık sabit kodlu değil — elle düzeltilebiliyor (bkz. maliyet kutusu).
   const [kurTL, setKurTL] = React.useState("48");
   const [onizlemeAcikMi, setOnizlemeAcikMi] = React.useState(false);
@@ -4247,10 +4356,25 @@ function KitapStudyo({ authFetch, token }) {
     let sonHata;
     for (let deneme = 0; deneme <= tekrar; deneme++) {
       try {
-        const r = await authFetch("/api/admin/kitap-studyo/gorsel-uret", { method: "POST", body: JSON.stringify(govde) });
+        const r = await authFetch("/api/admin/kitap-studyo/gorsel-uret", {
+          method: "POST",
+          // EKLENDİ (17 Ağu 2026): her üretim artık projeye ve amaca bağlı
+          // olarak kaydediliyor — "hangi kitap kaç kredi yaktı" ölçülebilsin.
+          body: JSON.stringify({ ...govde, projeId: govde.projeId ?? seciliId, amac: govde.amac || "uretim" }),
+        });
         const d = await r.json();
         if (!d.ok) { const h = new Error(d.error || "Görsel üretilemedi."); h.durumKodu = r.status; throw h; }
-        maliyetTahminiEkle(govde.model, govde.boyut, govde.kalite, !!(govde.referansGorseller && govde.referansGorseller.length));
+        // ÖLÇÜM VARSA TAHMİN KULLANILMAZ (17 Ağu 2026). Sunucu OpenAI'nin
+        // döndürdüğü gerçek token sayısını ve fiyat ayarıyla hesaplanmış
+        // tutarı gönderiyorsa, panelin kendi fiyat tablosuna hiç bakılmaz.
+        if (d.olcum?.maliyetUsd != null) {
+          setOlculenMaliyet((t) => t + d.olcum.maliyetUsd);
+          setOlculenSayi((n) => n + 1);
+          setSonOlcum(d.olcum);
+        } else {
+          maliyetTahminiEkle(govde.model, govde.boyut, govde.kalite, !!(govde.referansGorseller && govde.referansGorseller.length));
+          if (d.olcum) setSonOlcum(d.olcum);
+        }
         return d.gorselUrl;
       } catch (err) {
         sonHata = err;
@@ -5856,18 +5980,48 @@ function KitapStudyo({ authFetch, token }) {
                             üzerinden kesiliyor — dolar öne alındı, TL
                             karşılığı kullanılan kur AÇIKÇA yazılarak veriliyor
                             ve kur elle düzeltilebiliyor. */}
+                        {/* DEĞİŞTİRİLDİ (17 Ağu 2026): ÖLÇÜLEN harcama öne
+                            alındı. Sunucu artık her üretimde OpenAI'nin
+                            döndürdüğü gerçek token sayısını kaydediyor; fiyat
+                            ayarı girilmişse tutar ölçümden çıkıyor. Tahmin
+                            yalnızca ölçülemeyen üretimler için kalıyor ve ayrı
+                            satırda, ayrı etiketle duruyor — ikisi
+                            KARIŞTIRILMIYOR. */}
                         <div style={{ fontSize: 13 }}>
-                          <div style={{ fontSize: 11, color: "#6f6f6c" }}>Tahmini harcama (bu oturumda)</div>
-                          <div style={{ fontWeight: 700 }}>${toplamMaliyet.toFixed(3)}</div>
-                          <div style={{ fontSize: 10.5, color: "#8e897a", display: "flex", alignItems: "center", gap: 4, marginTop: 2 }}>
-                            ≈ ₺{(toplamMaliyet * (Number(kurTL) || 0)).toFixed(0)} · kur
-                            <input value={kurTL} onChange={(e) => setKurTL(e.target.value)}
-                              style={{ width: 44, fontSize: 10.5, padding: "1px 4px", borderRadius: 4, border: "1px solid #d8d2c4" }} />
-                          </div>
-                          <div style={{ fontSize: 10.5, color: "#b0663a", marginTop: 3, maxWidth: 260, lineHeight: 1.45 }}>
-                            Yayımlanmış liste fiyatlarından <b>hesaplanmış tahmindir</b>, fatura değildir.
-                            Gerçek tutar için OpenAI → Usage.
-                          </div>
+                          {olculenSayi > 0 ? (
+                            <>
+                              <div style={{ fontSize: 11, color: "#1E5E30" }}>Ölçülen harcama ({olculenSayi} görsel)</div>
+                              <div style={{ fontWeight: 700, color: "#1E5E30" }}>${olculenMaliyet.toFixed(4)}</div>
+                              <div style={{ fontSize: 10.5, color: "#8e897a", display: "flex", alignItems: "center", gap: 4, marginTop: 2 }}>
+                                ≈ ₺{(olculenMaliyet * (Number(kurTL) || 0)).toFixed(2)} · kur
+                                <input value={kurTL} onChange={(e) => setKurTL(e.target.value)}
+                                  style={{ width: 44, fontSize: 10.5, padding: "1px 4px", borderRadius: 4, border: "1px solid #d8d2c4" }} />
+                              </div>
+                              <div style={{ fontSize: 10.5, color: "#1E5E30", marginTop: 3, maxWidth: 280, lineHeight: 1.45 }}>
+                                OpenAI'nin bildirdiği <b>gerçek token sayısından</b> hesaplandı — tahmin değil.
+                              </div>
+                            </>
+                          ) : (
+                            <>
+                              <div style={{ fontSize: 11, color: "#6f6f6c" }}>Tahmini harcama (bu oturumda)</div>
+                              <div style={{ fontWeight: 700 }}>${toplamMaliyet.toFixed(3)}</div>
+                              <div style={{ fontSize: 10.5, color: "#8e897a", display: "flex", alignItems: "center", gap: 4, marginTop: 2 }}>
+                                ≈ ₺{(toplamMaliyet * (Number(kurTL) || 0)).toFixed(0)} · kur
+                                <input value={kurTL} onChange={(e) => setKurTL(e.target.value)}
+                                  style={{ width: 44, fontSize: 10.5, padding: "1px 4px", borderRadius: 4, border: "1px solid #d8d2c4" }} />
+                              </div>
+                              <div style={{ fontSize: 10.5, color: "#b0663a", marginTop: 3, maxWidth: 280, lineHeight: 1.45 }}>
+                                Yayımlanmış liste fiyatlarından <b>hesaplanmış tahmindir</b>, fatura değildir.
+                                Kesin rakam için en alttaki <b>Test Alanı</b>'na fiyatı bir kez girin —
+                                sonraki üretimlerin tutarı ölçümden çıkar.
+                              </div>
+                            </>
+                          )}
+                          {olculenSayi > 0 && toplamMaliyet > 0 && (
+                            <div style={{ fontSize: 10.5, color: "#b0663a", marginTop: 4 }}>
+                              Ayrıca ölçülemeyen üretimler için tahmin: ${toplamMaliyet.toFixed(3)}
+                            </div>
+                          )}
                         </div>
                       </div>
                       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -5937,7 +6091,547 @@ function KitapStudyo({ authFetch, token }) {
             )}
           </div>
         )}
+
+        {/* ============================================================
+            EN ALT — KAYIP KORUMA ve TEST ALANI (17 Ağu 2026)
+            ============================================================ */}
+        <SurumGecmisi authFetch={authFetch} projeId={seciliId} projeAdi={seciliProje?.kitapAdi} onGeriYuklendi={() => projeAc(seciliId)} />
+        <KitapStudyoTestAlani authFetch={authFetch} seciliProje={seciliProje} seciliId={seciliId} sonOlcum={sonOlcum} />
       </div>
+    </div>
+  );
+}
+
+// ============================================================
+// SÜRÜM GEÇMİŞİ — "bir daha kitap kaybolmasın" (17 Ağu 2026)
+//
+// Bedirhan: "Kaybolan 5 kitap projesi geri getirilemez… bunun önüne
+// geçebilmeliyiz yeni yaptığımız projelerde."
+//
+// Backend artık HER kayıttan önce projenin o anki hâlini saklıyor. Bu bölüm
+// o kayıtları gösterir ve tek tıkla geri döndürür. Ayrıca silinmiş projeler
+// de burada — silinen bir kitap tamamen yok olmuyor.
+// ============================================================
+function SurumGecmisi({ authFetch, projeId, projeAdi, onGeriYuklendi }) {
+  const [acik, setAcik] = React.useState(false);
+  const [surumler, setSurumler] = React.useState(null);
+  const [silinenler, setSilinenler] = React.useState([]);
+  const [durum, setDurum] = React.useState("");
+  const [calisiyor, setCalisiyor] = React.useState(false);
+
+  const yukle = async () => {
+    setDurum("");
+    try {
+      const istekler = [authFetch("/api/admin/kitap-studyo/silinen-projeler")];
+      if (projeId) istekler.unshift(authFetch(`/api/admin/kitap-studyo/projeler/${projeId}/surumler`));
+      const yanitlar = await Promise.all(istekler);
+      const veriler = await Promise.all(yanitlar.map((r) => r.json()));
+      if (projeId) {
+        setSurumler(veriler[0].ok ? veriler[0] : { surumler: [] });
+        setSilinenler(veriler[1].ok ? veriler[1].projeler : []);
+      } else {
+        setSurumler({ surumler: [] });
+        setSilinenler(veriler[0].ok ? veriler[0].projeler : []);
+      }
+    } catch { setDurum("Sürüm geçmişi okunamadı."); }
+  };
+
+  React.useEffect(() => { if (acik) yukle(); }, [acik, projeId]);
+
+  const geriYukle = async (s) => {
+    if (calisiyor) return;
+    if (!window.confirm(`Proje bu sürüme döndürülsün mü?\n\n${new Date(s.tarih).toLocaleString("tr-TR")} — ${s.gorselSayisi} görsel, ${s.sayfaCifti} sayfa çifti.\n\nŞu anki hâl de sürüm olarak saklanacak, bu işlem de geri alınabilir.`)) return;
+    setCalisiyor(true); setDurum("");
+    try {
+      const r = await authFetch(`/api/admin/kitap-studyo/projeler/${projeId}/surum-geri-yukle`, {
+        method: "POST", body: JSON.stringify({ surumId: s.id }),
+      });
+      const d = await r.json();
+      if (d.ok) { setDurum(`Geri yüklendi — ${d.gorselSayisi} görsel.`); await yukle(); if (onGeriYuklendi) onGeriYuklendi(); }
+      else setDurum(d.error || "Geri yüklenemedi.");
+    } catch { setDurum("Sunucuya ulaşılamadı."); }
+    finally { setCalisiyor(false); }
+  };
+
+  const projeyiGeriGetir = async (sp) => {
+    if (calisiyor) return;
+    if (!window.confirm(`"${sp.kitapAdi}" yeni bir proje olarak geri getirilsin mi? (${sp.gorselSayisi} görsel)`)) return;
+    setCalisiyor(true);
+    try {
+      const r = await authFetch("/api/admin/kitap-studyo/surumden-proje-olustur", {
+        method: "POST", body: JSON.stringify({ surumId: sp.sonSurumId }),
+      });
+      const d = await r.json();
+      setDurum(d.ok ? `Geri getirildi — yeni proje no: ${d.id}. Proje listesini yenileyin.` : (d.error || "Geri getirilemedi."));
+      if (d.ok) await yukle();
+    } catch { setDurum("Sunucuya ulaşılamadı."); }
+    finally { setCalisiyor(false); }
+  };
+
+  return (
+    <div style={{ marginTop: 20, background: "#fff", border: "1px solid #E4DFD1", borderRadius: 14, padding: "14px 16px" }}>
+      <div onClick={() => setAcik(!acik)} style={{ cursor: "pointer", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        <span style={{ fontSize: 15 }}>🛟</span>
+        <b style={{ fontFamily: "'Fredoka', sans-serif", fontSize: 14 }}>Kayıp Koruma — Sürüm Geçmişi</b>
+        <span style={{ fontSize: 11.5, color: "#6f6f6c" }}>her kayıttan önceki hâl saklanıyor, geri alınabilir</span>
+        <span style={{ marginLeft: "auto", fontSize: 12, color: "#3E8ED0" }}>{acik ? "▴ gizle" : "▾ aç"}</span>
+      </div>
+
+      {acik && (
+        <div style={{ marginTop: 12 }}>
+          <div style={{ padding: "9px 12px", borderRadius: 8, fontSize: 11.5, lineHeight: 1.6,
+            background: "#E8F3EC", border: "1px solid #A8D5B8", color: "#1E5E30" }}>
+            <b>Nasıl korunuyor:</b> Proje her kaydedildiğinde, kaydın <b>öncesindeki</b> hâli ayrı bir tabloya yazılır
+            (son 50 sürüm). Görseller Vercel Blob'da zaten duruyordu — kaybolan şey "hangi görsel hangi sayfada"
+            bilgisiydi; sürüm tam olarak onu saklar. Silinen projeler de burada kalır.
+            <div style={{ marginTop: 5, color: "#3f6a4c" }}>
+              Ağustos 2026'dan önceki kayıplar bu korumadan önceydi — onlar için hâlâ Görsel Deposu'ndan tek tek eşleştirme gerekiyor.
+            </div>
+          </div>
+
+          {durum && <div style={{ marginTop: 10, fontSize: 12, color: "#1E5E30" }}>{durum}</div>}
+
+          {projeId ? (
+            <div style={{ marginTop: 12 }}>
+              <div style={{ fontSize: 12.5, fontWeight: 600, marginBottom: 6 }}>
+                {projeAdi || "Seçili proje"} — sürümler
+              </div>
+              {!surumler ? <div style={{ fontSize: 12, color: "#6f6f6c" }}>Yükleniyor…</div>
+                : surumler.surumler.length === 0 ? (
+                  <div style={{ fontSize: 12, color: "#6f6f6c" }}>
+                    Bu projede henüz sürüm yok — koruma kurulu, ilk kayıttan sonra dolacak.
+                  </div>
+                ) : (
+                  <div style={{ maxHeight: 260, overflowY: "auto", border: "1px solid #EFEAE0", borderRadius: 8 }}>
+                    {surumler.surumler.map((s) => (
+                      <div key={s.id} style={{ display: "flex", gap: 10, alignItems: "center", padding: "8px 10px", borderBottom: "1px solid #F3EFE6", fontSize: 12 }}>
+                        <div style={{ minWidth: 128, color: "#6f6f6c" }}>{new Date(s.tarih).toLocaleString("tr-TR")}</div>
+                        <div style={{ flex: 1 }}>
+                          <b>{s.gorselSayisi}</b> görsel · {s.sayfaCifti} sayfa çifti · {s.karakter} karakter
+                          {s.sebep && <div style={{ fontSize: 11, color: "#8e897a" }}>{s.sebep}</div>}
+                        </div>
+                        <button style={{ ...stil.buton, padding: "4px 10px", fontSize: 11.5 }} disabled={calisiyor} onClick={() => geriYukle(s)}>
+                          Bu hâle dön
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+            </div>
+          ) : (
+            <div style={{ marginTop: 12, fontSize: 12, color: "#6f6f6c" }}>Sürümleri görmek için bir proje seçin.</div>
+          )}
+
+          {silinenler.length > 0 && (
+            <div style={{ marginTop: 14 }}>
+              <div style={{ fontSize: 12.5, fontWeight: 600, marginBottom: 6 }}>Silinmiş projeler ({silinenler.length})</div>
+              {silinenler.map((sp) => (
+                <div key={sp.projeId} style={{ display: "flex", gap: 10, alignItems: "center", padding: "8px 10px", border: "1px solid #EFEAE0", borderRadius: 8, marginBottom: 6, fontSize: 12 }}>
+                  <div style={{ flex: 1 }}>
+                    <b>{sp.kitapAdi}</b> <span style={{ color: "#8e897a" }}>· {sp.gorselSayisi} görsel · {sp.surumSayisi} sürüm</span>
+                    <div style={{ fontSize: 11, color: "#8e897a" }}>son kayıt {new Date(sp.tarih).toLocaleString("tr-TR")}</div>
+                  </div>
+                  <button style={{ ...stil.buton, padding: "4px 10px", fontSize: 11.5 }} disabled={calisiyor} onClick={() => projeyiGeriGetir(sp)}>
+                    Geri getir
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ============================================================
+// TEST ALANI (17 Ağu 2026)
+//
+// Bedirhan: "en altta bir test alanı yapalım kredi harcamalarını tam olarak
+// belirlemek için… hiçbir şey tahmini olmamalı."
+//
+// İLKE: Bu bölümdeki her sayı ya ÖLÇÜLMÜŞTÜR ya da "ölçülmedi" yazar.
+// Tahmin gösterilmez. Kredi harcayan tek düğme açıkça işaretlidir; geri
+// kalan her kontrol ücretsizdir ve OpenAI'yi hiç çağırmaz.
+// ============================================================
+function KitapStudyoTestAlani({ authFetch, seciliProje, seciliId, sonOlcum }) {
+  const [acik, setAcik] = React.useState(false);
+  const [fiyat, setFiyat] = React.useState(null);
+  const [form, setForm] = React.useState({ girdiMetin1M: "", girdiGorsel1M: "", cikti1M: "", usdTry: "", kaynak: "" });
+  const [fiyatDurum, setFiyatDurum] = React.useState("");
+  const [kontrol, setKontrol] = React.useState(null);
+  const [kontrolCalisiyor, setKontrolCalisiyor] = React.useState(false);
+  const [ozet, setOzet] = React.useState(null);
+  const [log, setLog] = React.useState(null);
+  const [testBoyut, setTestBoyut] = React.useState("1024x1024");
+  const [testKalite, setTestKalite] = React.useState("low");
+  const [testCalisiyor, setTestCalisiyor] = React.useState(false);
+  const [testSonuc, setTestSonuc] = React.useState(null);
+  const [testHata, setTestHata] = React.useState("");
+
+  const oku = async () => {
+    try {
+      const [rf, ro, rl] = await Promise.all([
+        authFetch("/api/admin/kitap-studyo/fiyat-ayari"),
+        authFetch("/api/admin/kitap-studyo/maliyet-ozeti"),
+        authFetch("/api/admin/kitap-studyo/uretim-log?limit=30"),
+      ]);
+      const [df, doz, dl] = await Promise.all([rf.json(), ro.json(), rl.json()]);
+      if (df.ok && df.fiyat) {
+        setFiyat(df.fiyat);
+        setForm({
+          girdiMetin1M: String(df.fiyat.girdiMetin1M ?? ""), girdiGorsel1M: String(df.fiyat.girdiGorsel1M ?? ""),
+          cikti1M: String(df.fiyat.cikti1M ?? ""), usdTry: String(df.fiyat.usdTry ?? ""), kaynak: df.fiyat.kaynak || "",
+        });
+      }
+      if (doz.ok) setOzet(doz);
+      if (dl.ok) setLog(dl);
+    } catch { /* sessiz — bölüm açılmamış olabilir */ }
+  };
+
+  React.useEffect(() => { if (acik) oku(); }, [acik]);
+
+  const fiyatKaydet = async () => {
+    setFiyatDurum("");
+    try {
+      const r = await authFetch("/api/admin/kitap-studyo/fiyat-ayari", { method: "PUT", body: JSON.stringify(form) });
+      const d = await r.json();
+      if (d.ok) { setFiyat(d.fiyat); setFiyatDurum("Kaydedildi. Bundan sonraki tutarlar ölçümden hesaplanacak."); await oku(); }
+      else setFiyatDurum(d.error || "Kaydedilemedi.");
+    } catch { setFiyatDurum("Sunucuya ulaşılamadı."); }
+  };
+
+  const sistemKontrol = async () => {
+    setKontrolCalisiyor(true); setKontrol(null);
+    try {
+      const r = await authFetch("/api/admin/kitap-studyo/sistem-kontrol");
+      const d = await r.json();
+      setKontrol(d.ok ? d : { kontroller: [{ ad: "Kontrol çalıştırılamadı", durum: "kaldi", detay: d.error || "" }], ozet: {} });
+    } catch { setKontrol({ kontroller: [{ ad: "Sunucuya ulaşılamadı", durum: "kaldi", detay: "" }], ozet: {} }); }
+    finally { setKontrolCalisiyor(false); }
+  };
+
+  // TEK GERÇEK ÜRETİM — kredi harcar. Ölçtükleri:
+  //  · sunucudan: token sayısı, OpenAI süresi, dosya boyutu, tutar
+  //  · tarayıcıdan: dosyanın GERÇEK piksel boyutu (istenen boyut geldi mi?)
+  //    ve projenin cm ölçüsünde kaç dpi ettiği
+  const testUret = async () => {
+    if (testCalisiyor) return;
+    if (!window.confirm(`Bu işlem GERÇEK bir görsel üretir ve OpenAI kredisi harcar.\n\nBoyut: ${testBoyut}\nKalite: ${testKalite}\n\nDevam edilsin mi?`)) return;
+    setTestCalisiyor(true); setTestHata(""); setTestSonuc(null);
+    const t0 = Date.now();
+    try {
+      const r = await authFetch("/api/admin/kitap-studyo/gorsel-uret", {
+        method: "POST",
+        body: JSON.stringify({
+          sahne: "Bir ölçüm testi görseli: düz gri arka plan üzerinde tek bir kırmızı daire.",
+          model: "gpt-image-2", boyut: testBoyut, kalite: testKalite,
+          projeId: seciliId || null, amac: "test-olcum", testMi: true,
+        }),
+      });
+      const d = await r.json();
+      if (!d.ok) { setTestHata(d.error || "Üretilemedi."); return; }
+
+      // Gerçek piksel ölçümü — istenen boyut gerçekten geldi mi?
+      const olculenPiksel = await new Promise((coz) => {
+        const im = new Image();
+        im.onload = () => coz({ g: im.naturalWidth, y: im.naturalHeight });
+        im.onerror = () => coz(null);
+        im.src = d.gorselUrl;
+      });
+
+      const cm = Number(seciliProje?.ozellikler?.genislikCm) || null;
+      const dpi = cm && olculenPiksel ? Math.round(olculenPiksel.g / (cm / 2.54)) : null;
+
+      setTestSonuc({
+        url: d.gorselUrl, olcum: d.olcum || null, olculenPiksel, dpi, cm,
+        istenenBoyut: testBoyut,
+        boyutTuttuMu: olculenPiksel ? `${olculenPiksel.g}x${olculenPiksel.y}` === testBoyut : null,
+        tarayiciToplamMs: Date.now() - t0,
+      });
+      await oku();
+    } catch (e) { setTestHata(e.message || "Hata"); }
+    finally { setTestCalisiyor(false); }
+  };
+
+  const renk = { gecti: "#1E5E30", kaldi: "#8B2E2E", uyari: "#7A4A12", bilinmiyor: "#6f6f6c" };
+  const simge = { gecti: "✔", kaldi: "✖", uyari: "!", bilinmiyor: "?" };
+
+  // Ölçülmüş bir grup varsa, seçili projenin sayfa sayısıyla GERÇEK toplam
+  // maliyet hesaplanır. Ölçüm yoksa hiçbir rakam gösterilmez.
+  const sayfaCifti = (seciliProje?.spreadler || []).length;
+  const uygunGrup = ozet?.gruplar?.find((g) => g.gorselBasinaUsd != null && g.boyut === (seciliProje?.yayilimBoyutu || "3840x1920") && g.kalite === (seciliProje?.kalite || "low"));
+
+  return (
+    <div style={{ marginTop: 16, marginBottom: 30, background: "#fff", border: "2px dashed #C9C2B2", borderRadius: 14, padding: "14px 16px" }}>
+      <div onClick={() => setAcik(!acik)} style={{ cursor: "pointer", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        <span style={{ fontSize: 15 }}>🧪</span>
+        <b style={{ fontFamily: "'Fredoka', sans-serif", fontSize: 14 }}>Test Alanı — ölçüm, kredi ve sistem kontrolü</b>
+        <span style={{ fontSize: 11.5, color: "#6f6f6c" }}>tahmin yok, sadece ölçülen</span>
+        <span style={{ marginLeft: "auto", fontSize: 12, color: "#3E8ED0" }}>{acik ? "▴ gizle" : "▾ aç"}</span>
+      </div>
+
+      {acik && (
+        <div style={{ marginTop: 14 }}>
+
+          {/* ---------- 1 · FİYAT AYARI ---------- */}
+          <div style={{ border: "1px solid #EFEAE0", borderRadius: 10, padding: "12px 14px" }}>
+            <div style={{ fontSize: 13, fontWeight: 700 }}>1 · Fiyat ayarı <span style={{ fontWeight: 400, color: "#6f6f6c", fontSize: 11.5 }}>(bir kez girilir)</span></div>
+            <div style={{ fontSize: 11.5, color: "#6f6f6c", marginTop: 5, lineHeight: 1.6 }}>
+              Token sayısını OpenAI ölçüp gönderiyor. Token <b>başına fiyatı</b> ise ilan ettikleri sayfadan
+              buraya bir kez giriyoruz. Böylece gösterilen tutar “tahmin” değil, <b>ölçüm × ilan edilmiş fiyat</b> oluyor.
+              Fiyat girilmezse tutar boş kalır — uydurulmaz.
+              <div style={{ marginTop: 4 }}>Değerler: <span style={{ fontFamily: FONT_MONO }}>platform.openai.com/docs/pricing</span> → görsel modelleri, 1M token başına dolar.</div>
+            </div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
+              {[
+                ["girdiMetin1M", "Girdi — metin ($/1M)"],
+                ["girdiGorsel1M", "Girdi — görsel ($/1M)"],
+                ["cikti1M", "Çıktı — görsel ($/1M)"],
+                ["usdTry", "Kur (₺/$)"],
+              ].map(([k, etiket]) => (
+                <div key={k}>
+                  <label style={{ fontSize: 10.5, color: "#6f6f6c", display: "block" }}>{etiket}</label>
+                  <input style={{ ...stil.input, width: 128 }} value={form[k]}
+                    onChange={(e) => setForm((f) => ({ ...f, [k]: e.target.value }))} />
+                </div>
+              ))}
+              <div style={{ flex: 1, minWidth: 180 }}>
+                <label style={{ fontSize: 10.5, color: "#6f6f6c", display: "block" }}>Kaynak / not</label>
+                <input style={{ ...stil.input, width: "100%" }} placeholder="örn. OpenAI fiyat sayfası, 17 Ağu 2026"
+                  value={form.kaynak} onChange={(e) => setForm((f) => ({ ...f, kaynak: e.target.value }))} />
+              </div>
+            </div>
+            <div style={{ marginTop: 10, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+              <button style={stil.buton} onClick={fiyatKaydet}>Fiyatı kaydet</button>
+              {fiyatDurum && <span style={{ fontSize: 12, color: "#1E5E30" }}>{fiyatDurum}</span>}
+              {!fiyat && <span style={{ fontSize: 12, color: "#7A4A12" }}>Henüz girilmedi — tutarlar boş görünecek.</span>}
+            </div>
+          </div>
+
+          {/* ---------- 2 · TEK GÖRSEL ÜRET VE ÖLÇ ---------- */}
+          <div style={{ border: "2px solid #F0C48A", background: "#FFFBF4", borderRadius: 10, padding: "12px 14px", marginTop: 12 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: "#7A4A12" }}>2 · Tek görsel üret ve ölç <span style={{ fontWeight: 400, fontSize: 11.5 }}>— bu düğme KREDİ HARCAR</span></div>
+            <div style={{ fontSize: 11.5, color: "#7A4A12", marginTop: 5, lineHeight: 1.6 }}>
+              Tek bir görsel üretilir ve şunlar ölçülür: harcanan gerçek token, OpenAI'nin yanıt süresi,
+              dosya boyutu, dönen görselin <b>gerçek piksel ölçüsü</b> (istenen boyut gerçekten geldi mi)
+              ve projenin cm ölçüsünde kaç <b>dpi</b> ettiği. Bir sayfanın gerçekte kaça mal olduğu buradan çıkar.
+            </div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10, alignItems: "flex-end" }}>
+              <div>
+                <label style={{ fontSize: 10.5, color: "#6f6f6c", display: "block" }}>Boyut</label>
+                <select style={{ ...stil.input, width: 150 }} value={testBoyut} onChange={(e) => setTestBoyut(e.target.value)}>
+                  <option value="1024x1024">1024×1024 (en ucuz)</option>
+                  <option value="1536x1024">1536×1024</option>
+                  <option value="1920x1920">1920×1920 (tek sayfa)</option>
+                  <option value="3840x1920">3840×1920 (sayfa çifti)</option>
+                </select>
+              </div>
+              <div>
+                <label style={{ fontSize: 10.5, color: "#6f6f6c", display: "block" }}>Kalite</label>
+                <select style={{ ...stil.input, width: 110 }} value={testKalite} onChange={(e) => setTestKalite(e.target.value)}>
+                  <option value="low">Düşük</option>
+                  <option value="medium">Orta</option>
+                  <option value="high">Yüksek</option>
+                </select>
+              </div>
+              <button style={{ ...stil.buton, background: "#C0392B", ...(testCalisiyor ? stil.butonPasif : {}) }}
+                disabled={testCalisiyor} onClick={testUret}>
+                {testCalisiyor ? "Üretiliyor ve ölçülüyor…" : "Üret ve ölç (kredi harcar)"}
+              </button>
+            </div>
+
+            {testHata && <div style={{ marginTop: 10, fontSize: 12, color: "#8B2E2E" }}>Hata: {testHata}</div>}
+
+            {testSonuc && (
+              <div style={{ marginTop: 12, display: "flex", gap: 14, flexWrap: "wrap" }}>
+                <img src={testSonuc.url} style={{ width: 140, borderRadius: 8, border: "1px solid #E4DFD1" }} />
+                <div style={{ flex: 1, minWidth: 260, fontSize: 12, lineHeight: 1.7 }}>
+                  <table style={{ borderCollapse: "collapse" }}>
+                    <tbody>
+                      {[
+                        ["İstenen boyut", testSonuc.istenenBoyut],
+                        ["Gelen gerçek boyut", testSonuc.olculenPiksel ? `${testSonuc.olculenPiksel.g}×${testSonuc.olculenPiksel.y} px ${testSonuc.boyutTuttuMu ? "✔ tuttu" : "✖ FARKLI"}` : "ölçülemedi"],
+                        ["Sayfa ölçüsünde çözünürlük", testSonuc.dpi ? `${testSonuc.dpi} dpi (${testSonuc.cm} cm genişlikte)${testSonuc.dpi >= 300 ? " ✔ baskıya uygun" : testSonuc.dpi >= 200 ? " · sınırda" : " ✖ baskı için düşük"}` : "projeye genişlik (cm) girilmemiş"],
+                        ["OpenAI süresi", testSonuc.olcum?.sureMs != null ? `${(testSonuc.olcum.sureMs / 1000).toFixed(1)} sn` : "ölçülemedi"],
+                        ["Baştan sona (yükleme dahil)", `${(testSonuc.tarayiciToplamMs / 1000).toFixed(1)} sn`],
+                        ["Dosya boyutu", testSonuc.olcum?.baytSayisi != null ? `${(testSonuc.olcum.baytSayisi / 1048576).toFixed(2)} MB` : "ölçülemedi"],
+                        ["Girdi token", testSonuc.olcum?.girdiToken ?? "gelmedi"],
+                        ["Çıktı token", testSonuc.olcum?.ciktiToken ?? "gelmedi"],
+                        ["Tutar", testSonuc.olcum?.maliyetUsd != null
+                          ? `$${testSonuc.olcum.maliyetUsd.toFixed(4)}${testSonuc.olcum.maliyetTry != null ? ` (₺${testSonuc.olcum.maliyetTry.toFixed(2)})` : ""}`
+                          : (testSonuc.olcum?.maliyetNeden || "hesaplanamadı")],
+                      ].map(([a, b]) => (
+                        <tr key={a}>
+                          <td style={{ padding: "2px 12px 2px 0", color: "#6f6f6c", whiteSpace: "nowrap", verticalAlign: "top" }}>{a}</td>
+                          <td style={{ padding: "2px 0", fontFamily: FONT_MONO }}>{String(b)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {testSonuc.olcum?.maliyetUsd != null && sayfaCifti > 0 && (
+                    <div style={{ marginTop: 8, padding: "8px 11px", borderRadius: 7, background: "#E8F3EC", border: "1px solid #A8D5B8", color: "#1E5E30" }}>
+                      Bu ölçüme göre <b>{sayfaCifti} sayfa çifti</b> ={" "}
+                      <b>${(testSonuc.olcum.maliyetUsd * sayfaCifti).toFixed(2)}</b>
+                      {testSonuc.olcum.maliyetTry != null && ` (₺${(testSonuc.olcum.maliyetTry * sayfaCifti).toFixed(0)})`}
+                      <div style={{ fontSize: 11, marginTop: 3 }}>
+                        Aynı boyut ve kalitede üretilirse geçerli. Kapak, karakter ve yeniden denemeler bunun dışında.
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {!testSonuc && sonOlcum && (
+              <div style={{ marginTop: 10, fontSize: 11.5, color: "#6f6f6c" }}>
+                Son normal üretim: {sonOlcum.boyut} · {sonOlcum.sureMs != null ? `${(sonOlcum.sureMs / 1000).toFixed(1)} sn` : "?"}
+                {sonOlcum.ciktiToken != null && ` · ${sonOlcum.ciktiToken} çıktı token`}
+                {sonOlcum.maliyetUsd != null && ` · $${sonOlcum.maliyetUsd.toFixed(4)}`}
+              </div>
+            )}
+          </div>
+
+          {/* ---------- 3 · ÖLÇÜLEN MALİYET TABLOSU ---------- */}
+          <div style={{ border: "1px solid #EFEAE0", borderRadius: 10, padding: "12px 14px", marginTop: 12 }}>
+            <div style={{ fontSize: 13, fontWeight: 700 }}>3 · Ölçülen maliyet — boyut ve kaliteye göre</div>
+            {!ozet ? <div style={{ fontSize: 12, color: "#6f6f6c", marginTop: 6 }}>Yükleniyor…</div>
+              : ozet.gruplar.length === 0 ? (
+                <div style={{ fontSize: 12, color: "#7A4A12", marginTop: 6, lineHeight: 1.6 }}>
+                  Henüz hiç ölçüm yok — bu yüzden burada rakam göstermiyoruz.
+                  Yukarıdaki “Üret ve ölç” ile her boyut/kalite için birer görsel üretildiğinde tablo dolar.
+                </div>
+              ) : (
+                <div style={{ marginTop: 8, overflowX: "auto" }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                    <thead>
+                      <tr style={{ color: "#6f6f6c", textAlign: "left" }}>
+                        <th style={{ padding: "5px 8px" }}>Boyut</th>
+                        <th style={{ padding: "5px 8px" }}>Kalite</th>
+                        <th style={{ padding: "5px 8px", textAlign: "right" }}>Ölçüm</th>
+                        <th style={{ padding: "5px 8px", textAlign: "right" }}>Ort. çıktı token</th>
+                        <th style={{ padding: "5px 8px", textAlign: "right" }}>Ort. süre</th>
+                        <th style={{ padding: "5px 8px", textAlign: "right" }}>Görsel başına</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {ozet.gruplar.map((g, i) => (
+                        <tr key={i} style={{ borderTop: "1px solid #F3EFE6" }}>
+                          <td style={{ padding: "6px 8px", fontFamily: FONT_MONO }}>{g.boyut}</td>
+                          <td style={{ padding: "6px 8px" }}>{g.kalite}{g.uc === "edits" ? " · referanslı" : ""}</td>
+                          <td style={{ padding: "6px 8px", textAlign: "right", fontFamily: FONT_MONO }}>{g.olculenAdet}/{g.adet}</td>
+                          <td style={{ padding: "6px 8px", textAlign: "right", fontFamily: FONT_MONO }}>{g.ortCiktiToken ?? "—"}</td>
+                          <td style={{ padding: "6px 8px", textAlign: "right", fontFamily: FONT_MONO }}>{g.ortSureMs != null ? `${(g.ortSureMs / 1000).toFixed(1)} sn` : "—"}</td>
+                          <td style={{ padding: "6px 8px", textAlign: "right", fontFamily: FONT_MONO, fontWeight: 700 }}>
+                            {g.gorselBasinaUsd != null
+                              ? `$${g.gorselBasinaUsd.toFixed(4)}`
+                              : <span title={g.neden || ""} style={{ color: "#7A4A12", fontWeight: 400 }}>ölçülmedi</span>}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {uygunGrup && sayfaCifti > 0 && (
+                    <div style={{ marginTop: 10, padding: "9px 12px", borderRadius: 8, background: "#E8F3EC", border: "1px solid #A8D5B8", color: "#1E5E30", fontSize: 12 }}>
+                      <b>Bu kitabın ölçülmüş maliyeti:</b> {sayfaCifti} sayfa çifti × ${uygunGrup.gorselBasinaUsd.toFixed(4)} ={" "}
+                      <b>${(uygunGrup.gorselBasinaUsd * sayfaCifti).toFixed(2)}</b>
+                      {uygunGrup.gorselBasinaTry != null && ` ≈ ₺${(uygunGrup.gorselBasinaTry * sayfaCifti).toFixed(0)}`}
+                      <div style={{ fontSize: 11, marginTop: 3 }}>{uygunGrup.olculenAdet} gerçek üretimin ortalamasından. Kapak, karakter ve başarısız denemeler hariç.</div>
+                    </div>
+                  )}
+                </div>
+              )}
+          </div>
+
+          {/* ---------- 4 · SİSTEM KONTROLÜ ---------- */}
+          <div style={{ border: "1px solid #EFEAE0", borderRadius: 10, padding: "12px 14px", marginTop: 12 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+              <div style={{ fontSize: 13, fontWeight: 700 }}>4 · Sistem kontrolü <span style={{ fontWeight: 400, color: "#1E5E30", fontSize: 11.5 }}>— ücretsiz, kredi harcamaz</span></div>
+              <button style={{ ...stil.buton, padding: "4px 12px", fontSize: 12, ...(kontrolCalisiyor ? stil.butonPasif : {}) }}
+                disabled={kontrolCalisiyor} onClick={sistemKontrol}>
+                {kontrolCalisiyor ? "Kontrol ediliyor…" : "Kontrolleri çalıştır"}
+              </button>
+              {kontrol?.ozet && (
+                <span style={{ fontSize: 12, color: "#6f6f6c" }}>
+                  {kontrol.ozet.gecti} geçti · {kontrol.ozet.kaldi} kaldı · {kontrol.ozet.uyari} uyarı
+                </span>
+              )}
+            </div>
+            {kontrol && (
+              <div style={{ marginTop: 10 }}>
+                {kontrol.kontroller.map((k, i) => (
+                  <div key={i} style={{ display: "flex", gap: 10, padding: "6px 0", borderTop: i ? "1px solid #F3EFE6" : "none", fontSize: 12 }}>
+                    <div style={{ width: 16, color: renk[k.durum] || "#6f6f6c", fontWeight: 700 }}>{simge[k.durum] || "?"}</div>
+                    <div style={{ flex: 1 }}>
+                      <b style={{ color: renk[k.durum] || "#333" }}>{k.ad}</b>
+                      <div style={{ color: "#6f6f6c", fontSize: 11.5, marginTop: 1 }}>{k.detay}</div>
+                      {k.nasil && <div style={{ color: "#a8a294", fontSize: 10.5, marginTop: 1 }}>nasıl ölçüldü: {k.nasil}</div>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* ---------- 5 · ÜRETİM KAYITLARI ---------- */}
+          <div style={{ border: "1px solid #EFEAE0", borderRadius: 10, padding: "12px 14px", marginTop: 12 }}>
+            <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
+              <div style={{ fontSize: 13, fontWeight: 700 }}>5 · Üretim kayıtları</div>
+              <span style={{ fontSize: 11.5, color: "#6f6f6c" }}>her üretim tek tek kaydediliyor</span>
+              <button style={{ ...stil.buton, padding: "3px 10px", fontSize: 11.5, marginLeft: "auto" }} onClick={oku}>⟳ Yenile</button>
+            </div>
+            {log?.ozet && (
+              <div style={{ marginTop: 8, fontSize: 12, color: "#6f6f6c" }}>
+                Son {log.ozet.kayitSayisi} kayıt · {log.ozet.basariliSayisi} başarılı ·{" "}
+                {log.ozet.maliyetiOlculen > 0
+                  ? <>toplam ölçülen tutar <b style={{ color: "#1E5E30" }}>${log.ozet.toplamUsd.toFixed(4)}</b>
+                      {log.ozet.toplamTry != null && ` (₺${log.ozet.toplamTry.toFixed(2)})`}</>
+                  : "tutar hesaplanamadı (fiyat girilmedi ya da token bilgisi gelmedi)"}
+                {log.ozet.ortalamaSureMs != null && ` · ortalama ${(log.ozet.ortalamaSureMs / 1000).toFixed(1)} sn`}
+              </div>
+            )}
+            {log?.kayitlar?.length ? (
+              <div style={{ marginTop: 8, maxHeight: 240, overflowY: "auto" }}>
+                {log.kayitlar.map((k) => (
+                  <div key={k.id} style={{ display: "flex", gap: 10, padding: "5px 0", borderTop: "1px solid #F3EFE6", fontSize: 11.5 }}>
+                    <div style={{ minWidth: 112, color: "#8e897a" }}>{new Date(k.tarih).toLocaleString("tr-TR")}</div>
+                    <div style={{ minWidth: 84, fontFamily: FONT_MONO }}>{k.boyut}</div>
+                    <div style={{ minWidth: 56 }}>{k.kalite}</div>
+                    <div style={{ minWidth: 58, fontFamily: FONT_MONO, color: "#6f6f6c" }}>{k.sureMs != null ? `${(k.sureMs / 1000).toFixed(1)}s` : "—"}</div>
+                    <div style={{ flex: 1, color: k.basarili ? "#6f6f6c" : "#8B2E2E" }}>
+                      {k.basarili ? (k.amac || "üretim") : `HATA: ${(k.hata || "").slice(0, 70)}`}
+                      {k.testMi && <span style={{ marginLeft: 6, fontSize: 10, background: "#F4E7D0", borderRadius: 4, padding: "1px 5px" }}>test</span>}
+                    </div>
+                    <div style={{ fontFamily: FONT_MONO, minWidth: 66, textAlign: "right" }}>
+                      {k.maliyetUsd != null ? `$${k.maliyetUsd.toFixed(4)}` : "—"}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : <div style={{ marginTop: 8, fontSize: 12, color: "#6f6f6c" }}>Kayıt yok.</div>}
+          </div>
+
+          {/* ---------- 6 · ELLE TEST EDİLECEKLER ---------- */}
+          <div style={{ border: "1px solid #EFEAE0", borderRadius: 10, padding: "12px 14px", marginTop: 12 }}>
+            <div style={{ fontSize: 13, fontWeight: 700 }}>6 · Yazılımın ölçemediği, gözle bakılması gerekenler</div>
+            <div style={{ fontSize: 11.5, color: "#6f6f6c", marginTop: 5, lineHeight: 1.6 }}>
+              Aşağıdakiler otomatik kontrol edilemez — çünkü “iyi görünüyor mu” sorusunun ölçüsü yok.
+              Kredi yüklendiğinde sırayla bakılmalı. Yanlarında hangi ayarla test edileceği yazıyor.
+            </div>
+            <ol style={{ fontSize: 12, lineHeight: 1.75, marginTop: 8, paddingLeft: 20, color: "#3a3a38" }}>
+              <li><b>Baskı çözünürlüğü gerçekten geliyor mu</b> — 3840×1920, orta kalite ile bir sayfa çifti üret; yukarıdaki ölçüm “tuttu” demeli ve dpi ≥ 300 çıkmalı.</li>
+              <li><b>Vercel süre sınırı</b> — aynı üretimde süre 60 sn'yi geçerse Hobby planında istek kesilir. Ölçüm bunu gösterir; kesilirse plan ya da boyut değişmeli.</li>
+              <li><b>Sayfa çifti sürekliliği</b> — tek geniş görsel ikiye bölünüyor; ortadaki birleşme yerinde kopukluk var mı, gözle bakılmalı.</li>
+              <li><b>Karakter tutarlılığı</b> — art arda 3 sayfa üret; aynı karakter aynı görünüyor mu.</li>
+              <li><b>Yazı yerleşimi</b> — üretilen görsel <u>yazısız</u> gelmeli. Yazı panelde ekleniyor; konumu sürüklenebiliyor mu, uzun metin taşıyor mu.</li>
+              <li><b>PDF ölçüsü</b> — PDF indir, Acrobat'ta “Belge özellikleri”nde sayfa boyutu projede yazan cm ile birebir aynı mı.</li>
+              <li><b>Kalite farkı gerçekten görünüyor mu</b> — aynı sahneyi düşük ve orta kalitede üretip yan yana koy; fark maliyeti hak ediyor mu.</li>
+              <li><b>Kayıp koruması</b> — bir projeyi kaydet, sonra “Kayıp Koruma” bölümünden önceki sürüme dön; görseller geri gelmeli.</li>
+            </ol>
+          </div>
+
+        </div>
+      )}
     </div>
   );
 }
