@@ -6095,11 +6095,54 @@ function KitapStudyo({ authFetch, token }) {
         {/* ============================================================
             EN ALT — KAYIP KORUMA ve TEST ALANI (17 Ağu 2026)
             ============================================================ */}
-        <SurumGecmisi authFetch={authFetch} projeId={seciliId} projeAdi={seciliProje?.kitapAdi} onGeriYuklendi={() => projeAc(seciliId)} />
-        <KitapStudyoTestAlani authFetch={authFetch} seciliProje={seciliProje} seciliId={seciliId} sonOlcum={sonOlcum} />
+        {/* DÜZELTİLDİ (17 Ağu 2026): bu iki bölüm `stil` nesnesini
+            kullanıyor ama `stil` KitapStudyo'nun İÇİNDE tanımlı — modül
+            düzeyindeki bileşenler ona erişemiyordu ve bölüm açılınca sayfa
+            tamamen boşalıyordu. Artık prop olarak geçiyor.
+
+            Ayrıca ikisi de HataSinir ile sarıldı: buradaki bir hata bir
+            daha ASLA tüm paneli karartmasın — üretim ekranı, alttaki bir
+            test bölümü yüzünden kaybedilemez. */}
+        <HataSinir ad="Kayıp Koruma">
+          <SurumGecmisi authFetch={authFetch} stil={stil} projeId={seciliId} projeAdi={seciliProje?.kitapAdi} onGeriYuklendi={() => projeAc(seciliId)} />
+        </HataSinir>
+        <HataSinir ad="Test Alanı">
+          <KitapStudyoTestAlani authFetch={authFetch} stil={stil} seciliProje={seciliProje} seciliId={seciliId} sonOlcum={sonOlcum} />
+        </HataSinir>
       </div>
     </div>
   );
+}
+
+// ============================================================
+// HATA SINIRI (17 Ağu 2026)
+//
+// Test Alanı ilk denemede tüm sayfayı karartmıştı: bileşen, KitapStudyo'nun
+// içinde tanımlı `stil` nesnesine erişemiyordu ve React tek bir hatada tüm
+// ağacı söküyor. Asıl hata düzeltildi, ama tek bir bölümün üretim ekranını
+// götürebilmesi kabul edilemez — bu sınır onu engelliyor.
+//
+// Hata gizlenmiyor: kullanıcıya ne olduğu ve nerede olduğu yazılıyor.
+// ============================================================
+class HataSinir extends React.Component {
+  constructor(p) { super(p); this.state = { hata: null }; }
+  static getDerivedStateFromError(hata) { return { hata }; }
+  componentDidCatch(hata, bilgi) {
+    console.error(`[MST-PANEL] "${this.props.ad}" bölümü hata verdi:`, hata, bilgi?.componentStack);
+  }
+  render() {
+    if (this.state.hata) {
+      return (
+        <div style={{ marginTop: 16, padding: "12px 15px", borderRadius: 12, fontSize: 12.5, lineHeight: 1.6,
+          background: "#FFF4E5", border: "1px solid #F0C48A", color: "#7A4A12" }}>
+          <b>“{this.props.ad}” bölümü açılamadı.</b> Sayfanın geri kalanı çalışmaya devam ediyor.
+          <div style={{ marginTop: 5, fontFamily: FONT_MONO, fontSize: 11.5 }}>{String(this.state.hata?.message || this.state.hata)}</div>
+          <div style={{ marginTop: 5, fontSize: 11 }}>Bu metni bana ilet — düzeltilebilir. (Ayrıntı tarayıcı konsolunda.)</div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
 }
 
 // ============================================================
@@ -6112,7 +6155,7 @@ function KitapStudyo({ authFetch, token }) {
 // o kayıtları gösterir ve tek tıkla geri döndürür. Ayrıca silinmiş projeler
 // de burada — silinen bir kitap tamamen yok olmuyor.
 // ============================================================
-function SurumGecmisi({ authFetch, projeId, projeAdi, onGeriYuklendi }) {
+function SurumGecmisi({ authFetch, stil, projeId, projeAdi, onGeriYuklendi }) {
   const [acik, setAcik] = React.useState(false);
   const [surumler, setSurumler] = React.useState(null);
   const [silinenler, setSilinenler] = React.useState([]);
@@ -6254,7 +6297,7 @@ function SurumGecmisi({ authFetch, projeId, projeAdi, onGeriYuklendi }) {
 // Tahmin gösterilmez. Kredi harcayan tek düğme açıkça işaretlidir; geri
 // kalan her kontrol ücretsizdir ve OpenAI'yi hiç çağırmaz.
 // ============================================================
-function KitapStudyoTestAlani({ authFetch, seciliProje, seciliId, sonOlcum }) {
+function KitapStudyoTestAlani({ authFetch, stil, seciliProje, seciliId, sonOlcum }) {
   const [acik, setAcik] = React.useState(false);
   const [fiyat, setFiyat] = React.useState(null);
   const [form, setForm] = React.useState({ girdiMetin1M: "", girdiGorsel1M: "", cikti1M: "", usdTry: "", kaynak: "" });
