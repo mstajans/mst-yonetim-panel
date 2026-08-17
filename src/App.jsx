@@ -450,6 +450,127 @@ const ASISTAN_HAZIR_SORULAR = [
   { etiket: "Veri sağlığı", soru: "Verilerde tutarsızlık, eksiklik veya şüpheli görünen bir şey var mı? ISBN'siz kitaplar, hiç satmayan kitaplar ve platform eşleşmeleri açısından değerlendir." },
 ];
 
+
+// ============ SATIŞ DAĞILIMI — hangi kitaptan, hangi platformdan ============
+// Genel Bakış'ta yalnız toplam satış görünüyordu. Bu bileşen kırılımı açar.
+//
+// VERİ DÜRÜSTLÜĞÜ: rakamlar gerçek sipariş kaydından değil, başlangıç stoğu
+// ile güncel stok FARKINDAN hesaplanıyor. Bu, 4 Ağustos'taki hayali 1000
+// satış olayının kaynağıydı — o yüzden uyarı her zaman görünür (madde 9).
+function SatisDagilimi({ authFetch }) {
+  const [veri, setVeri] = useState(null);
+  const [yukleniyor, setYukleniyor] = useState(true);
+  const [acik, setAcik] = useState(false);
+  const [hata, setHata] = useState("");
+
+  useEffect(() => {
+    let iptal = false;
+    (async () => {
+      try {
+        const r = await authFetch("/api/admin/satis-dagilimi");
+        const d = await r.json();
+        if (iptal) return;
+        if (d.ok) setVeri(d); else setHata(d.error || "Satış dağılımı alınamadı.");
+      } catch { if (!iptal) setHata("Sunucuya ulaşılamadı."); }
+      finally { if (!iptal) setYukleniyor(false); }
+    })();
+    return () => { iptal = true; };
+  }, []);
+
+  if (yukleniyor) return null;
+  if (hata) return (
+    <div style={{ marginTop: 18, background: THEME.panelBg, border: `1px solid ${THEME.border}`, borderRadius: 8, padding: "12px 16px", fontSize: 12, color: THEME.textMuted }}>
+      Satış dağılımı yüklenemedi: {hata}
+    </div>
+  );
+  if (!veri || !veri.kitaplar.length) return null;
+
+  const enCok = veri.kitaplar[0]?.toplamSatis || 1;
+  const gosterilen = acik ? veri.kitaplar : veri.kitaplar.slice(0, 8);
+
+  return (
+    <div style={{ marginTop: 18, background: THEME.panelBg, border: `1px solid ${THEME.border}`, borderRadius: 8, padding: "16px 18px" }}>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
+        <div style={{ color: THEME.textLight, fontWeight: 700, fontSize: 14 }}>Satış Dağılımı</div>
+        <div style={{ fontSize: 11.5, color: THEME.textMuted }}>
+          {veri.kitapSayisi} kitap · toplam {veri.genelToplam.toLocaleString("tr-TR")} adet
+        </div>
+      </div>
+
+      {/* Hesaplanan sayı, doğrulanmış sayı gibi gösterilmiyor. */}
+      <div style={{ marginTop: 8, padding: "8px 11px", borderRadius: 6, fontSize: 11, lineHeight: 1.5,
+        background: "rgba(255,138,61,.08)", border: "1px solid rgba(255,138,61,.28)", color: "#e0ac79" }}>
+        <b>Hesaplanmış rakam — gerçek sipariş kaydı değil.</b> Başlangıç stoğu ile güncel stok farkından türetilir.
+        Bir pazaryerinde ürün yayından kalkarsa stok 0 döner ve sahte satış görünebilir.
+      </div>
+
+      {/* Platform kırılımı */}
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 12 }}>
+        {veri.platformlar.map((pl) => (
+          <div key={pl.platform} style={{ background: THEME.bg, border: `1px solid ${THEME.border}`, borderRadius: 7, padding: "8px 12px", minWidth: 110 }}>
+            <div style={{ fontSize: 17, fontWeight: 800, fontFamily: FONT_MONO, color: THEME.textLight }}>{pl.satis.toLocaleString("tr-TR")}</div>
+            <div style={{ fontSize: 10.5, color: THEME.textMuted, letterSpacing: ".03em", textTransform: "capitalize" }}>{pl.platform}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Kitap kırılımı */}
+      <div style={{ marginTop: 14, overflowX: "auto" }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+          <thead>
+            <tr style={{ color: THEME.textMuted, textAlign: "left" }}>
+              <th style={{ padding: "6px 8px", fontWeight: 600 }}>Kitap</th>
+              <th style={{ padding: "6px 8px", fontWeight: 600 }}>Yazar</th>
+              <th style={{ padding: "6px 8px", fontWeight: 600, textAlign: "right" }}>Satış</th>
+              <th style={{ padding: "6px 8px", fontWeight: 600, textAlign: "right" }}>Stok</th>
+              <th style={{ padding: "6px 8px", fontWeight: 600 }}>Hangi siteden</th>
+            </tr>
+          </thead>
+          <tbody>
+            {gosterilen.map((k) => (
+              <tr key={k.kitapId} style={{ borderTop: `1px solid ${THEME.border}` }}>
+                <td style={{ padding: "8px", color: THEME.textLight, fontWeight: 600 }}>
+                  {k.kitap}
+                  <div style={{ height: 3, borderRadius: 2, marginTop: 4, background: THEME.border }}>
+                    <div style={{ height: "100%", borderRadius: 2, background: "#4FAF7A",
+                      width: `${Math.max(2, (k.toplamSatis / enCok) * 100)}%` }} />
+                  </div>
+                </td>
+                <td style={{ padding: "8px", color: THEME.textMuted }}>{k.yazar || "—"}</td>
+                <td style={{ padding: "8px", textAlign: "right", fontFamily: FONT_MONO, fontWeight: 700, color: THEME.textLight }}>
+                  {k.toplamSatis.toLocaleString("tr-TR")}
+                </td>
+                <td style={{ padding: "8px", textAlign: "right", fontFamily: FONT_MONO, color: k.toplamStok === 0 ? "#e0ac79" : THEME.textMuted }}>
+                  {k.toplamStok}
+                </td>
+                <td style={{ padding: "8px", color: THEME.textMuted }}>
+                  {k.platformlar.filter((pp) => pp.satis > 0).length === 0
+                    ? <span style={{ opacity: .6 }}>satış yok</span>
+                    : k.platformlar.filter((pp) => pp.satis > 0)
+                        .sort((a, b) => b.satis - a.satis)
+                        .map((pp) => (
+                          <span key={pp.platform} style={{ display: "inline-block", marginRight: 6, marginBottom: 3,
+                            background: THEME.bg, border: `1px solid ${THEME.border}`, borderRadius: 20, padding: "2px 9px", fontSize: 11 }}>
+                            <span style={{ textTransform: "capitalize" }}>{pp.platform}</span>
+                            {" "}<b style={{ color: THEME.textLight }}>{pp.satis}</b>
+                          </span>
+                        ))}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {veri.kitaplar.length > 8 && (
+        <div onClick={() => setAcik(!acik)} style={{ marginTop: 10, fontSize: 12, color: "#3E8ED0", cursor: "pointer" }}>
+          {acik ? "▴ Daha az göster" : `▾ Tüm ${veri.kitaplar.length} kitabı göster`}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function PanelAsistani({ authFetch }) {
   const [cevap, setCevap] = useState(null);
   const [calisiyor, setCalisiyor] = useState(false);
@@ -825,6 +946,12 @@ function Overview({ authors, onSyncAll, authFetch }) {
           </div>
         ))}
       </div>
+
+      {/* EKLENDİ (17 Ağu 2026, Bedirhan: "stok düşüyor ama hangi kitaptan
+          geldi sipariş veya hangi siteden geldi göremiyorum"):
+          TOPLAM SATIŞ kartı tek bir sayıydı; kırılım veride vardı ama hiç
+          gösterilmiyordu. */}
+      <SatisDagilimi authFetch={authFetch} />
 
       <PanelAsistani authFetch={authFetch} />
 
@@ -3498,6 +3625,13 @@ function KitapStudyo({ authFetch, token }) {
   const [depoVeri, setDepoVeri] = React.useState(null);
   const [depoYukleniyor, setDepoYukleniyor] = React.useState(false);
   const [depoSadeceBagsiz, setDepoSadeceBagsiz] = React.useState(false);
+  // PDF indirildikten sonra gerçek çözünürlüğü bildirmek için.
+  const [pdfSonDurum, setPdfSonDurum] = React.useState(null);
+  // Ölü Blob adreslerini işaretle — kırık resim ikonu yerine kurtarma kutusu.
+  const [bozukGorseller, setBozukGorseller] = React.useState({});
+  // Düzenleyicide ileri ayarlar varsayılan olarak GİZLİ — 11 kaydırıcı bir
+  // arada fazla geliyordu ("eklediğimiz özellikler çok karmaşık duruyor").
+  const [gelismisAcik, setGelismisAcik] = React.useState(false);
   const [tumunuUretiliyorMu, setTumunuUretiliyorMu] = React.useState(false);
   const [beklemeSn, setBeklemeSn] = React.useState("4");
   const [toplamMaliyet, setToplamMaliyet] = React.useState(0);
@@ -3569,14 +3703,31 @@ function KitapStudyo({ authFetch, token }) {
 
   // Depodaki bir görseli bir sayfa yuvasına GERİ BAĞLAR. Yeniden üretim yok,
   // AI çağrısı yok — kaybolan yalnızca bağlantıydı, dosya zaten duruyor.
-  const depodanAta = async (idx, taraf, url) => {
+  // DÜZELTİLDİ (17 Ağu 2026 — ÜST ÜSTE İKİ YAZI hatası):
+  // Depodan atanan HER görsel "ham (temiz) plaka" sayılıyordu. Oysa depoda
+  // iki tür var: `ham-sayfa-*` (yazısız) ve `sayfa-*` (yazı zaten İÇİNE
+  // basılmış). Yazılı bir görsel ham sanılınca, düzenleyici onun üstüne
+  // İKİNCİ bir yazı çiziyordu — ekran görüntüsündeki üst üste binmiş metin
+  // tam olarak buydu.
+  //
+  // Artık yalnız `ham-sayfa` türü temiz plaka kabul ediliyor. Yazılı bir
+  // görsel atanırsa ham alanı BOŞALTILIYOR; böylece düzenleyici "bu sayfanın
+  // temiz kopyası yok" deyip üstüne yazmayı reddediyor. Pişmiş yazı geri
+  // alınamaz — bunu gizlemek yerine açıkça söylemek doğru olan.
+  const depodanAta = async (idx, taraf, url, tur) => {
     const p = projeOku(seciliId);
     const hamAlan = taraf === "sol" ? "solHamUrl" : "sagHamUrl";
     const gorAlan = taraf === "sol" ? "solGorselUrl" : "sagGorselUrl";
+    const temizPlaka = tur === "ham-sayfa";
     const yeniSpreadler = (p.spreadler || []).map((sp, i) => i === idx
-      ? { ...sp, [hamAlan]: sp[hamAlan] || url, [gorAlan]: url } : sp);
+      ? { ...sp, [hamAlan]: temizPlaka ? url : null, [gorAlan]: url,
+          yaziBasildi: temizPlaka ? false : true }
+      : sp);
     const ok = await projeGuncelle(seciliId, { ...p, spreadler: yeniSpreadler });
-    if (ok) setDepoAcik(null);
+    if (ok) {
+      setDepoAcik(null);
+      if (!temizPlaka) setHata("Atandı. Bu görselde yazı ZATEN BASILI — üstüne yeni yazı eklenmez. Yazıyı değiştirmek istersen sayfayı yeniden üretmen gerekir.");
+    }
   };
 
   const stil = {
@@ -4531,7 +4682,12 @@ function KitapStudyo({ authFetch, token }) {
               fontSize: `${(yerlesim.punto / 1000) * 100}cqw`,
               lineHeight: st.satirAraligi,
               textShadow: `0 1px 3px rgba(0,0,0,${(st.golge / 100).toFixed(2)}), 0 0 10px rgba(0,0,0,${(st.golge / 160).toFixed(2)})`,
-              outline: surukluyor ? "1px dashed rgba(255,255,255,.65)" : "none",
+              // Sürüklenebilir olduğu HER ZAMAN belli olsun — kullanıcı
+              // "yazının konumunu değiştirmekte zorlanıyorum" dedi.
+              outline: surukluyor ? "2px dashed rgba(255,255,255,.85)" : "1px dashed rgba(255,255,255,.28)",
+              outlineOffset: "6px",
+              padding: "6px 0",   // tutma alanını büyüt
+              touchAction: "none",
             }}>
             {yerlesim.satirlar.map((sr, i) => <div key={i}>{sr}</div>)}
           </div>
@@ -4683,6 +4839,21 @@ function KitapStudyo({ authFetch, token }) {
     document.head.appendChild(s);
   });
 
+  // DÜZELTİLDİ (16 Ağu 2026 — ÖLÇÜLEREK BULUNDU, baskı çıktısını bozan hata):
+  //
+  // Sayfa boyutu PİKSEL biriminde veriliyordu: new jsPDF({unit:"px",
+  // format:[1920,1920]}). jsPDF'te 1 px = 1 pt = 1/72 inç sayılır. Sonuç:
+  // 1920 px'lik bir sayfa PDF'e 1920 pt = 26,7 inç = **67,7 x 67,7 cm**
+  // olarak yazılıyor ve gömülü görselin çözünürlüğü **72 dpi** görünüyordu.
+  //
+  // Yani sayfaları 244 dpi'a çıkarmamız son çıktıya hiç yansımıyordu —
+  // matbaaya giden dosya hem yanlış fiziksel ölçüde hem de baskı için
+  // kabul edilemez çözünürlükte beyan ediliyordu.
+  //
+  // Artık sayfa boyutu MİLİMETRE cinsinden, projenin kendi ölçüsünden
+  // (Genişlik/Yükseklik cm alanları, tanımsızsa 20x20) kuruluyor. Görselin
+  // en-boy oranı korunur: sayfa genişliği projeden gelir, yüksekliği görselin
+  // oranından türetilir — böylece kapak gibi farklı oranlı sayfalar ezilmez.
   const pdfIndir = async () => {
     const liste = kitapSayfaListesiOlustur();
     if (liste.length === 0) { setHata("Henüz indirilecek bir görsel yok."); return; }
@@ -4690,15 +4861,43 @@ function KitapStudyo({ authFetch, token }) {
     try {
       await jspdfYukle();
       const { jsPDF } = window.jspdf;
+
+      const genislikCm = Number(seciliProje.ozellikler?.genislikCm) || 20;
+      const genislikMm = genislikCm * 10;
       let doc;
+      const dpiler = [];
+
       for (let i = 0; i < liste.length; i++) {
         const b64 = await urlDenB64Al(liste[i].url);
-        const boyut = await new Promise((resolve) => { const img = new Image(); img.onload = () => resolve({ w: img.width, h: img.height }); img.src = "data:image/png;base64," + b64; });
-        if (i === 0) doc = new jsPDF({ unit: "px", format: [boyut.w, boyut.h] });
-        else doc.addPage([boyut.w, boyut.h]);
-        doc.addImage("data:image/png;base64," + b64, "PNG", 0, 0, boyut.w, boyut.h);
+        // JPEG mi PNG mi — veriden anlaşılır. Yanlış etiket jsPDF'i gereksiz
+        // yeniden kodlamaya zorluyor, dosya şişiyordu.
+        const jpegMi = b64.startsWith("/9j/");
+        const mime = jpegMi ? "image/jpeg" : "image/png";
+        const veriUrl = `data:${mime};base64,` + b64;
+        const boyut = await new Promise((resolve) => {
+          const img = new Image();
+          img.onload = () => resolve({ w: img.width, h: img.height });
+          img.src = veriUrl;
+        });
+
+        const sayfaG = genislikMm;
+        const sayfaY = genislikMm * (boyut.h / boyut.w);   // oran korunur
+        if (i === 0) doc = new jsPDF({ unit: "mm", format: [sayfaG, sayfaY], compress: true });
+        else doc.addPage([sayfaG, sayfaY]);
+        doc.addImage(veriUrl, jpegMi ? "JPEG" : "PNG", 0, 0, sayfaG, sayfaY);
+
+        dpiler.push(boyut.w / (sayfaG / 25.4));
       }
+
       doc.save(`${(seciliProje.kitapAdi || "kitap").replace(/[^a-zA-Z0-9ığüşöçİĞÜŞÖÇ_-]+/g, "-")}.pdf`);
+
+      // Çıktının gerçek çözünürlüğünü SÖYLE — "baskıya hazır" diye sessizce
+      // geçme. En düşük sayfa neyse ölçüt odur.
+      const enDusuk = Math.round(Math.min(...dpiler));
+      setPdfSonDurum({
+        sayfa: liste.length, enDusukDpi: enDusuk, genislikCm,
+        yeterli: enDusuk >= 240,
+      });
     } catch (err) { setHata("PDF oluşturulamadı: " + err.message); }
     finally { setPdfHazirlaniyorMu(false); }
   };
@@ -4822,7 +5021,7 @@ function KitapStudyo({ authFetch, token }) {
                     {liste.map((g) => (
                       <div key={g.goruntuUrl}
                         onClick={() => depoAcik.mod === "ata"
-                          ? depodanAta(depoAcik.idx, depoAcik.taraf, g.goruntuUrl)
+                          ? depodanAta(depoAcik.idx, depoAcik.taraf, g.goruntuUrl, g.tur)
                           : setBuyukGorsel({ url: g.goruntuUrl, baslik: g.yol.split("/").pop() })}
                         style={{ background: "#12110d", borderRadius: 9, overflow: "hidden", cursor: "pointer",
                                  border: g.projeyeBagli ? "1px solid rgba(255,255,255,.12)" : "1px solid #B0663A" }}>
@@ -4861,7 +5060,18 @@ function KitapStudyo({ authFetch, token }) {
                      borderBottom: "1px solid rgba(255,255,255,.1)" }}>
             <b style={{ fontFamily: "'Fredoka', sans-serif" }}>{buyukGorsel.baslik}</b>
             <span style={{ color: "#a09a89" }}>
-              {buyukGorsel.olcu ? `${buyukGorsel.olcu.g}×${buyukGorsel.olcu.y} px · 20×20 cm'de ${Math.round(buyukGorsel.olcu.g / (20 / 2.54))} dpi` : "ölçülüyor…"}
+              {/* DÜZELTİLDİ (17 Ağu 2026): ölçü 20 cm diye SABİT KODLANMIŞTI
+                  ve sayfa kare varsayılıyordu. Artık projenin kendi
+                  "Genişlik (cm)" değeri kullanılıyor ve yükseklik görselin
+                  gerçek oranından hesaplanıyor — kare olmayan görselde
+                  "20×20" yazmak yanlış bilgiydi. */}
+              {buyukGorsel.olcu ? (() => {
+                const gCm = Number(seciliProje?.ozellikler?.genislikCm) || 20;
+                const yCm = gCm * (buyukGorsel.olcu.y / buyukGorsel.olcu.g);
+                const dpi = Math.round(buyukGorsel.olcu.g / (gCm / 2.54));
+                const kareMi = Math.abs(buyukGorsel.olcu.g - buyukGorsel.olcu.y) < 2;
+                return `${buyukGorsel.olcu.g}×${buyukGorsel.olcu.y} px · ${gCm.toFixed(0)}×${yCm.toFixed(1)} cm · ${dpi} dpi${kareMi ? "" : "  ⚠ kare değil"}`;
+              })() : "ölçülüyor…"}
             </span>
             <button onClick={() => setBuyukGorsel({ ...buyukGorsel, birebir: !buyukGorsel.birebir })}
               style={{ padding: "5px 12px", fontSize: 12, borderRadius: 7, cursor: "pointer", color: "#efe9da",
@@ -5379,9 +5589,29 @@ function KitapStudyo({ authFetch, token }) {
                                   <div key={taraf} style={{ width: "calc(50% - 3px)" }}>
                                     {/* Tıklayınca tam ekran — baskı kalitesi küçük
                                         önizlemeden değerlendirilemiyordu. */}
-                                    <img src={url} title="Tam ekran açmak için tıkla"
-                                      onClick={() => setBuyukGorsel({ url, baslik: `Sayfa ${no}` })}
-                                      style={{ width: "100%", borderRadius: 8, cursor: "zoom-in", display: "block" }} />
+                                    {/* DÜZELTİLDİ (17 Ağu 2026): ölü bir Blob adresi
+                                        tarayıcının kırık-resim ikonunu ve alt metnini
+                                        gösteriyordu ("Tam ekran açmak için tıkla" yazısı
+                                        ekranda öyle çıkıyordu). Artık hata yakalanıp
+                                        anlaşılır bir kutu ve kurtarma yolu veriliyor. */}
+                                    {bozukGorseller[url] ? (
+                                      <div style={{ width: "100%", aspectRatio: "1/1", borderRadius: 8, display: "flex",
+                                        flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 8,
+                                        background: "#FFF4E5", border: "1px dashed #F0C48A", color: "#7A4A12",
+                                        fontSize: 12, textAlign: "center", padding: 12 }}>
+                                        <b>Görsel yüklenemedi</b>
+                                        <span style={{ fontSize: 11, lineHeight: 1.5 }}>Bu sayfanın dosyasına ulaşılamıyor.</span>
+                                        <button style={{ ...stil.buton, fontSize: 11, padding: "6px 12px", background: "#8A6A38" }}
+                                          onClick={() => { setDepoAcik({ mod: "ata", idx, taraf }); if (!depoVeri) depoYukle(); }}>
+                                          🗂 Depodan seç
+                                        </button>
+                                      </div>
+                                    ) : (
+                                      <img src={url} alt="" title="Tam ekran açmak için tıkla"
+                                        onError={() => setBozukGorseller((b) => ({ ...b, [url]: true }))}
+                                        onClick={() => setBuyukGorsel({ url, baslik: `Sayfa ${no}` })}
+                                        style={{ width: "100%", borderRadius: 8, cursor: "zoom-in", display: "block" }} />
+                                    )}
                                     <div style={{ display: "flex", gap: 10, marginTop: 4 }}>
                                       <span onClick={() => setBuyukGorsel({ url, baslik: `Sayfa ${no}` })}
                                         style={{ fontSize: 11, color: "#3E8ED0", cursor: "pointer" }}>⤢ Tam ekran</span>
@@ -5417,11 +5647,20 @@ function KitapStudyo({ authFetch, token }) {
                                   </div>
                                 ) : (
                                   <div style={{ background: "#221d16", borderRadius: 12, padding: 14, color: "#efe9da" }}>
-                                    {!s.solHamUrl ? (
-                                      <div style={{ fontSize: 12.5, lineHeight: 1.6 }}>
-                                        Bu sayfa çifti, ham görsellerin saklanmaya başlamasından <b>önce</b> üretilmiş.
-                                        Yazıyı yeniden dizebilmek için önce <b>“Bu Sayfa Çiftini Üret”</b>e bir kez daha basılmalı.
-                                        <div style={{ marginTop: 8 }}>
+                                    {(!s.solHamUrl || !s.sagHamUrl) ? (
+                                      <div style={{ fontSize: 12.5, lineHeight: 1.65 }}>
+                                        <b style={{ color: "#e0ac79" }}>Bu sayfa çiftinin yazısız (temiz) kopyası yok.</b>
+                                        <div style={{ marginTop: 6, color: "#c9c2ae" }}>
+                                          Yazı doğrudan resmin içine basılmış durumda. Pişmiş yazı geri alınamaz — üstüne
+                                          yeni yazı eklenirse <b>iki yazı üst üste biner</b>. Bu yüzden düzenleyici burada
+                                          çalışmıyor.
+                                        </div>
+                                        <div style={{ marginTop: 8, color: "#c9c2ae" }}>
+                                          Yazıyı değiştirmek için iki yol var:
+                                          <div style={{ marginTop: 4 }}>• <b>“Bu Sayfa Çiftini Üret”</b> — yeni, temiz görsel üretir (ücretli)</div>
+                                          <div>• <b>🗂 depodan</b> aynı sahnenin <b>“Sayfa — ham (yazısız)”</b> etiketli kopyasını seç (ücretsiz)</div>
+                                        </div>
+                                        <div style={{ marginTop: 10 }}>
                                           <span onClick={() => setStilDuzenleIdx(null)} style={{ color: "#9fb6cd", cursor: "pointer", fontSize: 12 }}>Kapat</span>
                                         </div>
                                       </div>
@@ -5455,52 +5694,72 @@ function KitapStudyo({ authFetch, token }) {
                                                 style={{ width: "100%", accentColor: "#F4A83E" }} />
                                             </label>
                                           );
+                                          const renkler = [["#fffdf5", "Krem"], ["#f7e9c8", "Açık altın"], ["#20201a", "Koyu"], ["#7a2f1e", "Kiremit"]];
                                           return (
-                                            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 16px", marginTop: 10 }}>
-                                              <div>
-                                                <label style={{ fontSize: 11.5, color: "#c9c2ae", display: "flex", alignItems: "center", gap: 6 }}>
-                                                  <input type="checkbox" checked={st.otomatikPunto} onChange={(e) => g("otomatikPunto", e.target.checked)} />
-                                                  Punto otomatik küçülsün (uzun metin sığsın)
-                                                </label>
-                                                {kaydirici(st.otomatikPunto ? "Punto — üst sınır" : "Punto", "punto", 1.6, 6, 0.1, "%")}
-                                                {st.otomatikPunto && kaydirici("Punto — alt sınır", "enKucukPunto", 1.2, 4, 0.1, "%")}
-                                                {kaydirici("Metin kutusu genişliği", "genislik", 40, 96, 1, "%")}
-                                                {kaydirici("Satır aralığı", "satirAraligi", 1, 2.2, 0.02, "×")}
-                                                <label style={{ display: "block", fontSize: 11.5, color: "#c9c2ae", marginTop: 9 }}>
-                                                  Hizalama
-                                                  <div style={{ display: "flex", gap: 5, marginTop: 4 }}>
-                                                    {[["left", "Sola"], ["center", "Ortala"], ["right", "Sağa"]].map(([v, ad]) => (
-                                                      <button key={v} onClick={() => g("hiza", v)}
-                                                        style={{ flex: 1, padding: "5px 0", fontSize: 11, borderRadius: 6, cursor: "pointer",
-                                                          border: st.hiza === v ? "1px solid #F4A83E" : "1px solid rgba(255,255,255,.16)",
-                                                          background: st.hiza === v ? "rgba(244,168,62,.16)" : "transparent", color: "#efe9da" }}>{ad}</button>
-                                                    ))}
-                                                  </div>
-                                                </label>
+                                            <div style={{ marginTop: 12 }}>
+                                              {/* SADELEŞTİRİLDİ (17 Ağu 2026): 11 kaydırıcı bir arada
+                                                  fazla geliyordu. Günlük işte gereken DÖRT ayar önde,
+                                                  gerisi "Gelişmiş" altında. */}
+                                              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 18px" }}>
+                                                <div>
+                                                  <label style={{ fontSize: 12, color: "#c9c2ae", display: "flex", alignItems: "center", gap: 6 }}>
+                                                    <input type="checkbox" checked={st.otomatikPunto} onChange={(e) => g("otomatikPunto", e.target.checked)} />
+                                                    Punto otomatik (uzun metin sığsın)
+                                                  </label>
+                                                  {kaydirici(st.otomatikPunto ? "Punto — üst sınır" : "Punto", "punto", 1.6, 6, 0.1, "%")}
+                                                  <label style={{ display: "block", fontSize: 12, color: "#c9c2ae", marginTop: 10 }}>
+                                                    Hizalama
+                                                    <div style={{ display: "flex", gap: 5, marginTop: 4 }}>
+                                                      {[["left", "Sola"], ["center", "Ortala"], ["right", "Sağa"]].map(([v, ad]) => (
+                                                        <button key={v} onClick={() => g("hiza", v)}
+                                                          style={{ flex: 1, padding: "6px 0", fontSize: 11.5, borderRadius: 6, cursor: "pointer",
+                                                            border: st.hiza === v ? "1px solid #F4A83E" : "1px solid rgba(255,255,255,.16)",
+                                                            background: st.hiza === v ? "rgba(244,168,62,.16)" : "transparent", color: "#efe9da" }}>{ad}</button>
+                                                      ))}
+                                                    </div>
+                                                  </label>
+                                                </div>
+                                                <div>
+                                                  <label style={{ display: "block", fontSize: 12, color: "#c9c2ae" }}>
+                                                    Yazı rengi
+                                                    <div style={{ display: "flex", gap: 6, marginTop: 5, alignItems: "center" }}>
+                                                      {renkler.map(([c, ad]) => (
+                                                        <span key={c} onClick={() => g("renk", c)} title={ad}
+                                                          style={{ width: 26, height: 26, borderRadius: 6, background: c, cursor: "pointer",
+                                                            border: st.renk === c ? "2px solid #F4A83E" : "1px solid rgba(255,255,255,.25)" }} />
+                                                      ))}
+                                                      <input type="color" value={st.renk} onChange={(e) => g("renk", e.target.value)}
+                                                        style={{ width: 32, height: 26, background: "none", border: "none", cursor: "pointer" }} />
+                                                    </div>
+                                                  </label>
+                                                  {kaydirici("Alt karartma (okunurluk)", "bant", 0, 100, 1, "")}
+                                                </div>
                                               </div>
-                                              <div>
-                                                <label style={{ display: "block", fontSize: 11.5, color: "#c9c2ae" }}>
-                                                  Yazı rengi
-                                                  <div style={{ display: "flex", gap: 5, marginTop: 4, alignItems: "center" }}>
-                                                    {["#fffdf5", "#f7e9c8", "#20201a", "#7a2f1e"].map((c) => (
-                                                      <span key={c} onClick={() => g("renk", c)} title={c}
-                                                        style={{ width: 22, height: 22, borderRadius: 5, background: c, cursor: "pointer",
-                                                          border: st.renk === c ? "2px solid #F4A83E" : "1px solid rgba(255,255,255,.25)" }} />
-                                                    ))}
-                                                    <input type="color" value={st.renk} onChange={(e) => g("renk", e.target.value)}
-                                                      style={{ width: 30, height: 24, background: "none", border: "none", cursor: "pointer" }} />
-                                                  </div>
-                                                </label>
-                                                {kaydirici("Yazı gölgesi (okunurluk)", "golge", 0, 100, 1, "")}
-                                                {kaydirici("Alt geçiş yoğunluğu", "bant", 0, 100, 1, "")}
-                                                {kaydirici("Alt geçiş yüksekliği", "bantYuksekligi", 8, 60, 1, "%")}
-                                                {kaydirici("Dikey konum", "y", 6, 96, 1, "%")}
-                                                {kaydirici("Yatay konum", "x", 4, 96, 1, "%")}
-                                                <label style={{ fontSize: 11.5, color: "#c9c2ae", display: "flex", alignItems: "center", gap: 6, marginTop: 9 }}>
-                                                  <input type="checkbox" checked={st.sayfaNoGoster} onChange={(e) => g("sayfaNoGoster", e.target.checked)} />
-                                                  Sayfa numarası görünsün
-                                                </label>
+
+                                              <div onClick={() => setGelismisAcik(!gelismisAcik)}
+                                                style={{ marginTop: 12, fontSize: 12, color: "#9fb6cd", cursor: "pointer", userSelect: "none" }}>
+                                                {gelismisAcik ? "▾" : "▸"} Gelişmiş ayarlar
                                               </div>
+                                              {gelismisAcik && (
+                                                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 18px", marginTop: 6,
+                                                  paddingTop: 8, borderTop: "1px solid rgba(255,255,255,.1)" }}>
+                                                  <div>
+                                                    {st.otomatikPunto && kaydirici("Punto — alt sınır", "enKucukPunto", 1.2, 4, 0.1, "%")}
+                                                    {kaydirici("Metin kutusu genişliği", "genislik", 40, 96, 1, "%")}
+                                                    {kaydirici("Satır aralığı", "satirAraligi", 1, 2.2, 0.02, "×")}
+                                                    {kaydirici("Yazı gölgesi", "golge", 0, 100, 1, "")}
+                                                  </div>
+                                                  <div>
+                                                    {kaydirici("Alt karartma yüksekliği", "bantYuksekligi", 8, 60, 1, "%")}
+                                                    {kaydirici("Dikey konum", "y", 6, 96, 1, "%")}
+                                                    {kaydirici("Yatay konum", "x", 4, 96, 1, "%")}
+                                                    <label style={{ fontSize: 12, color: "#c9c2ae", display: "flex", alignItems: "center", gap: 6, marginTop: 10 }}>
+                                                      <input type="checkbox" checked={st.sayfaNoGoster} onChange={(e) => g("sayfaNoGoster", e.target.checked)} />
+                                                      Sayfa numarası görünsün
+                                                    </label>
+                                                  </div>
+                                                </div>
+                                              )}
                                             </div>
                                           );
                                         })()}
@@ -5621,6 +5880,23 @@ function KitapStudyo({ authFetch, token }) {
                           disabled={pdfHazirlaniyorMu || kitapSayfaListesiOlustur().length === 0} onClick={pdfIndir}>
                           {pdfHazirlaniyorMu ? "Hazırlanıyor..." : "PDF Olarak İndir"}
                         </button>
+                        {/* Çıktının GERÇEK çözünürlüğü söylenir — "baskıya hazır"
+                            diye sessizce geçilmez (CALISMA-KURALLARI madde 9). */}
+                        {pdfSonDurum && (
+                          <div style={{ width: "100%", marginTop: 8, padding: "10px 12px", borderRadius: 8, fontSize: 12, lineHeight: 1.55,
+                            background: pdfSonDurum.yeterli ? "#E8F3EC" : "#FFF4E5",
+                            border: `1px solid ${pdfSonDurum.yeterli ? "#A8D5B8" : "#F0C48A"}`,
+                            color: pdfSonDurum.yeterli ? "#1E5E30" : "#7A4A12" }}>
+                            <b>PDF indirildi — {pdfSonDurum.sayfa} sayfa, {pdfSonDurum.genislikCm}×{pdfSonDurum.genislikCm} cm.</b>{" "}
+                            En düşük sayfa çözünürlüğü <b>{pdfSonDurum.enDusukDpi} dpi</b>.
+                            {pdfSonDurum.yeterli
+                              ? " Baskı için yeterli."
+                              : " Baskı için düşük — matbaa 240-300 dpi ister. Sayfaları daha yüksek çözünürlükte yeniden üretmek gerekebilir."}
+                            <div style={{ marginTop: 4, fontSize: 11, opacity: .85 }}>
+                              Not: PDF <b>RGB</b> renk uzayında. Matbaa CMYK istiyorsa dönüştürme baskı öncesi yapılmalı — bu dosya doğrudan “print ready” değildir.
+                            </div>
+                          </div>
+                        )}
                         {/* EKLENDİ (16 Ağu 2026, Bedirhan'ın talebi: "tek tuşta
                             tümünü yeniden üret olmalı, ne silebiliyorum ne de
                             baştan üretebiliyorum"): tek tıkla sil+baştan üret. */}
