@@ -3754,6 +3754,9 @@ function KitapStudyo({ authFetch, token }) {
   const [onizlemeAcikMi, setOnizlemeAcikMi] = React.useState(false);
   const [onizlemeIndex, setOnizlemeIndex] = React.useState(0);
   const [pdfHazirlaniyorMu, setPdfHazirlaniyorMu] = React.useState(false);
+  // EKLENDİ (18 Ağu 2026): PDF hangi sayfada, kaçta kaç — "takıldı mı, sürüyor
+  // mu" ayrımı yapılamıyordu.
+  const [pdfIlerleme, setPdfIlerleme] = React.useState(null);
   const [ekPozTarifleri, setEkPozTarifleri] = React.useState({});
   const [ekPozUretiliyorIdx, setEkPozUretiliyorIdx] = React.useState(null);
   // EKLENDİ (14 Ağu 2026, "projeden çıkınca üretim devam etmeli" — Bedirhan'ın
@@ -3863,6 +3866,60 @@ function KitapStudyo({ authFetch, token }) {
       if (hedefId === seciliId) { setKayitDurumu("hata"); setHata("Sunucuya ulaşılamadı — değişiklik KAYDEDİLMEDİ."); }
       return false;
     }
+  };
+
+  // EKLENDİ (18 Ağu 2026, "zebra projesinin tüm otomatik üretilen promptlarını
+  // ve çizdirilen görsel karşılıklarını incele"): projenin TAMAMINI tek bir
+  // JSON dosyası olarak indirir — her sayfa çiftinin sahne promptu, metinleri
+  // ve görsel adresleri yan yana. Analiz için dışarı çıkarmanın tek yolu buydu;
+  // oturum anahtarı React state'inde durduğu için tarayıcı konsolundan
+  // alınamıyor.
+  //
+  // Salt okunur — hiçbir şey değiştirmez.
+  const projeyiDisaAktar = () => {
+    const p = projeOku(seciliId) || seciliProje;
+    if (!p) return;
+    const paket = {
+      disaAktarma: { tarih: new Date().toISOString(), projeId: seciliId, surum: "1" },
+      kitap: {
+        kitapAdi: p.kitapAdi, yazarAdi: p.yazarAdi, asama: p.asama,
+        model: p.model, kalite: p.kalite, boyut: p.boyut, yayilimBoyutu: p.yayilimBoyutu,
+        ozellikler: p.ozellikler,
+      },
+      stil: {
+        onaylananStilEtiket: p.onaylananStilEtiket,
+        stilTanimi: p.stilTanimi,
+        stilAdaylari: (p.stilAdaylari || []).map((a) => ({ etiket: a.etiket, stilTanimi: a.stilTanimi, gorselUrl: a.gorselUrl })),
+      },
+      karakterler: (p.karakterler || []).map((k) => ({
+        ad: k.ad, tanim: k.tanim || k.tarif || null, gorselUrl: k.gorselUrl,
+        ekPozlar: (k.ekPozlar || []).map((e) => ({ tarif: e.tarif, gorselUrl: e.gorselUrl })),
+      })),
+      kapaklar: {
+        onKapakSahne: p.onKapakSahne, onKapakGorselUrl: p.onKapakGorselUrl, onKapakHamUrl: p.onKapakHamUrl,
+        arkaKapakSahne: p.arkaKapakSahne, arkaKapakGorselUrl: p.arkaKapakGorselUrl,
+        kapakArkasiYazisi: p.kapakArkasiYazisi,
+      },
+      sayfaCiftleri: (p.spreadler || []).map((sp, i) => {
+        const { solSayfa, sagSayfa } = spreadNumaralariGetir(i);
+        return {
+          sira: i, sayfalar: `${solSayfa}-${sagSayfa}`,
+          sahnePrompt: sp.sahne,
+          solMetin: sp.solMetin, sagMetin: sp.sagMetin,
+          solMetinsiz: !!sp.solMetinsiz, sagMetinsiz: !!sp.sagMetinsiz,
+          yaziBasildi: !!sp.yaziBasildi,
+          solHamUrl: sp.solHamUrl, sagHamUrl: sp.sagHamUrl,
+          solGorselUrl: sp.solGorselUrl, sagGorselUrl: sp.sagGorselUrl,
+        };
+      }),
+      kitapMetni: p.kitapMetni,
+    };
+    const kutu = new Blob([JSON.stringify(paket, null, 2)], { type: "application/json" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(kutu);
+    a.download = `${(p.kitapAdi || "proje").replace(/[^a-zA-Z0-9_-]+/g, "-")}-analiz-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
   };
 
   // Depoyu yükler. Salt okunur — hiçbir şey silinmez.
@@ -5073,18 +5130,31 @@ function KitapStudyo({ authFetch, token }) {
       let doc;
       const dpiler = [];
 
+      const atlanan = [];
       for (let i = 0; i < liste.length; i++) {
-        const b64 = await urlDenB64Al(liste[i].url);
+        setPdfIlerleme({ mevcut: i + 1, toplam: liste.length, etiket: liste[i].etiket });
+        // Tek bir sayfanın indirilememesi tüm PDF'i düşürmemeli.
+        let b64;
+        try { b64 = await urlDenB64Al(liste[i].url); }
+        catch { atlanan.push(liste[i].etiket); continue; }
         // JPEG mi PNG mi — veriden anlaşılır. Yanlış etiket jsPDF'i gereksiz
         // yeniden kodlamaya zorluyor, dosya şişiyordu.
         const jpegMi = b64.startsWith("/9j/");
         const mime = jpegMi ? "image/jpeg" : "image/png";
         const veriUrl = `data:${mime};base64,` + b64;
+        // DÜZELTİLDİ (18 Ağu 2026, "PDF hazırlanıyorda takılıyor"):
+        // Bu Promise'in onerror'u YOKTU. Tek bir görsel çözülemezse (ölü Blob
+        // adresi, bozuk dosya) promise HİÇBİR ZAMAN sonuçlanmıyor ve "PDF
+        // hazırlanıyor" sonsuza kadar dönüyordu. Kullanıcıya da hiçbir şey
+        // söylenmiyordu. Artık hem hata hem zaman aşımı yakalanıyor.
         const boyut = await new Promise((resolve) => {
           const img = new Image();
-          img.onload = () => resolve({ w: img.width, h: img.height });
+          const zamanAsimi = setTimeout(() => resolve(null), 20000);
+          img.onload = () => { clearTimeout(zamanAsimi); resolve({ w: img.width, h: img.height }); };
+          img.onerror = () => { clearTimeout(zamanAsimi); resolve(null); };
           img.src = veriUrl;
         });
+        if (!boyut) { atlanan.push(liste[i].etiket); continue; }
 
         const sayfaG = genislikMm;
         const sayfaY = genislikMm * (boyut.h / boyut.w);   // oran korunur
@@ -5095,17 +5165,21 @@ function KitapStudyo({ authFetch, token }) {
         dpiler.push(boyut.w / (sayfaG / 25.4));
       }
 
+      if (!doc) { setHata(`PDF oluşturulamadı — hiçbir sayfa yüklenemedi. Atlanan: ${atlanan.join(", ")}`); return; }
       doc.save(`${(seciliProje.kitapAdi || "kitap").replace(/[^a-zA-Z0-9ığüşöçİĞÜŞÖÇ_-]+/g, "-")}.pdf`);
 
       // Çıktının gerçek çözünürlüğünü SÖYLE — "baskıya hazır" diye sessizce
       // geçme. En düşük sayfa neyse ölçüt odur.
       const enDusuk = Math.round(Math.min(...dpiler));
       setPdfSonDurum({
-        sayfa: liste.length, enDusukDpi: enDusuk, genislikCm,
+        sayfa: liste.length - atlanan.length, enDusukDpi: enDusuk, genislikCm,
         yeterli: enDusuk >= 240,
+        // Atlanan sayfa SESSİZCE geçilmiyor — eksik bir kitap dosyası
+        // matbaaya gidebilir.
+        atlanan,
       });
     } catch (err) { setHata("PDF oluşturulamadı: " + err.message); }
-    finally { setPdfHazirlaniyorMu(false); }
+    finally { setPdfHazirlaniyorMu(false); setPdfIlerleme(null); }
   };
 
   // ================= EKLENDİ: 6. parça — karakter ek poz/ifade ================= 
@@ -5382,6 +5456,11 @@ function KitapStudyo({ authFetch, token }) {
                     disabled={kayitDurumu === "kaydediliyor"}
                     onClick={() => metaKaydet(seciliProje)}>
                     {kayitDurumu === "kaydediliyor" ? "Kaydediliyor…" : "💾 Sayfayı Kaydet"}
+                  </button>
+                  <button style={{ ...stil.buton, fontSize: 12, background: "#5A6B7A", padding: "7px 14px" }}
+                    title="Tüm sahne promptlarını ve görsel adreslerini tek JSON dosyası olarak indirir"
+                    onClick={projeyiDisaAktar}>
+                    📤 Analiz için dışa aktar
                   </button>
                   <span style={{ fontSize: 12,
                     color: kayitDurumu === "kaydedildi" ? "#1E5E30"
@@ -5860,10 +5939,22 @@ function KitapStudyo({ authFetch, token }) {
                                         </button>
                                       </div>
                                     ) : (
+                                      /* EKLENDİ (18 Ağu 2026, "görseller çok
+                                         yavaş yükleniyor, internetim hızlı
+                                         olmasına rağmen"): sorun internet
+                                         değil — burada 1920×1920, ~3–4 MB'lık
+                                         BASKI dosyaları küçük önizleme olarak
+                                         gösteriliyor. 20 sayfa çiftlik bir
+                                         kitapta proje açılışında ~150 MB
+                                         indiriliyordu. lazy + async, ekranda
+                                         olmayanları indirmeyi erteliyor.
+                                         Kalıcı çözüm küçük önizleme dosyası
+                                         üretmek (rapordaki Ö-2 maddesi). */
                                       <img src={url} alt="" title="Tam ekran açmak için tıkla"
+                                        loading="lazy" decoding="async"
                                         onError={() => setBozukGorseller((b) => ({ ...b, [url]: true }))}
                                         onClick={() => setBuyukGorsel({ url, baslik: `Sayfa ${no}` })}
-                                        style={{ width: "100%", borderRadius: 8, cursor: "zoom-in", display: "block" }} />
+                                        style={{ width: "100%", borderRadius: 8, cursor: "zoom-in", display: "block", background: "#F3EFE6", minHeight: 60 }} />
                                     )}
                                     <div style={{ display: "flex", gap: 10, marginTop: 4 }}>
                                       <span onClick={() => setBuyukGorsel({ url, baslik: `Sayfa ${no}` })}
@@ -6161,7 +6252,9 @@ function KitapStudyo({ authFetch, token }) {
                         <button style={stil.buton} disabled={kitapSayfaListesiOlustur().length === 0} onClick={kitapiOnizle}>Kitabı Önizle</button>
                         <button style={{ ...stil.buton, ...(pdfHazirlaniyorMu ? stil.butonPasif : {}) }}
                           disabled={pdfHazirlaniyorMu || kitapSayfaListesiOlustur().length === 0} onClick={pdfIndir}>
-                          {pdfHazirlaniyorMu ? "Hazırlanıyor..." : "PDF Olarak İndir"}
+                          {pdfHazirlaniyorMu
+                            ? (pdfIlerleme ? `Hazırlanıyor… ${pdfIlerleme.mevcut}/${pdfIlerleme.toplam} (${pdfIlerleme.etiket})` : "Hazırlanıyor…")
+                            : "PDF Olarak İndir"}
                         </button>
                         {/* Çıktının GERÇEK çözünürlüğü söylenir — "baskıya hazır"
                             diye sessizce geçilmez (CALISMA-KURALLARI madde 9). */}
@@ -6200,16 +6293,39 @@ function KitapStudyo({ authFetch, token }) {
                       const liste = kitapSayfaListesiOlustur();
                       const sayfa = liste[Math.min(onizlemeIndex, liste.length - 1)];
                       return (
-                        <div style={{ background: "#fff", border: "2px solid #F4A83E", borderRadius: 16, padding: 18, marginTop: 16, textAlign: "center" }}>
-                          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 10 }}>
-                            <div style={{ fontFamily: "'Fredoka', sans-serif", fontWeight: 600, fontSize: 14 }}>Kitap Önizleme</div>
-                            <span onClick={() => setOnizlemeAcikMi(false)} style={{ cursor: "pointer", fontSize: 12, color: "#6f6f6c" }}>Kapat</span>
+                        /* DÜZELTİLDİ (18 Ağu 2026, "kitaplar tamamlandıktan
+                           sonra önizleme çalışmıyor"): Önizleme sayfanın
+                           İÇİNE, üretim listesinin altına çiziliyordu. Uzun
+                           bir kitapta o nokta ekranın çok aşağısında kalıyor —
+                           kullanıcı düğmeye basıyor, hiçbir şey olmamış gibi
+                           görünüyordu. Aslında açılıyordu, sadece görünmüyordu.
+                           Artık tam ekran katman olarak açılıyor. */
+                        <div onClick={(e) => { if (e.target === e.currentTarget) setOnizlemeAcikMi(false); }}
+                          style={{ position: "fixed", inset: 0, zIndex: 9999, background: "rgba(20,18,15,.88)",
+                            display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 20 }}>
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%", maxWidth: 900, marginBottom: 10 }}>
+                            <div style={{ fontFamily: "'Fredoka', sans-serif", fontWeight: 600, fontSize: 15, color: "#fff" }}>
+                              Kitap Önizleme — {seciliProje.kitapAdi}
+                            </div>
+                            <span onClick={() => setOnizlemeAcikMi(false)}
+                              style={{ cursor: "pointer", fontSize: 13, color: "#fff", background: "rgba(255,255,255,.15)", padding: "5px 14px", borderRadius: 100 }}>
+                              Kapat ✕
+                            </span>
                           </div>
-                          {sayfa && <img src={sayfa.url} style={{ maxWidth: "100%", maxHeight: 480, borderRadius: 10, border: "1px solid #E4DFD1" }} />}
-                          <p style={{ fontWeight: 600, margin: "12px 0 8px" }}>{sayfa ? `${sayfa.etiket} · ${onizlemeIndex + 1} / ${liste.length}` : ""}</p>
+                          {sayfa
+                            ? <img src={sayfa.url} alt={sayfa.etiket}
+                                style={{ maxWidth: "min(900px, 100%)", maxHeight: "72vh", borderRadius: 10, background: "#fff", objectFit: "contain" }} />
+                            : <div style={{ color: "#fff", fontSize: 13, padding: 40 }}>
+                                Gösterilecek görsel yok — sayfaların görselleri henüz üretilmemiş olabilir.
+                              </div>}
+                          <p style={{ fontWeight: 600, margin: "12px 0 10px", color: "#fff", fontSize: 13 }}>
+                            {sayfa ? `${sayfa.etiket} · ${onizlemeIndex + 1} / ${liste.length}` : ""}
+                          </p>
                           <div style={{ display: "flex", gap: 8, justifyContent: "center" }}>
-                            <button style={stil.buton} disabled={onizlemeIndex === 0} onClick={() => setOnizlemeIndex((i) => i - 1)}>← Önceki</button>
-                            <button style={stil.buton} disabled={onizlemeIndex >= liste.length - 1} onClick={() => setOnizlemeIndex((i) => i + 1)}>Sonraki →</button>
+                            <button style={{ ...stil.buton, ...(onizlemeIndex === 0 ? stil.butonPasif : {}) }}
+                              disabled={onizlemeIndex === 0} onClick={() => setOnizlemeIndex((i) => i - 1)}>← Önceki</button>
+                            <button style={{ ...stil.buton, ...(onizlemeIndex >= liste.length - 1 ? stil.butonPasif : {}) }}
+                              disabled={onizlemeIndex >= liste.length - 1} onClick={() => setOnizlemeIndex((i) => i + 1)}>Sonraki →</button>
                           </div>
                         </div>
                       );
