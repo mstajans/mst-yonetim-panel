@@ -4185,8 +4185,15 @@ function KitapStudyo({ authFetch, token }) {
       });
       const d = await r.json();
       if (!d.ok) { setHata(d.error || "Metin ayrıştırılamadı."); setSahnelerDurumMetni(""); return; }
+      // GENİŞLETİLDİ (18 Ağu 2026): metin ayrıştırıcı artık düz cümle değil
+      // ALANLI sahne şartnamesi döndürüyor. Hepsi saklanıyor — prompt bunlardan
+      // kuruluyor. Eski projeler bu alanlar olmadan da çalışmaya devam ediyor.
       const yeniSpreadler = (d.sayfalar || []).map((s) => ({
-        sahne: s.sahne || "", solMetin: s.solSayfaMetni || "", sagMetin: s.sagSayfaMetni || "",
+        sahne: s.sahne || s.sahneTr || "", solMetin: s.solSayfaMetni || "", sagMetin: s.sagSayfaMetni || "",
+        sahneEn: s.sahneEn || "", sahnedekiler: s.sahnedekiler || [],
+        plan: s.plan || "", kamera: s.kamera || "", zaman: s.zaman || "",
+        isik: s.isik || "", duygu: s.duygu || "", solTaraf: s.solTaraf || "", sagTaraf: s.sagTaraf || "",
+        riskler: s.riskler || [], denetimUyarilari: s.denetimUyarilari || [],
         solMetinsiz: false, sagMetinsiz: false, solGorselUrl: null, sagGorselUrl: null,
       }));
       // EKLENDİ (14 Ağu 2026, Bedirhan'ın vizyonu: "önce karakterleri çıkarıp
@@ -4195,12 +4202,38 @@ function KitapStudyo({ authFetch, token }) {
       // ikiletmemek için isme göre birleştiriyoruz — geri kalanı yeni eklenir.
       const mevcutKarakterler = seciliProje.karakterler || [];
       const mevcutAdlar = new Set(mevcutKarakterler.map((k) => (k.ad || "").trim().toLowerCase()));
-      const yeniCikarilanlar = (d.karakterler || [])
+      // Künye alanları (18 Ağu 2026): ölçek çıpası, ayırt edici işaret ve
+      // İngilizce tanım artık karakterle birlikte saklanıyor — prompt'a
+      // giden ASIL bilgi bunlar. Zebra projesinde bunların hiçbiri yoktu:
+      // 9 karakterin 8'i görselsizdi, 9'unun da tanımı boştu.
+      const gelenKunyeler = d.karakterKunyeleri || d.karakterler || [];
+      const yeniCikarilanlar = gelenKunyeler
         .filter((k) => k.ad && !mevcutAdlar.has(k.ad.trim().toLowerCase()))
-        .map((k) => ({ ad: k.ad, aciklama: k.aciklama || "", gorselUrl: null, ekPozlar: [] }));
+        .map((k) => ({
+          ad: k.ad, aciklama: k.tanimTr || k.aciklama || "", gorselUrl: null, ekPozlar: [],
+          rol: k.rol || "", tur: k.tur || "", tanimEn: k.tanimEn || "",
+          olcekCipasi: k.olcekCipasi || "", ayirtEdiciIsaret: k.ayirtEdiciIsaret || "",
+          yasEvresi: k.yasEvresi || "", yasakListesi: k.yasakListesi || [],
+        }));
+      // Zaten var olan karakterlerin künyesi boşsa doldur — kullanıcının elle
+      // eklediği karakter de ölçek çıpası kazansın.
+      const kunyeHaritasi = new Map(gelenKunyeler.filter((k) => k.ad).map((k) => [k.ad.trim().toLowerCase(), k]));
+      const zenginlestirilmis = mevcutKarakterler.map((k) => {
+        const g = kunyeHaritasi.get((k.ad || "").trim().toLowerCase());
+        if (!g) return k;
+        return {
+          ...k,
+          aciklama: k.aciklama || g.tanimTr || "",
+          tanimEn: k.tanimEn || g.tanimEn || "",
+          olcekCipasi: k.olcekCipasi || g.olcekCipasi || "",
+          ayirtEdiciIsaret: k.ayirtEdiciIsaret || g.ayirtEdiciIsaret || "",
+          yasEvresi: k.yasEvresi || g.yasEvresi || "",
+          yasakListesi: (k.yasakListesi && k.yasakListesi.length) ? k.yasakListesi : (g.yasakListesi || []),
+        };
+      });
       const guncelMeta = {
         ...seciliProje, spreadler: yeniSpreadler,
-        karakterler: [...mevcutKarakterler, ...yeniCikarilanlar],
+        karakterler: [...zenginlestirilmis, ...yeniCikarilanlar],
         kapakArkasiYazisi: d.kapakArkasiYazisi || seciliProje.kapakArkasiYazisi || "",
       };
       setSeciliProje(guncelMeta);
@@ -4415,16 +4448,133 @@ function KitapStudyo({ authFetch, token }) {
   // (stilTanimi) güveniliyordu, ki bu tek başına yeterli görsel tutarlılık
   // sağlamıyor. Artık onaylanan stil adayının görseli, listenin EN BAŞINA
   // (en güçlü referans) ekleniyor.
-  const referansHavuzuTopla = (hedefId) => {
+  // DEĞİŞTİRİLDİ (18 Ağu 2026 — zebra projesinin gerçek verisiyle):
+  //
+  // Her sayfaya TÜM karakterlerin referansı gidiyordu. Sahnede sadece anne
+  // zebra varken aslanın, adamın, köpeklerin görselleri de gönderiliyordu.
+  // Model gönderilen her referansı "bunu kullan" sinyali sayar — istenmeyen
+  // karakter sahneye sızar, ayrıca her referans girdi-görsel ücreti ve süre
+  // ekler (ölçüm: 3840x1920 referanssız 43.8 sn; Vercel sınırı 60 sn).
+  //
+  // Artık sahnedekiler listesi varsa yalnız o karakterler gönderiliyor.
+  // Liste yoksa (eski projeler) eski davranış sürüyor — sessizce bozmamak için.
+  const referansHavuzuTopla = (hedefId, sahnedekiler) => {
     const p = projeOku(hedefId);
     const liste = [];
     const onayliStil = (p.stilAdaylari || []).find((a) => a.etiket === p.onaylananStilEtiket);
     if (onayliStil?.gorselUrl) liste.push(onayliStil.gorselUrl);
+    // Ölçek tablosu: tüm karakterlerin doğru göreli boyutta durduğu tek kare.
+    // Varsa HER sahneye gider — "aslan bazen küçük bazen büyük" sorununun
+    // doğrudan karşılığı.
+    if (p.olcekTablosuUrl) liste.push(p.olcekTablosuUrl);
+
+    const istenen = Array.isArray(sahnedekiler) && sahnedekiler.length
+      ? new Set(sahnedekiler.map((a) => String(a).trim().toLowerCase()))
+      : null;
+
     (p.karakterler || []).forEach((k) => {
+      if (istenen && !istenen.has((k.ad || "").trim().toLowerCase())) return;
       if (k.gorselUrl) liste.push(k.gorselUrl);
-      (k.ekPozlar || []).forEach((e) => liste.push(e.gorselUrl));
+      (k.ekPozlar || []).forEach((e) => { if (e.gorselUrl) liste.push(e.gorselUrl); });
     });
     return liste;
+  };
+
+  // ============================================================
+  // PROMPT MOTORU (18 Ağu 2026)
+  //
+  // Zebra projesinin verisi üç yapısal kusuru kanıtladı:
+  //  1. Karakter tanımları prompt'a HİÇ gitmiyordu. gorselIste'ye geçilen
+  //     "karakterTanimi" alanı aslında STİL tanımını taşıyor; karakterlerin
+  //     kendi tarifi hiçbir yerden prompt'a girmiyordu.
+  //  2. Prompt Türkçeydi. Görsel modelleri ağırlıklı İngilizce başlıklarla
+  //     eğitiliyor; Türkçe sadakati düşürüyor.
+  //  3. Tek yasak "yazı olmasın"dı. Anatomi, tekrar, birleşme üzerine hiçbir
+  //     kısıt yoktu — "yeni doğmak üzere olan yavru" ifadesi bu yüzden iki
+  //     gövdeli zebraya dönüştü.
+  // ============================================================
+
+  const YASAKLAR_TEMEL = [
+    "No text, letters, numbers, signatures, watermarks, borders or frames anywhere in the image.",
+    "No extra limbs. No duplicated bodies. No second head or second neck on any creature.",
+    "No two creatures fused, merged or growing out of each other.",
+    "Every animal has the correct, countable number of legs, clearly separated.",
+    "The same character must never appear twice in the same image.",
+    "No deformed faces, no misaligned eyes, no melted anatomy.",
+  ];
+
+  // Sahne risk etiketlerine göre EK kısıtlar. Her yaşanan hata buraya bir
+  // satır ekler ve bir daha tekrarlanmaz.
+  const RISK_KURALLARI = {
+    dogum: "If a newborn animal appears, it is a SEPARATE and COMPLETE body lying beside the mother — never emerging from her, never merged with her. The mother has exactly one body, one head, one neck, four legs.",
+    kalabalik: "Background animals must have correct anatomy; no fused, overlapping or half-formed bodies in the herd.",
+    hareket: "Legs stay countable and separate during motion; motion blur must not multiply or smear limbs.",
+    yansima: "Any reflection is single and consistent with the subject; it must not read as a second character.",
+    iki_karakter_ayni_tur: "The two animals of the same species differ clearly in size and are clearly separated in space; they must not merge or overlap ambiguously.",
+    insan_hayvan: "Human hands and the animal body stay anatomically correct where they touch; no fused or missing fingers or limbs.",
+  };
+
+  const karakterSatiri = (k) => {
+    const parcalar = [];
+    const tanim = (k.tanimEn || k.aciklama || "").trim();
+    parcalar.push(k.ad + ": " + (tanim || "(no description provided — appearance will drift between pages)"));
+    if (k.olcekCipasi) parcalar.push("Size: " + k.olcekCipasi + ".");
+    if (k.ayirtEdiciIsaret) parcalar.push("Identifying mark that must be visible: " + k.ayirtEdiciIsaret + ".");
+    if (k.yasEvresi) parcalar.push("Age stage: " + k.yasEvresi + ".");
+    if (k.yasakListesi && k.yasakListesi.length) parcalar.push("Must not: " + k.yasakListesi.join("; ") + ".");
+    return "- " + parcalar.join(" ");
+  };
+
+  // Sayfa çifti için tam prompt. İngilizce sahne varsa o kullanılır; yoksa
+  // Türkçe sahneye düşülür — ve bu, arayüzde AÇIKÇA söylenir (sessiz kalite
+  // kaybı olmasın).
+  const spreadPromptKur = (p, s) => {
+    const bolumler = [];
+    bolumler.push("STYLE (apply to the whole illustration):\n" + (p.stilTanimi || ""));
+
+    const sahneMetni = (s.sahneEn || "").trim() || (s.sahne || "").trim();
+    const sahneSatirlari = [sahneMetni];
+    if (s.solTaraf) sahneSatirlari.push("Left half of the spread: " + s.solTaraf);
+    if (s.sagTaraf) sahneSatirlari.push("Right half of the spread: " + s.sagTaraf);
+    const teknik = [s.plan, s.kamera, s.zaman && ("time: " + s.zaman), s.isik && ("light: " + s.isik), s.duygu && ("mood: " + s.duygu)]
+      .filter(Boolean).join(", ");
+    if (teknik) sahneSatirlari.push(teknik.charAt(0).toUpperCase() + teknik.slice(1) + ".");
+    bolumler.push("SCENE (one single moment in time):\n" + sahneSatirlari.join("\n"));
+
+    const istenen = Array.isArray(s.sahnedekiler) && s.sahnedekiler.length
+      ? new Set(s.sahnedekiler.map((a) => String(a).trim().toLowerCase()))
+      : null;
+    const sahneKarakterleri = (p.karakterler || []).filter((k) =>
+      istenen ? istenen.has((k.ad || "").trim().toLowerCase()) : false);
+    if (sahneKarakterleri.length) {
+      bolumler.push("CHARACTERS IN THIS SCENE (keep each one identical to this description on every page):\n" +
+        sahneKarakterleri.map(karakterSatiri).join("\n"));
+    }
+
+    bolumler.push("COMPOSITION:\n" +
+      "This is ONE single uninterrupted double-page spread. It will be cut exactly down the middle and printed as the left and right page of a book; each page is SQUARE, so the composition is a wide 2:1 field. " +
+      "The horizon, ground, sky, light direction and colour transitions continue seamlessly from left to right — one wide landscape, NOT two scenes placed side by side. " +
+      "Do not place the main character's face, eyes or any critical story detail at the exact centre (the gutter); the middle is a calm part of the landscape. " +
+      "Each half must also work as a balanced square composition on its own.");
+
+    if (!(s.solMetinsiz && s.sagMetinsiz)) {
+      bolumler.push("TEXT AREA:\n" +
+        "Leave the bottom 28% of the image, across BOTH halves, calm and low in detail — flat ground, soft grass, shallow water, shaded earth or misty foreground. Book text will be placed there afterwards. " +
+        "Do not put faces, eyes, sharp contrast, dense pattern or critical story detail in that band. The band must not look like an empty strip or a crop; it should read as a natural, soft continuation of the landscape.");
+    }
+
+    const riskler = Array.isArray(s.riskler) ? s.riskler : [];
+    const ekKurallar = riskler.map((r) => RISK_KURALLARI[r]).filter(Boolean);
+    // DÜZELTİLDİ (test-prompt-motoru.js yakaladı): "listede olmayan karakter
+    // olmasın" yasağı, karakter bölümü YOKKEN var olmayan bir bölüme atıf
+    // yapıyordu. Artık yalnız o bölüm varsa ekleniyor.
+    const kapsamYasagi = sahneKarakterleri.length
+      ? ["No creature or person that is not listed in CHARACTERS IN THIS SCENE."]
+      : [];
+    bolumler.push("MUST NOT APPEAR:\n" +
+      [...YASAKLAR_TEMEL, ...kapsamYasagi, ...ekKurallar].map((y) => "- " + y).join("\n"));
+
+    return bolumler.join("\n\n");
   };
 
   // ---- Güvenilirlik katmanı: maliyet tahmini + yeniden deneme ----
@@ -4804,43 +4954,20 @@ function KitapStudyo({ authFetch, token }) {
     try {
       const { solSayfa, sagSayfa } = spreadNumaralariGetir(idx);
 
-      const metinAlaniNotu = (s.solMetinsiz && s.sagMetinsiz)
-        ? ""
-        : "\n\nMETİN ALANI (ÖNEMLİ): Görselin ALT %28'lik bandında, hem sol hem sağ yarıda, SAKİN ve AZ DETAYLI bir alan bırak — düz toprak, yumuşak çayır, sığ su, gölgeli zemin, sisli ön plan gibi. Bu bandın üzerine sonradan kitap metni yerleştirilecek. Oraya karakter yüzü, gözler, keskin kontrast, yoğun desen veya hikâyenin kritik detayı KOYMA. Bu bant boş bir şerit ya da kesilmiş bir alan gibi DURMASIN; manzaranın doğal ve yumuşak bir devamı olsun.";
+      // DEĞİŞTİRİLDİ (18 Ağu 2026): prompt artık burada elle kurulmuyor,
+      // katmanlı motordan (spreadPromptKur) geliyor — stil, sahne, SAHNEDEKİ
+      // KARAKTERLERİN künyeleri, kompozisyon, metin alanı ve YASAKLAR.
+      // Eski hâlde karakter tanımları prompt'a hiç girmiyordu ve tek yasak
+      // "yazı olmasın"dı.
+      const spreadSahne = spreadPromptKur(p, s);
 
-      const spreadSahne =
-        `${s.sahne.trim()}\n\n` +
-        "BU TEK BİR KESİNTİSİZ ÇİFT SAYFA İLLÜSTRASYONUDUR (double-page spread). " +
-        "Görsel tam ortadan ikiye bölünüp bir kitabın sol ve sağ sayfası olarak basılacak; " +
-        "her sayfa KARE (20x20 cm) olacak, yani kompozisyon 2:1 oranında geniş bir alandır. " +
-        "Ufuk çizgisi, zemin, gökyüzü, ışık yönü ve renk geçişleri soldan sağa KESİNTİSİZ devam etmeli — " +
-        "iki ayrı sahne yan yana konmuş gibi DEĞİL, tek bir geniş manzara gibi. " +
-        "Tam ortada (cilt payı) ana karakterin yüzü, gözü veya hikâyenin kritik detayı BULUNMASIN; " +
-        "orta bölge manzaranın sakin bir parçası olsun. " +
-        "Her iki yarı da kendi başına dengeli bir kare kompozisyon oluşturmalı. " +
-        "Görselin içinde HİÇBİR yazı, harf, rakam, imza veya filigran olmasın." +
-        metinAlaniNotu;
-
-      // BASKI ÇÖZÜNÜRLÜĞÜ (16 Ağu 2026, Bedirhan: "baskıya uygun olmaz,
-      // her sayfa 20x20 olmalı"):
-      //
-      // Önceki boyut 1536x1024'tü; ortadan bölününce sayfa başına 768 px
-      // kalıyordu — 20 cm'lik bir sayfada 98 dpi, yani baskıda kullanılamaz.
-      //
-      // gpt-image-2 artık 3840x2160'a kadar serbest boyut kabul ediyor.
-      // 3840x1920 seçildi: tam 2:1, yani ortadan bölününce iki adet
-      // 1920x1920 KARE sayfa çıkıyor — 20x20 cm'de 244 dpi.
-      //
-      // Neden 300 dpi değil: 300 dpi 2363 px/sayfa, yani 4726 px'lik bir
-      // yayılım ister; model 3840'ta duruyor. 244 dpi bu modelden
-      // SÜREKLİLİĞİ BOZMADAN alınabilecek en yüksek değer. Sayfaları ayrı
-      // ayrı üretmek 2160x2160'a (274 dpi) çıkarırdı ama süreklilik giderdi —
-      // asıl şikâyet oydu, o yüzden tercih edilmedi.
       const YAYILIM_BOYUTU = p.yayilimBoyutu || "3840x1920";
 
       const genisUrl = await gorselIsteYenidenDeneyerek({
-        karakterTanimi: p.stilTanimi, sahne: spreadSahne, model: p.model,
-        kalite: p.kalite, boyut: YAYILIM_BOYUTU, referansGorseller: referansHavuzuTopla(hedefId),
+        // Stil zaten spreadPromptKur içinde ilk katman — burada tekrar
+        // gönderilirse prompt'ta iki kez geçer, ağırlığı bozar.
+        karakterTanimi: "", sahne: spreadSahne, model: p.model,
+        kalite: p.kalite, boyut: YAYILIM_BOYUTU, referansGorseller: referansHavuzuTopla(hedefId, s.sahnedekiler),
       });
       const genisB64 = await urlDenB64Al(genisUrl);
       const { sol: solHamB64, sag: sagHamB64 } = await gorseliIkiyeBol(genisB64);
@@ -5595,6 +5722,12 @@ function KitapStudyo({ authFetch, token }) {
                               <div style={{ fontFamily: "'Fredoka', sans-serif", fontWeight: 600, fontSize: 13, marginBottom: 8, color: "#6f6f6c" }}>Sayfa {solSayfa} — {sagSayfa}</div>
                               <textarea style={{ ...stil.input, minHeight: 50 }} placeholder="Sahne (iki sayfaya birden yayılan tek kompozisyon)"
                                 value={s.sahne} onChange={(e) => spreadAlanGuncelle(idx, "sahne", e.target.value)} onBlur={() => metaKaydet(seciliProje)} />
+
+                              {/* EKLENDİ (18 Ağu 2026): sahne şartnamesinin
+                                  görünür hâli. Neyin gönderildiğini bilmeden
+                                  neden bozuk çıktığını anlamak imkânsızdı. */}
+                              <SahneDenetimi s={s} karakterler={seciliProje.karakterler || []} />
+
                               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginTop: 8 }}>
                                 <textarea style={{ ...stil.input, minHeight: 40 }} placeholder="Sol sayfa metni" value={s.solMetin}
                                   onChange={(e) => spreadAlanGuncelle(idx, "solMetin", e.target.value)} onBlur={() => metaKaydet(seciliProje)} />
@@ -6355,6 +6488,91 @@ function KitapStudyo({ authFetch, token }) {
           <KitapStudyoTestAlani authFetch={authFetch} stil={stil} seciliProje={seciliProje} seciliId={seciliId} sonOlcum={sonOlcum} />
         </HataSinir>
       </div>
+    </div>
+  );
+}
+
+// ============================================================
+// SAHNE DENETİMİ (18 Ağu 2026)
+//
+// Zebra projesinin verisi şunu gösterdi: sahnede geçen 9 karakterin 8'inin
+// referans görseli, 9'unun da tanımı YOKTU. Kullanıcı bunu hiçbir yerde
+// göremiyordu — sadece sonucun bozuk olduğunu görüyordu.
+//
+// Bu blok, üretimden ÖNCE söylüyor: bu sahnede kim var, kiminin referansı
+// eksik, kiminin ölçek çıpası yok, ve ayrıştırıcı hangi riski işaretledi.
+// ============================================================
+function SahneDenetimi({ s, karakterler }) {
+  const sahnedekiler = Array.isArray(s.sahnedekiler) ? s.sahnedekiler : [];
+  const uyarilar = Array.isArray(s.denetimUyarilari) ? s.denetimUyarilari : [];
+  const riskler = Array.isArray(s.riskler) ? s.riskler : [];
+  const ingilizceVar = !!(s.sahneEn || "").trim();
+
+  // Eski projelerde bu alanların hiçbiri yok — o zaman blok tek satırlık
+  // bir bilgi notuna iniyor, ekranı doldurmuyor.
+  const yeniAlanVar = sahnedekiler.length || uyarilar.length || riskler.length || ingilizceVar;
+
+  const bul = (ad) => karakterler.find((k) => (k.ad || "").trim().toLowerCase() === String(ad).trim().toLowerCase());
+  const eksikler = sahnedekiler.map((ad) => {
+    const k = bul(ad);
+    if (!k) return { ad, sorun: "bu isimde karakter yok" };
+    const s2 = [];
+    if (!k.gorselUrl) s2.push("referans görseli yok");
+    if (!k.olcekCipasi) s2.push("ölçek çıpası yok");
+    if (!(k.tanimEn || k.aciklama)) s2.push("tanımı yok");
+    return s2.length ? { ad, sorun: s2.join(", ") } : null;
+  }).filter(Boolean);
+
+  if (!yeniAlanVar) {
+    return (
+      <div style={{ marginTop: 6, fontSize: 11, color: "#8e897a", lineHeight: 1.5 }}>
+        Bu sayfa çifti eski biçimde — sahnede kimin olduğu, plan ve ışık bilgisi yok.
+        Prompt yalnız yukarıdaki cümleden kurulur. “Sahneleri otomatik doldur” yeniden
+        çalıştırılırsa alanlı şartname üretilir.
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ marginTop: 7, fontSize: 11.5, lineHeight: 1.55 }}>
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+        {sahnedekiler.map((ad) => {
+          const k = bul(ad);
+          const tam = k && k.gorselUrl && k.olcekCipasi;
+          return (
+            <span key={ad} title={k ? (k.olcekCipasi || "ölçek çıpası yok") : "karakter bulunamadı"}
+              style={{ background: tam ? "#E8F3EC" : "#FFF4E5", border: `1px solid ${tam ? "#A8D5B8" : "#F0C48A"}`,
+                color: tam ? "#1E5E30" : "#7A4A12", borderRadius: 20, padding: "2px 9px" }}>
+              {tam ? "✔" : "!"} {ad}
+            </span>
+          );
+        })}
+        {s.plan && <span style={{ color: "#8e897a" }}>{s.plan}{s.zaman ? " · " + s.zaman : ""}</span>}
+        <span style={{ marginLeft: "auto", color: ingilizceVar ? "#1E5E30" : "#7A4A12" }}>
+          {ingilizceVar ? "EN prompt ✔" : "EN prompt yok — Türkçe gönderilecek, sadakat düşer"}
+        </span>
+      </div>
+
+      {eksikler.length > 0 && (
+        <div style={{ marginTop: 5, padding: "6px 9px", borderRadius: 6, background: "#FFF4E5", border: "1px solid #F0C48A", color: "#7A4A12" }}>
+          <b>Devamlılık riski:</b> {eksikler.map((e) => `${e.ad} (${e.sorun})`).join(" · ")}
+          <div style={{ fontSize: 10.5, marginTop: 2 }}>
+            Referansı ve ölçek çıpası olmayan karakter her sayfada yeniden hayal edilir — boyu ve görünüşü değişir.
+          </div>
+        </div>
+      )}
+
+      {uyarilar.length > 0 && (
+        <div style={{ marginTop: 5, padding: "6px 9px", borderRadius: 6, background: "#FDECEC", border: "1px solid #E3B4B4", color: "#8B2E2E" }}>
+          {uyarilar.map((u, i) => <div key={i}>⚠ {u}</div>)}
+        </div>
+      )}
+
+      {riskler.length > 0 && (
+        <div style={{ marginTop: 4, color: "#8e897a", fontSize: 10.5 }}>
+          Otomatik anatomi kısıtı eklendi: {riskler.join(", ")}
+        </div>
+      )}
     </div>
   );
 }
