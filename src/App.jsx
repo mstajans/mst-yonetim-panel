@@ -450,6 +450,230 @@ const ASISTAN_HAZIR_SORULAR = [
   { etiket: "Veri sağlığı", soru: "Verilerde tutarsızlık, eksiklik veya şüpheli görünen bir şey var mı? ISBN'siz kitaplar, hiç satmayan kitaplar ve platform eşleşmeleri açısından değerlendir." },
 ];
 
+
+// ============ SATIŞ DAĞILIMI — hangi kitaptan, hangi platformdan ============
+// Genel Bakış'ta yalnız toplam satış görünüyordu. Bu bileşen kırılımı açar.
+//
+// VERİ DÜRÜSTLÜĞÜ: rakamlar gerçek sipariş kaydından değil, başlangıç stoğu
+// ile güncel stok FARKINDAN hesaplanıyor. Bu, 4 Ağustos'taki hayali 1000
+// satış olayının kaynağıydı — o yüzden uyarı her zaman görünür (madde 9).
+// DEĞİŞTİRİLDİ (17 Ağu 2026, Bedirhan: "sadece son gelen sipariş görünse
+// yeterli. stok düşmüş, nereden düşmüş, niye düşmüş bilelim yeter"):
+//
+// Önceki hâl 69 kitaplık tam tabloyu açıyordu — istenen bu değildi. Artık
+// varsayılan görünüm SON HAREKETLER: hangi kitap, hangi platform, kaç adet,
+// neden. Tam döküm hâlâ var ama kapalı duruyor.
+//
+// Hareketler, book_stock üzerindeki veritabanı tetikleyicisinden gelir —
+// yani gerçekten olmuş olaylar. Satış dağılımı ise hesaplanmış rakam;
+// ikisi ayrı ayrı ve farklı etiketlerle gösteriliyor (madde 9).
+function SatisDagilimi({ authFetch }) {
+  const [veri, setVeri] = useState(null);
+  const [hareket, setHareket] = useState(null);
+  const [yukleniyor, setYukleniyor] = useState(true);
+  const [dokumAcik, setDokumAcik] = useState(false);
+  const [tumHareket, setTumHareket] = useState(false);
+  const [hata, setHata] = useState("");
+
+  const yenile = async () => {
+    try {
+      const [rh, rv] = await Promise.all([
+        authFetch("/api/admin/stok-hareketleri?limit=50"),
+        authFetch("/api/admin/satis-dagilimi"),
+      ]);
+      const [dh, dv] = await Promise.all([rh.json(), rv.json()]);
+      if (dh.ok) setHareket(dh);
+      if (dv.ok) setVeri(dv); else if (!dh.ok) setHata(dv.error || "Veri alınamadı.");
+    } catch { setHata("Sunucuya ulaşılamadı."); }
+    finally { setYukleniyor(false); }
+  };
+
+  useEffect(() => { yenile(); }, []);
+
+  if (yukleniyor) return null;
+  if (hata) return (
+    <div style={{ marginTop: 18, background: THEME.panelBg, border: `1px solid ${THEME.border}`, borderRadius: 8, padding: "12px 16px", fontSize: 12, color: THEME.textMuted }}>
+      Stok bilgisi yüklenemedi: {hata}
+    </div>
+  );
+
+  const zaman = (t) => {
+    if (!t) return "";
+    const d = new Date(t), fark = (Date.now() - d.getTime()) / 1000;
+    if (fark < 60) return "az önce";
+    if (fark < 3600) return `${Math.floor(fark / 60)} dk önce`;
+    if (fark < 86400) return `${Math.floor(fark / 3600)} saat önce`;
+    return d.toLocaleString("tr-TR", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
+  };
+
+  const hepsi = hareket?.hareketler || [];
+  const liste = tumHareket ? hepsi : hepsi.slice(0, 6);
+  const son = hepsi[0];
+
+  return (
+    <div style={{ marginTop: 18, background: THEME.panelBg, border: `1px solid ${THEME.border}`, borderRadius: 8, padding: "16px 18px" }}>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
+        <div style={{ color: THEME.textLight, fontWeight: 700, fontSize: 14 }}>Stok Hareketi</div>
+        <div style={{ fontSize: 11.5, color: THEME.textMuted }}>stok nereden, niye düştü</div>
+        <div onClick={yenile} style={{ marginLeft: "auto", fontSize: 11.5, color: "#3E8ED0", cursor: "pointer" }}>⟳ Yenile</div>
+      </div>
+
+      {/* ---- SON HAREKET: tek bakışta cevap ---- */}
+      {son ? (
+        <div style={{ marginTop: 12, background: THEME.bg, border: `1px solid ${THEME.border}`, borderRadius: 8, padding: "12px 14px" }}>
+          <div style={{ fontSize: 10.5, color: THEME.textMuted, letterSpacing: ".05em", textTransform: "uppercase" }}>Son hareket · {zaman(son.tarih)}</div>
+          <div style={{ marginTop: 6, fontSize: 15, color: THEME.textLight, fontWeight: 700 }}>
+            {son.kitap}
+            <span style={{ fontWeight: 400, color: THEME.textMuted, fontSize: 13 }}> — {son.platformAdi}</span>
+          </div>
+          <div style={{ marginTop: 6, display: "flex", gap: 18, flexWrap: "wrap", alignItems: "baseline" }}>
+            <div style={{ fontFamily: FONT_MONO, fontSize: 14, color: THEME.textLight }}>
+              Stok {son.oncekiStok == null ? "—" : son.oncekiStok} → {son.yeniStok}
+              {son.degisim != null && son.degisim !== 0 && (
+                <b style={{ marginLeft: 8, color: son.degisim < 0 ? "#E06C6C" : "#4FAF7A" }}>
+                  {son.degisim > 0 ? "+" : ""}{son.degisim}
+                </b>
+              )}
+            </div>
+            {son.satisDegisim ? (
+              <div style={{ fontFamily: FONT_MONO, fontSize: 13, color: THEME.textMuted }}>
+                Satış {son.satisDegisim > 0 ? "+" : ""}{son.satisDegisim}
+              </div>
+            ) : null}
+          </div>
+          <div style={{ marginTop: 8, fontSize: 12, color: son.sebepBilinmiyor ? "#e0ac79" : THEME.textLight }}>
+            <span style={{ color: THEME.textMuted }}>Neden: </span>
+            {son.sebepBilinmiyor ? "kaynak kaydedilmemiş — bu değişikliği yapan yol henüz sebep yazmıyor" : son.sebep}
+          </div>
+        </div>
+      ) : (
+        <div style={{ marginTop: 12, padding: "11px 13px", borderRadius: 7, fontSize: 12, lineHeight: 1.55,
+          background: "rgba(62,142,208,.07)", border: "1px solid rgba(62,142,208,.25)", color: "#9dc6e8" }}>
+          <b>Henüz hareket kaydı yok.</b> Stok geçmişi 17 Ağustos 2026'da tutulmaya başladı; öncesine ait kayıt yok.
+          İlk stok değişikliğinden (sipariş, senkron ya da elle giriş) sonra burada görünecek.
+        </div>
+      )}
+
+      {/* ---- Önceki hareketler ---- */}
+      {hepsi.length > 1 && (
+        <div style={{ marginTop: 10 }}>
+          {liste.slice(1).map((h) => (
+            <div key={h.id} style={{ display: "flex", gap: 10, alignItems: "baseline", padding: "7px 2px", borderTop: `1px solid ${THEME.border}`, fontSize: 12 }}>
+              <div style={{ minWidth: 74, color: THEME.textMuted, fontSize: 11 }}>{zaman(h.tarih)}</div>
+              <div style={{ flex: 1, color: THEME.textLight }}>
+                {h.kitap} <span style={{ color: THEME.textMuted }}>· {h.platformAdi}</span>
+                {h.sebep && <div style={{ fontSize: 11, color: THEME.textMuted, marginTop: 2 }}>{h.sebep}</div>}
+              </div>
+              <div style={{ fontFamily: FONT_MONO, color: h.degisim < 0 ? "#E06C6C" : h.degisim > 0 ? "#4FAF7A" : THEME.textMuted }}>
+                {h.degisim == null ? "yeni kayıt" : `${h.degisim > 0 ? "+" : ""}${h.degisim}`}
+              </div>
+              <div style={{ fontFamily: FONT_MONO, color: THEME.textMuted, minWidth: 46, textAlign: "right" }}>→ {h.yeniStok}</div>
+            </div>
+          ))}
+          {hepsi.length > 6 && (
+            <div onClick={() => setTumHareket(!tumHareket)} style={{ marginTop: 8, fontSize: 12, color: "#3E8ED0", cursor: "pointer" }}>
+              {tumHareket ? "▴ Daha az" : `▾ Son ${hepsi.length} hareketin tamamı`}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ---- Tam döküm: artık kapalı geliyor ---- */}
+      {veri && veri.kitaplar.length > 0 && (
+        <div style={{ marginTop: 14, borderTop: `1px solid ${THEME.border}`, paddingTop: 12 }}>
+          <div onClick={() => setDokumAcik(!dokumAcik)} style={{ fontSize: 12.5, color: "#3E8ED0", cursor: "pointer" }}>
+            {dokumAcik ? "▴ Tam satış dökümünü gizle" : `▾ Tam satış dökümü (${veri.kitapSayisi} kitap, ${veri.genelToplam.toLocaleString("tr-TR")} adet)`}
+          </div>
+
+          {dokumAcik && <SatisDokumu veri={veri} />}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Tam döküm — istendiğinde açılır. İçerik değişmedi, sadece varsayılan
+// olarak kapalı.
+function SatisDokumu({ veri }) {
+  const [hepsi, setHepsi] = useState(false);
+  const enCok = veri.kitaplar[0]?.toplamSatis || 1;
+  const gosterilen = hepsi ? veri.kitaplar : veri.kitaplar.slice(0, 8);
+
+  return (
+    <div style={{ marginTop: 10 }}>
+      {/* Hesaplanan sayı, doğrulanmış sayı gibi gösterilmiyor. */}
+      <div style={{ padding: "8px 11px", borderRadius: 6, fontSize: 11, lineHeight: 1.5,
+        background: "rgba(255,138,61,.08)", border: "1px solid rgba(255,138,61,.28)", color: "#e0ac79" }}>
+        <b>Hesaplanmış rakam — gerçek sipariş kaydı değil.</b> Başlangıç stoğu ile güncel stok farkından türetilir.
+        Bir pazaryerinde ürün yayından kalkarsa stok 0 döner ve sahte satış görünebilir.
+        Yukarıdaki "Stok Hareketi" listesi ise gerçek olaylardır.
+      </div>
+
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 12 }}>
+        {veri.platformlar.map((pl) => (
+          <div key={pl.platform} style={{ background: THEME.bg, border: `1px solid ${THEME.border}`, borderRadius: 7, padding: "8px 12px", minWidth: 110 }}>
+            <div style={{ fontSize: 17, fontWeight: 800, fontFamily: FONT_MONO, color: THEME.textLight }}>{pl.satis.toLocaleString("tr-TR")}</div>
+            <div style={{ fontSize: 10.5, color: THEME.textMuted, letterSpacing: ".03em", textTransform: "capitalize" }}>{pl.platform}</div>
+          </div>
+        ))}
+      </div>
+
+      <div style={{ marginTop: 14, overflowX: "auto" }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+          <thead>
+            <tr style={{ color: THEME.textMuted, textAlign: "left" }}>
+              <th style={{ padding: "6px 8px", fontWeight: 600 }}>Kitap</th>
+              <th style={{ padding: "6px 8px", fontWeight: 600 }}>Yazar</th>
+              <th style={{ padding: "6px 8px", fontWeight: 600, textAlign: "right" }}>Satış</th>
+              <th style={{ padding: "6px 8px", fontWeight: 600, textAlign: "right" }}>Stok</th>
+              <th style={{ padding: "6px 8px", fontWeight: 600 }}>Hangi siteden</th>
+            </tr>
+          </thead>
+          <tbody>
+            {gosterilen.map((k) => (
+              <tr key={k.kitapId} style={{ borderTop: `1px solid ${THEME.border}` }}>
+                <td style={{ padding: "8px", color: THEME.textLight, fontWeight: 600 }}>
+                  {k.kitap}
+                  <div style={{ height: 3, borderRadius: 2, marginTop: 4, background: THEME.border }}>
+                    <div style={{ height: "100%", borderRadius: 2, background: "#4FAF7A",
+                      width: `${Math.max(2, (k.toplamSatis / enCok) * 100)}%` }} />
+                  </div>
+                </td>
+                <td style={{ padding: "8px", color: THEME.textMuted }}>{k.yazar || "—"}</td>
+                <td style={{ padding: "8px", textAlign: "right", fontFamily: FONT_MONO, fontWeight: 700, color: THEME.textLight }}>
+                  {k.toplamSatis.toLocaleString("tr-TR")}
+                </td>
+                <td style={{ padding: "8px", textAlign: "right", fontFamily: FONT_MONO, color: k.toplamStok === 0 ? "#e0ac79" : THEME.textMuted }}>
+                  {k.toplamStok}
+                </td>
+                <td style={{ padding: "8px", color: THEME.textMuted }}>
+                  {k.platformlar.filter((pp) => pp.satis > 0).length === 0
+                    ? <span style={{ opacity: .6 }}>satış yok</span>
+                    : k.platformlar.filter((pp) => pp.satis > 0)
+                        .sort((a, b) => b.satis - a.satis)
+                        .map((pp) => (
+                          <span key={pp.platform} style={{ display: "inline-block", marginRight: 6, marginBottom: 3,
+                            background: THEME.bg, border: `1px solid ${THEME.border}`, borderRadius: 20, padding: "2px 9px", fontSize: 11 }}>
+                            <span style={{ textTransform: "capitalize" }}>{pp.platform}</span>
+                            {" "}<b style={{ color: THEME.textLight }}>{pp.satis}</b>
+                          </span>
+                        ))}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {veri.kitaplar.length > 8 && (
+        <div onClick={() => setHepsi(!hepsi)} style={{ marginTop: 10, fontSize: 12, color: "#3E8ED0", cursor: "pointer" }}>
+          {hepsi ? "▴ Daha az göster" : `▾ Tüm ${veri.kitaplar.length} kitabı göster`}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function PanelAsistani({ authFetch }) {
   const [cevap, setCevap] = useState(null);
   const [calisiyor, setCalisiyor] = useState(false);
@@ -825,6 +1049,12 @@ function Overview({ authors, onSyncAll, authFetch }) {
           </div>
         ))}
       </div>
+
+      {/* EKLENDİ (17 Ağu 2026, Bedirhan: "stok düşüyor ama hangi kitaptan
+          geldi sipariş veya hangi siteden geldi göremiyorum"):
+          TOPLAM SATIŞ kartı tek bir sayıydı; kırılım veride vardı ama hiç
+          gösterilmiyordu. */}
+      <SatisDagilimi authFetch={authFetch} />
 
       <PanelAsistani authFetch={authFetch} />
 
@@ -3453,7 +3683,7 @@ function VersiyonSkorboard({ authFetch }) {
 // "Gökkuşağı Rafı" teması (kullanıcının 10 varyanttan seçtiği) kullanılıyor
 // — beyaz zemin, üstte gökkuşağı şeridi, Fredoka font, panel geneli koyu
 // temadan kasıtlı olarak farklı (bu, MST Çocuk Stüdyo'nun kendi kimliği).
-function KitapStudyo({ authFetch }) {
+function KitapStudyo({ authFetch, token }) {
   const [projeler, setProjeler] = React.useState(null);
   const [hata, setHata] = React.useState("");
   const [yeniAd, setYeniAd] = React.useState("");
@@ -3485,9 +3715,42 @@ function KitapStudyo({ authFetch }) {
   // güvenilirlik katmanı (bekleme/yeniden deneme/maliyet), PDF+önizleme,
   // karakter ek poz için state'ler.
   const [spreadUretiliyorIdx, setSpreadUretiliyorIdx] = React.useState(null);
+  // EKLENDİ (16 Ağu 2026): tam ekran görüntüleyici — baskı kalitesini
+  // küçük önizlemeden değerlendirmek mümkün değildi.
+  const [buyukGorsel, setBuyukGorsel] = React.useState(null); // {url, baslik}
+  // EKLENDİ (16 Ağu 2026): metin stili düzenleyici (hangi sayfa çifti açık)
+  const [stilDuzenleIdx, setStilDuzenleIdx] = React.useState(null);
+  const [stilTaslak, setStilTaslak] = React.useState(null);
+  const [stilUyguluyor, setStilUyguluyor] = React.useState(false);
+  // EKLENDİ (16 Ağu 2026): Görsel Deposu — kaybolan üretimlerin kurtarılması.
+  // depoAcik: null | {mod:"gozat"} | {mod:"ata", idx, taraf}
+  const [depoAcik, setDepoAcik] = React.useState(null);
+  const [depoVeri, setDepoVeri] = React.useState(null);
+  const [depoYukleniyor, setDepoYukleniyor] = React.useState(false);
+  const [depoSadeceBagsiz, setDepoSadeceBagsiz] = React.useState(false);
+  // PDF indirildikten sonra gerçek çözünürlüğü bildirmek için.
+  const [pdfSonDurum, setPdfSonDurum] = React.useState(null);
+  // Ölü Blob adreslerini işaretle — kırık resim ikonu yerine kurtarma kutusu.
+  const [bozukGorseller, setBozukGorseller] = React.useState({});
+  // Düzenleyicide ileri ayarlar varsayılan olarak GİZLİ — 11 kaydırıcı bir
+  // arada fazla geliyordu ("eklediğimiz özellikler çok karmaşık duruyor").
+  const [gelismisAcik, setGelismisAcik] = React.useState(false);
   const [tumunuUretiliyorMu, setTumunuUretiliyorMu] = React.useState(false);
   const [beklemeSn, setBeklemeSn] = React.useState("4");
   const [toplamMaliyet, setToplamMaliyet] = React.useState(0);
+  // EKLENDİ (17 Ağu 2026, "hiçbir şey tahmini olmamalı"): ölçülen harcama
+  // tahmin edilenden AYRI tutuluyor. İkisi asla toplanmıyor, ekranda da ayrı
+  // ayrı ve farklı etiketlerle gösteriliyor.
+  const [olculenMaliyet, setOlculenMaliyet] = React.useState(0);
+  const [olculenSayi, setOlculenSayi] = React.useState(0);
+  const [sonOlcum, setSonOlcum] = React.useState(null);
+  // EKLENDİ (18 Ağu 2026): "kaydettiğim zaman öyle kalmalı" — kaydın gerçekten
+  // sunucuya yazılıp yazılmadığı artık ekranda görünüyor. Sessiz başarısızlık
+  // yok.
+  const [kayitDurumu, setKayitDurumu] = React.useState(null);   // kaydediliyor | kaydedildi | hata | geri-alindi
+  const [sonKayitZamani, setSonKayitZamani] = React.useState(null);
+  // Kur artık sabit kodlu değil — elle düzeltilebiliyor (bkz. maliyet kutusu).
+  const [kurTL, setKurTL] = React.useState("48");
   const [onizlemeAcikMi, setOnizlemeAcikMi] = React.useState(false);
   const [onizlemeIndex, setOnizlemeIndex] = React.useState(0);
   const [pdfHazirlaniyorMu, setPdfHazirlaniyorMu] = React.useState(false);
@@ -3513,17 +3776,134 @@ function KitapStudyo({ authFetch }) {
   // Projeyi günceller: ref'e yazar, backend'e PUT eder, ekranda hâlâ o proje
   // açıksa state'i de günceller. Tüm üretim fonksiyonları artık setSeciliProje
   // + metaKaydet yerine bunu kullanıyor.
-  const projeGuncelle = async (hedefId, guncelMeta) => {
+  // gorselSilmeyiOnayla: backend, kayıtlı bir görseli düşüren yazmayı 409 ile
+  // durduruyor (16 Ağu 2026'daki görsel kaybının kalıcı koruması). Kullanıcının
+  // BİLEREK sildiği durumlarda (uretimiSifirla, tumunuYenidenUret — ikisi de
+  // zaten onay soruyor) bu bayrak açıkça gönderilir.
+  // DÜZELTİLDİ (18 Ağu 2026 — "sildiğim görsel geri gelmiş, ürettiğim görsel
+  // gitmiş"):
+  //
+  // 16 Ağustos'ta eklediğim 409 koruması, İSTEMEDEN silmeyi durduruyordu ama
+  // BİLEREK silmeyi de durduruyordu — ve iki ağır yan etkisi vardı:
+  //
+  //  1) Ekran state'i istekten ÖNCE güncelleniyordu. Sunucu 409 dönünce
+  //     ekranda silinmiş görünüyor, sunucuda duruyordu. Çıkış-giriş yapınca
+  //     "sildiğim görsel geri gelmiş" oluyordu.
+  //  2) Reddedilen meta bellekteki kopyaya (ref) yazılı kalıyordu. Sonraki
+  //     HER kayıt o silmeyi taşıdığı için hepsi 409 alıyordu — yani sonradan
+  //     üretilen görseller de hiç kaydedilemiyordu. "Ürettiğim görsel gitmiş"
+  //     bundandı. Tek bir silme, projeyi kalıcı olarak kaydedilemez hâle
+  //     getiriyordu.
+  //
+  // Artık: kayıp tespit edilirse kullanıcıya SORULUYOR. "Evet, sil" derse
+  // onaylı olarak tekrar gönderiliyor. "Hayır" derse ekran ve bellek
+  // SUNUCUDAKİ gerçek hâle geri çekiliyor — ikisi asla ayrışmıyor.
+  const projeyiSunucudanTazele = async (hedefId) => {
+    try {
+      const r = await authFetch(`/api/admin/kitap-studyo/projeler/${hedefId}`);
+      const d = await r.json();
+      if (d.ok) {
+        aktifUretimVerisiRef.current[hedefId] = d.proje;
+        if (hedefId === seciliId) setSeciliProje(d.proje);
+        return d.proje;
+      }
+    } catch { /* ağ hatası — aşağıda bildiriliyor */ }
+    return null;
+  };
+
+  const projeGuncelle = async (hedefId, guncelMeta, gorselSilmeyiOnayla) => {
     aktifUretimVerisiRef.current[hedefId] = guncelMeta;
-    if (hedefId === seciliId) setSeciliProje(guncelMeta);
+    if (hedefId === seciliId) { setSeciliProje(guncelMeta); setKayitDurumu("kaydediliyor"); }
     try {
       const r = await authFetch(`/api/admin/kitap-studyo/projeler/${hedefId}`, {
-        method: "PUT", body: JSON.stringify({ ...guncelMeta, asama: guncelMeta.asama || "uretim" }),
+        method: "PUT",
+        body: JSON.stringify({
+          ...guncelMeta,
+          asama: guncelMeta.asama || "uretim",
+          ...(gorselSilmeyiOnayla ? { gorselSilmeyiOnayla: true } : {}),
+        }),
       });
       const d = await r.json();
-      if (!d.ok && hedefId === seciliId) setHata(d.error || "Kaydedilemedi.");
-      return d.ok;
-    } catch { if (hedefId === seciliId) setHata("Sunucuya ulaşılamadı."); return false; }
+
+      if (d.ok) {
+        if (hedefId === seciliId) { setKayitDurumu("kaydedildi"); setSonKayitZamani(new Date()); }
+        return true;
+      }
+
+      // ---- Koruma devreye girdi: sor, sonra ya onayla ya geri al ----
+      if (d.kod === "gorsel_kaybi" && !gorselSilmeyiOnayla) {
+        const onay = window.confirm(
+          `Bu kayıt, ÜRETİLMİŞ ${d.kaybolanSayisi} görseli siliyor.\n\n` +
+          `Bunu bilerek yaptıysan (sayfa sildin, görseli kaldırdın) "Tamam" de — silinsin.\n\n` +
+          `Böyle bir şey yapmadıysan "İptal" de. O zaman hiçbir şey silinmez ve ekran ` +
+          `sunucudaki gerçek hâle döner.`);
+        if (onay) return await projeGuncelle(hedefId, guncelMeta, true);
+
+        const gercek = await projeyiSunucudanTazele(hedefId);
+        if (hedefId === seciliId) {
+          setKayitDurumu("geri-alindi");
+          setHata(gercek
+            ? "Kayıt iptal edildi — hiçbir görsel silinmedi, ekran sunucudaki hâle döndü."
+            : "Kayıt iptal edildi ama sunucudan güncel hâl okunamadı. Sayfayı yenileyin.");
+        }
+        return false;
+      }
+
+      // ---- Başka bir hata: ekranı sunucudaki gerçekle eşitle ----
+      // Reddedilen bir kopyayı bellekte bırakmak, sonraki tüm kayıtları da
+      // bozuyordu. Artık asla bırakılmıyor.
+      await projeyiSunucudanTazele(hedefId);
+      if (hedefId === seciliId) {
+        setKayitDurumu("hata");
+        setHata((d.error || "Kaydedilemedi.") + " — Değişiklik KAYDEDİLMEDİ, ekran sunucudaki hâle döndü.");
+      }
+      return false;
+    } catch {
+      await projeyiSunucudanTazele(hedefId);
+      if (hedefId === seciliId) { setKayitDurumu("hata"); setHata("Sunucuya ulaşılamadı — değişiklik KAYDEDİLMEDİ."); }
+      return false;
+    }
+  };
+
+  // Depoyu yükler. Salt okunur — hiçbir şey silinmez.
+  const depoYukle = async () => {
+    setDepoYukleniyor(true); setHata("");
+    try {
+      const r = await authFetch("/api/admin/kitap-studyo/depo?limit=500");
+      const d = await r.json();
+      if (d.ok) setDepoVeri(d);
+      else setHata(d.error || "Depo listelenemedi.");
+    } catch { setHata("Sunucuya ulaşılamadı."); }
+    finally { setDepoYukleniyor(false); }
+  };
+
+  // Depodaki bir görseli bir sayfa yuvasına GERİ BAĞLAR. Yeniden üretim yok,
+  // AI çağrısı yok — kaybolan yalnızca bağlantıydı, dosya zaten duruyor.
+  // DÜZELTİLDİ (17 Ağu 2026 — ÜST ÜSTE İKİ YAZI hatası):
+  // Depodan atanan HER görsel "ham (temiz) plaka" sayılıyordu. Oysa depoda
+  // iki tür var: `ham-sayfa-*` (yazısız) ve `sayfa-*` (yazı zaten İÇİNE
+  // basılmış). Yazılı bir görsel ham sanılınca, düzenleyici onun üstüne
+  // İKİNCİ bir yazı çiziyordu — ekran görüntüsündeki üst üste binmiş metin
+  // tam olarak buydu.
+  //
+  // Artık yalnız `ham-sayfa` türü temiz plaka kabul ediliyor. Yazılı bir
+  // görsel atanırsa ham alanı BOŞALTILIYOR; böylece düzenleyici "bu sayfanın
+  // temiz kopyası yok" deyip üstüne yazmayı reddediyor. Pişmiş yazı geri
+  // alınamaz — bunu gizlemek yerine açıkça söylemek doğru olan.
+  const depodanAta = async (idx, taraf, url, tur) => {
+    const p = projeOku(seciliId);
+    const hamAlan = taraf === "sol" ? "solHamUrl" : "sagHamUrl";
+    const gorAlan = taraf === "sol" ? "solGorselUrl" : "sagGorselUrl";
+    const temizPlaka = tur === "ham-sayfa";
+    const yeniSpreadler = (p.spreadler || []).map((sp, i) => i === idx
+      ? { ...sp, [hamAlan]: temizPlaka ? url : null, [gorAlan]: url,
+          yaziBasildi: temizPlaka ? false : true }
+      : sp);
+    const ok = await projeGuncelle(seciliId, { ...p, spreadler: yeniSpreadler });
+    if (ok) {
+      setDepoAcik(null);
+      if (!temizPlaka) setHata("Atandı. Bu görselde yazı ZATEN BASILI — üstüne yeni yazı eklenmez. Yazıyı değiştirmek istersen sayfayı yeniden üretmen gerekir.");
+    }
   };
 
   const stil = {
@@ -3554,26 +3934,35 @@ function KitapStudyo({ authFetch }) {
     try {
       const r = await authFetch(`/api/admin/kitap-studyo/projeler/${id}`);
       const d = await r.json();
-      if (d.ok) setSeciliProje(d.proje);
-      else setHata(d.error || "Proje açılamadı.");
+      if (d.ok) {
+        setSeciliProje(d.proje);
+        // DÜZELTİLDİ (16 Ağu 2026 — GÖRSEL KAYBININ KÖK NEDENİ):
+        // Burada YALNIZCA ekran state'i tazeleniyordu; aktifUretimVerisiRef
+        // dokunulmadan kalıyordu. projeOku() ise ÖNCE o ref'e bakıyor. Yani
+        // panel kapatılıp açıldığında ekranda güncel veri görünse bile,
+        // sonraki her üretim/kayıt ref'teki ESKİ kopyayı sunucuya geri
+        // yazıyor ve arada üretilmiş tüm görseller siliniyordu.
+        // Artık sunucudan ne geldiyse ref de o oluyor.
+        aktifUretimVerisiRef.current[id] = d.proje;
+      } else setHata(d.error || "Proje açılamadı.");
     } catch { setHata("Sunucuya ulaşılamadı."); }
   };
 
   // EKLENDİ (14 Ağu 2026): mevcut proje meta'sını (tüm alanları) backend'e
   // yazar — bağımsız araçtaki projeMetaKaydet() karşılığı. guncelMeta
   // verilmezse, o anki seciliProje state'i gönderilir.
+  // DEĞİŞTİRİLDİ (18 Ağu 2026): metaKaydet kendi başına PUT atıyordu ve
+  // 409 dönünce ekranı geri almıyordu — projeGuncelle ile İKİ AYRI kayıt
+  // yolu vardı, davranışları farklıydı. Artık tek yol var: metaKaydet
+  // doğrudan projeGuncelle'e devrediyor. Böylece onay sorma, geri alma ve
+  // kayıt durumu göstergesi her kayıt yolunda aynı çalışıyor.
   const metaKaydet = async (guncelMeta, yeniAsama) => {
     const meta = guncelMeta || seciliProje;
+    if (!seciliId || !meta) return false;
     setKaydediliyor(true); setHata("");
     try {
-      const r = await authFetch(`/api/admin/kitap-studyo/projeler/${seciliId}`, {
-        method: "PUT", body: JSON.stringify({ ...meta, asama: yeniAsama || seciliProje.asama }),
-      });
-      const d = await r.json();
-      if (!d.ok) setHata(d.error || "Kaydedilemedi.");
-      return d.ok;
-    } catch { setHata("Sunucuya ulaşılamadı."); return false; }
-    finally { setKaydediliyor(false); }
+      return await projeGuncelle(seciliId, { ...meta, asama: yeniAsama || meta.asama || seciliProje?.asama });
+    } finally { setKaydediliyor(false); }
   };
 
   // Bir stil adayı için OpenAI'den örnek bir sahne üretir, sonucu (Vercel
@@ -3657,7 +4046,21 @@ function KitapStudyo({ authFetch }) {
   // DEĞİŞTİRİLDİ (15 Ağu 2026, yeni akış: metin → stil → karakter → uretim):
   // ismi "sahnelereGec"ten "kitapUretimineGec"e çevrildi, artık son aşama
   // olan "uretim"e geçiyor (künye/kapak/sayfa görselleri burada üretiliyor).
+  // DÜZELTİLDİ (16 Ağu 2026, "karakter devamlılığı yok" sorunu): referans
+  // görseli olmayan (hiç "Referans Üret" yapılmamış) karakterler varsa,
+  // kitap üretimine geçmeden önce açıkça uyarıyor — çünkü sayfa üretimi
+  // sırasında bu karakterler için hiçbir görsel referansı gönderilemez,
+  // her sayfada farklı görünmelerinin asıl sebebi bu.
   const kitapUretimineGec = async () => {
+    const referanssiz = (seciliProje.karakterler || []).filter((k) => !k.gorselUrl).map((k) => k.ad);
+    if (referanssiz.length) {
+      const onay = window.confirm(
+        `Şu karakterlerin henüz referans görseli yok: ${referanssiz.join(", ")}. ` +
+        `Bu karakterler kitap üretiminde HER SAYFADA FARKLI görünecek (görsel referansı olmadığı için). ` +
+        `Önce ② Karakter aşamasında her biri için "Referans Üret"e basmanı öneririm. Yine de devam etmek istiyor musun?`
+      );
+      if (!onay) return;
+    }
     setSeciliProje({ ...seciliProje, asama: "uretim" });
     const basarili = await metaKaydet(seciliProje, "uretim");
     if (basarili) await projeAc(seciliId);
@@ -3779,11 +4182,36 @@ function KitapStudyo({ authFetch }) {
 
   // Hazır bir görseli (base64/veri URL) doğrudan Blob'a yükler — künye/kapak
   // gibi OpenAI'ye hiç gitmeyen görseller için.
+  // DÜZELTİLDİ (15 Ağu 2026, "413 Content Too Large" — client-side Blob
+  // upload da başarısız oldu, kaynak koddan doğrulandı: @vercel/blob/client'ın
+  // handleUpload()'ı statik BLOB_READ_WRITE_TOKEN gerektiriyor, storeId/OIDC
+  // ile çalışmıyor — kitap görselleri store'unun ise hiç statik token'ı yok):
+  // client-side Blob upload tamamen terk edildi. Yerine, ZATEN ÇALIŞAN sunucu
+  // tarafı yükleme (OIDC ile) korunuyor — ama artık görsel küçük parçalara
+  // bölünüp sırayla gönderiliyor, her istek Vercel'in 4.5MB sınırının çok
+  // altında kalıyor. Backend son parçada hepsini birleştirip Blob'a yüklüyor.
   const gorselYukle = async (b64, onEki) => {
-    const r = await authFetch("/api/admin/kitap-studyo/gorsel-yukle", { method: "POST", body: JSON.stringify({ gorselB64: b64, dosyaOnEki: onEki }) });
-    const d = await r.json();
-    if (!d.ok) throw new Error(d.error || "Görsel yüklenemedi.");
-    return d.gorselUrl;
+    const mime = b64.startsWith("/9j/") ? "image/jpeg" : "image/png"; // JPEG'ler hep bu imzayla başlar
+    const uzanti = mime === "image/jpeg" ? "jpg" : "png";
+    const PARCA_BOYUTU = 1_400_000; // base64 karakter sayısı — ~1MB ham veri, JSON sarmalıyla birlikte güvenle 4.5MB'ın altında
+    const toplamParca = Math.max(1, Math.ceil(b64.length / PARCA_BOYUTU));
+    const anahtar = `${onEki || "gorsel"}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+    let sonCevap = null;
+    for (let i = 0; i < toplamParca; i++) {
+      const parcaVerisi = b64.slice(i * PARCA_BOYUTU, (i + 1) * PARCA_BOYUTU);
+      const r = await authFetch("/api/admin/kitap-studyo/gorsel-parca-yukle", {
+        method: "POST",
+        body: JSON.stringify({ anahtar, parcaNo: i, toplamParca, parcaVerisi, dosyaOnEki: onEki, uzanti }),
+      });
+      if (!r.ok) {
+        let mesaj = `Yükleme başarısız (HTTP ${r.status}).`;
+        try { const d = await r.json(); if (d?.error) mesaj = d.error; } catch { /* HTML dönmüş olabilir, mesajı koru */ }
+        throw new Error(mesaj);
+      }
+      sonCevap = await r.json();
+    }
+    if (!sonCevap?.tamamlandi || !sonCevap?.gorselUrl) throw new Error("Görsel yüklenemedi (son parça tamamlanmadı).");
+    return sonCevap.gorselUrl;
   };
 
   const ozellikGuncelle = (alan, deger) => {
@@ -3827,7 +4255,12 @@ function KitapStudyo({ authFetch }) {
         oz.ekNot || null,
         "Tüm hakları saklıdır.",
       ].filter(Boolean).forEach((satir) => { ctx.fillText(satir, w * 0.14, y); y += w * 0.045; });
-      const b64 = canvas.toDataURL("image/png").split(",")[1];
+      // DÜZELTİLDİ (15 Ağu 2026, "413 Content Too Large" hatası): gorsel-yukle
+      // ucuna giden ÇIKTI görselleri artık PNG yerine yüksek kaliteli JPEG
+      // (0.92) — Vercel'in sunucu isteği boyut sınırını (4.5MB) aşmamak için.
+      // İçerik illüstrasyon/metin olduğu için JPEG kalite kaybı gözle
+      // görülmüyor, dosya boyutu ise 3-6 kat küçülüyor.
+      const b64 = canvas.toDataURL("image/jpeg", 0.72).split(",")[1];
       const url = await gorselYukle(b64, "kunye");
       const guncelMeta = { ...p, kunyeGorselUrl: url };
       await projeGuncelle(hedefId, guncelMeta);
@@ -3885,7 +4318,7 @@ function KitapStudyo({ authFetch }) {
           ctx.font = `${Math.round(img.width * 0.036)}px Capriola, Georgia, serif`;
           ctx.fillText(p.yazarAdi, img.width / 2, Math.max(sonY + img.width * 0.07, img.height - img.height * 0.05));
         }
-        resolve(canvas.toDataURL("image/png").split(",")[1]);
+        resolve(canvas.toDataURL("image/jpeg", 0.72).split(",")[1]);
       };
       img.src = "data:image/png;base64," + hamB64;
     });
@@ -3906,7 +4339,7 @@ function KitapStudyo({ authFetch }) {
         ctx.fillStyle = "#18181a"; ctx.textAlign = "left";
         ctx.font = `${Math.round(img.width * 0.032)}px Capriola, Georgia, serif`;
         metniSar(ctx, yazi, img.width * 0.12, kutuY + img.width * 0.06, img.width * 0.76, img.width * 0.045);
-        resolve(canvas.toDataURL("image/png").split(",")[1]);
+        resolve(canvas.toDataURL("image/jpeg", 0.72).split(",")[1]);
       };
       img.src = "data:image/png;base64," + hamB64;
     });
@@ -3918,12 +4351,24 @@ function KitapStudyo({ authFetch }) {
     return canvas.toDataURL("image/png").split(",")[1];
   };
 
-  const referansHavuzuTopla = (hedefId) => (projeOku(hedefId).karakterler || []).flatMap((k) => {
+  // DÜZELTİLDİ (16 Ağu 2026, Bedirhan'ın bildirdiği kritik kalite sorunu:
+  // "karakter devamlılığı yok, stil devamlılığı yok"): önceden SADECE
+  // karakter referans görselleri gönderiliyordu, onaylanan stilin KENDİ
+  // örnek görseli hiç referans olarak gitmiyordu — sadece metin tanımına
+  // (stilTanimi) güveniliyordu, ki bu tek başına yeterli görsel tutarlılık
+  // sağlamıyor. Artık onaylanan stil adayının görseli, listenin EN BAŞINA
+  // (en güçlü referans) ekleniyor.
+  const referansHavuzuTopla = (hedefId) => {
+    const p = projeOku(hedefId);
     const liste = [];
-    if (k.gorselUrl) liste.push(k.gorselUrl);
-    (k.ekPozlar || []).forEach((e) => liste.push(e.gorselUrl));
+    const onayliStil = (p.stilAdaylari || []).find((a) => a.etiket === p.onaylananStilEtiket);
+    if (onayliStil?.gorselUrl) liste.push(onayliStil.gorselUrl);
+    (p.karakterler || []).forEach((k) => {
+      if (k.gorselUrl) liste.push(k.gorselUrl);
+      (k.ekPozlar || []).forEach((e) => liste.push(e.gorselUrl));
+    });
     return liste;
-  });
+  };
 
   // ---- Güvenilirlik katmanı: maliyet tahmini + yeniden deneme ----
   const FIYAT_TABLOSU = {
@@ -3931,11 +4376,30 @@ function KitapStudyo({ authFetch }) {
     "gpt-image-1.5": { kare: { low: .009, medium: .034, high: .133 }, diger: { low: .013, medium: .05, high: .20 } },
     "gpt-image-1-mini": { kare: { low: .005, medium: .02, high: .052 }, diger: { low: .005, medium: .025, high: .06 } },
   };
+  // DÜZELTİLDİ (16 Ağu 2026): çarpan TEK BİR BOYUTA sabitlenmişti —
+  //   if (boyut === "1536x1024") fiyat *= 1.3;
+  // Baskı çözünürlüğüne (3840x1920) geçilince bu koşul hiç tutmadı ve 4.7
+  // katlık piksel artışı fiyata YANSIMADI. Panel "tüm kitap ~7 ₺" gibi
+  // gerçeğin çok altında bir rakam gösteriyordu.
+  //
+  // Görsel çıktısı token üzerinden faturalanır, token sayısı da piksel
+  // sayısıyla artar. Bu yüzden fiyat artık megapiksel oranıyla ölçekleniyor.
+  // Referans boyut 1536x1024 (1.57 MP) — fiyat tablosundaki değerler bu
+  // ölçek civarı için yayımlanmış.
+  const REFERANS_MP = (1536 * 1024) / 1e6;
+  const boyutMP = (boyut) => {
+    const m = String(boyut || "").match(/^(\d+)x(\d+)$/);
+    return m ? (Number(m[1]) * Number(m[2])) / 1e6 : REFERANS_MP;
+  };
   const maliyetTahminiEkle = (model, boyut, kalite, referansliMi) => {
     const tablo = FIYAT_TABLOSU[model] || FIYAT_TABLOSU["gpt-image-2"];
-    const grup = boyut === "1024x1024" ? tablo.kare : tablo.diger;
+    const kareMi = boyutMP(boyut) > 0 && (() => {
+      const m = String(boyut || "").match(/^(\d+)x(\d+)$/);
+      return m ? m[1] === m[2] : false;
+    })();
+    const grup = kareMi ? tablo.kare : tablo.diger;
     let fiyat = grup[kalite] ?? grup.medium;
-    if (boyut === "1536x1024") fiyat *= 1.3;
+    fiyat *= boyutMP(boyut) / REFERANS_MP;   // piksel sayısıyla ölçekle
     if (referansliMi) fiyat *= 1.15;
     setToplamMaliyet((t) => t + fiyat);
   };
@@ -3949,10 +4413,25 @@ function KitapStudyo({ authFetch }) {
     let sonHata;
     for (let deneme = 0; deneme <= tekrar; deneme++) {
       try {
-        const r = await authFetch("/api/admin/kitap-studyo/gorsel-uret", { method: "POST", body: JSON.stringify(govde) });
+        const r = await authFetch("/api/admin/kitap-studyo/gorsel-uret", {
+          method: "POST",
+          // EKLENDİ (17 Ağu 2026): her üretim artık projeye ve amaca bağlı
+          // olarak kaydediliyor — "hangi kitap kaç kredi yaktı" ölçülebilsin.
+          body: JSON.stringify({ ...govde, projeId: govde.projeId ?? seciliId, amac: govde.amac || "uretim" }),
+        });
         const d = await r.json();
         if (!d.ok) { const h = new Error(d.error || "Görsel üretilemedi."); h.durumKodu = r.status; throw h; }
-        maliyetTahminiEkle(govde.model, govde.boyut, govde.kalite, !!(govde.referansGorseller && govde.referansGorseller.length));
+        // ÖLÇÜM VARSA TAHMİN KULLANILMAZ (17 Ağu 2026). Sunucu OpenAI'nin
+        // döndürdüğü gerçek token sayısını ve fiyat ayarıyla hesaplanmış
+        // tutarı gönderiyorsa, panelin kendi fiyat tablosuna hiç bakılmaz.
+        if (d.olcum?.maliyetUsd != null) {
+          setOlculenMaliyet((t) => t + d.olcum.maliyetUsd);
+          setOlculenSayi((n) => n + 1);
+          setSonOlcum(d.olcum);
+        } else {
+          maliyetTahminiEkle(govde.model, govde.boyut, govde.kalite, !!(govde.referansGorseller && govde.referansGorseller.length));
+          if (d.olcum) setSonOlcum(d.olcum);
+        }
         return d.gorselUrl;
       } catch (err) {
         sonHata = err;
@@ -4039,10 +4518,35 @@ function KitapStudyo({ authFetch }) {
     setSeciliProje(guncelMeta);
     metaKaydet(guncelMeta);
   };
-  const spreadSil = (idx) => {
+  // DÜZELTİLDİ (18 Ağu 2026): sayfa çifti silme, arkasındaki görsellerle
+  // birlikte 409 tetikliyordu; kullanıcı silinmiş sanıyor, sunucu reddediyordu.
+  // Artık ne silineceği ÖNCE söyleniyor, onay alınınca da sunucuya onaylı
+  // gidiyor — ekran ile sunucu ayrışmıyor.
+  const spreadSil = async (idx) => {
+    const s0 = seciliProje.spreadler[idx];
+    const { solSayfa, sagSayfa } = spreadNumaralariGetir(idx);
+    const gorselSayisi = ["solGorselUrl", "sagGorselUrl", "solHamUrl", "sagHamUrl"].filter((a) => s0?.[a]).length;
+    if (!window.confirm(
+      `Sayfa ${solSayfa}–${sagSayfa} tamamen silinsin mi?` +
+      (gorselSayisi ? `\n\nÜretilmiş ${gorselSayisi} görsel de silinecek (parası ödenmişti).` : "") +
+      `\n\nYanlışlıkla sildiysen en alttaki "Kayıp Koruma" bölümünden geri alabilirsin.`)) return;
     const guncelMeta = { ...seciliProje, spreadler: seciliProje.spreadler.filter((_, i) => i !== idx) };
-    setSeciliProje(guncelMeta);
-    metaKaydet(guncelMeta);
+    await projeGuncelle(seciliId, guncelMeta, true);
+  };
+
+  // EKLENDİ (18 Ağu 2026, "görsel hatalı ama sayfanın görselini sil
+  // diyemiyorum"): sahneyi ve metni KORUYARAK yalnızca görselleri siler.
+  // Sayfa yerinde kalır, "Bu Sayfa Çiftini Üret" ile yeniden çizdirilir.
+  const spreadGorselleriniSil = async (idx) => {
+    const { solSayfa, sagSayfa } = spreadNumaralariGetir(idx);
+    if (!window.confirm(
+      `Sayfa ${solSayfa}–${sagSayfa} görselleri silinsin mi?\n\n` +
+      `Sahne tarifi ve metin KALIR — sadece çizimler silinir, sonra yeniden üretebilirsin.\n\n` +
+      `Silinen dosyalar depoda durmaya devam eder; "Depodan seç" ile geri bağlanabilir.`)) return;
+    const yeniSpreadler = seciliProje.spreadler.map((sp, i) => i === idx
+      ? { ...sp, solGorselUrl: undefined, sagGorselUrl: undefined, solHamUrl: undefined, sagHamUrl: undefined, yaziBasildi: false }
+      : sp);
+    await projeGuncelle(seciliId, { ...seciliProje, spreadler: yeniSpreadler }, true);
   };
   const spreadAlanGuncelle = (idx, alan, deger) => {
     const yeniSpreadler = seciliProje.spreadler.map((s, i) => i === idx ? { ...s, [alan]: deger } : s);
@@ -4066,11 +4570,114 @@ function KitapStudyo({ authFetch }) {
     img.src = "data:image/png;base64," + b64Genis;
   });
 
-  // KRİTİK ÖZELLİK (bağımsız araçta sonradan eklenen en önemli düzeltme):
-  // sayfa metnini ve sayfa numarasını görsele canvas ile bindirir — önceden
-  // sadece veride tutulup görsele hiç basılmıyordu.
-  const sayfaMetniBindir = async (hamB64, metin, sayfaNo) => {
+  // Metni verilen genişlikte satırlara böler — ÇİZMEDEN, sadece ölçer.
+  // (metniSar hem ölçüp hem çizdiği için otomatik punto ayarında kullanılamıyor.)
+  const metniSatirlaraBol = (ctx, metin, maxGenislik) => {
+    const satirlar = []; let satir = "";
+    for (const kelime of (metin || "").trim().split(/\s+/)) {
+      const test = satir ? satir + " " + kelime : kelime;
+      if (ctx.measureText(test).width > maxGenislik && satir) { satirlar.push(satir); satir = kelime; }
+      else satir = test;
+    }
+    if (satir) satirlar.push(satir);
+    return satirlar;
+  };
+
+  // Bir bölgenin ortalama parlaklığını ölçer (0 = simsiyah, 1 = bembeyaz).
+  // Yazının o bölgede açık mı koyu mu olması gerektiğine buna bakarak karar
+  // veriyoruz — sabit renk, gökyüzünde okunurken toprakta kayboluyordu.
+  const bolgeParlakligi = (ctx, x, y, g, y2) => {
+    try {
+      const d = ctx.getImageData(Math.max(0, x | 0), Math.max(0, y | 0), Math.max(1, g | 0), Math.max(1, y2 | 0)).data;
+      let toplam = 0, adet = 0;
+      for (let i = 0; i < d.length; i += 4 * 37) { // her 37. pikseli örnekle — yeterli ve hızlı
+        toplam += (0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2]) / 255; adet++;
+      }
+      return adet ? toplam / adet : 0.5;
+    } catch { return 0.5; }
+  };
+
+  // SEÇİLEN DÜZEN — KONSEPT 1: "Tam kanama, yazı resmin üstünde"
+  // (16 Ağu 2026, 10 konsept sunuldu, Bedirhan 1'i seçti.)
+  //
+  // Kural: illüstrasyon iki sayfayı da uçtan uca kaplar, metin AYRI BİR KUTUDA
+  // DEĞİL doğrudan resmin üstünde durur, ve resmin bir parçası gibi görünür.
+  //
+  // Onaylanan mockup'a birebir oturtmak için üç şey:
+  //
+  //  1. ALT BANT YUMUŞAKÇA KOYULAŞIR — kutu değil, GEÇİŞ. Şeffaftan başlayıp
+  //     alta doğru koyulaşan sıcak bir gradyan; kenarı yok, nerede başladığı
+  //     görünmüyor, akşam ışığının yere düşen gölgesi gibi okunuyor. Bu,
+  //     "yazı kutunun içinde" hissi vermeden okunurluğu GARANTİ altına alır —
+  //     prompt modelden sakin alan istese de model her zaman uymayabilir.
+  //  2. YAZI RENGİ KİTAP BOYUNCA SABİT (açık krem). Önceki turda zemine göre
+  //     açık/koyu seçiliyordu; bu, sayfa sayfa değişen bir tipografi demekti —
+  //     bir kitapta tutarsız durur. Gradyan zaten koyu zemini garanti ettiği
+  //     için artık her sayfada aynı ton kullanılıyor.
+  //  3. GÖLGE, KALIN DIŞ ÇİZGİ DEĞİL. Mockup'taki text-shadow'un canvas
+  //     karşılığı (shadowBlur) kullanılıyor — strokeText kalın ve "sticker"
+  //     gibi duruyordu.
+  //
+  // Punto otomatiği korundu: metin sığana kadar küçülür, hiçbir cümle
+  // kırpılmaz (ekran görüntülerindeki "...korku ve" hatası buradan geliyordu).
+  // ═══════════════════════════════════════════════════════════════
+  // METİN KATMANI — düzenlenebilir tipografi
+  //
+  // YENİDEN YAZILDI (16 Ağu 2026, Bedirhan: "yazı yerlerini rengini vs her
+  // şeyini ben yapabilmeliyim, tıpkı Canva gibi" + "bazısının boyutu büyük
+  // bazısının küçük"):
+  //
+  // Punto neden tutarsızdı: her sayfada metin uzunluğuna göre OTOMATİK
+  // küçülüyordu. Kırpılmayı önlüyordu ama kitap boyunca punto oynuyordu.
+  // Artık otomatik SEÇENEK; kapatılıp sabit punto verilebiliyor ve tek
+  // tıkla tüm kitaba uygulanabiliyor.
+  //
+  // Her değer sayfa genişliğinin YÜZDESİ olarak tutuluyor — böylece aynı
+  // ayar hem 1920 px'lik baskı çıktısında hem küçük önizlemede aynı görünür.
+  const VARSAYILAN_METIN_STILI = {
+    otomatikPunto: true,
+    punto: 3.0,        // % — sayfa genişliğine oran
+    enKucukPunto: 2.3, // % — otomatik küçülmenin tabanı
+    maksSatir: 4,
+    renk: "#fffdf5",
+    hiza: "center",    // left | center | right
+    x: 50,             // % — metin kutusunun yatay merkezi
+    y: 88,             // % — metin bloğunun DİKEY MERKEZİ
+    genislik: 84,      // % — satır sarma genişliği
+    satirAraligi: 1.42,
+    golge: 62,         // 0-100 — harflerin çevresindeki yumuşaklık
+    bant: 58,          // 0-100 — alt geçişin yoğunluğu (0 = geçiş yok)
+    bantYuksekligi: 30,// % — geçişin başladığı yükseklik
+    sayfaNoGoster: true,
+  };
+  const metinStiliCoz = (s) => ({ ...VARSAYILAN_METIN_STILI, ...(s || {}) });
+
+  const SAYFA_NO_SERIDI = 0.045;
+
+  // Metni verilen stile göre satırlara böler ve kullanılacak puntoyu döndürür.
+  // Hem canvas çizimi hem canlı HTML önizlemesi AYNI bu fonksiyonu kullanır —
+  // önizleme ile çıktı arasında fark kalmasın diye.
+  const metinYerlesimiHesapla = (ctx, metin, G, st) => {
+    const maxG = G * (st.genislik / 100);
+    const tavan = Math.round(G * (st.punto / 100));
+    const taban = Math.round(G * (st.enKucukPunto / 100));
+    let punto = tavan, satirlar = [];
+    if (st.otomatikPunto) {
+      while (punto >= taban) {
+        ctx.font = `${punto}px Capriola, Georgia, serif`;
+        satirlar = metniSatirlaraBol(ctx, metin, maxG);
+        if (satirlar.length <= st.maksSatir) break;
+        punto -= 1;
+      }
+    }
+    ctx.font = `${punto}px Capriola, Georgia, serif`;
+    if (!satirlar.length) satirlar = metniSatirlaraBol(ctx, metin, maxG);
+    return { punto, satirlar, satirAraligi: punto * st.satirAraligi };
+  };
+
+  const sayfaMetniBindir = async (hamB64, metin, sayfaNo, stilGirdi) => {
     await fontHazirla(28, "Capriola");
+    const st = metinStiliCoz(stilGirdi);
     return new Promise((resolve) => {
       const img = new Image();
       img.onload = () => {
@@ -4078,21 +4685,54 @@ function KitapStudyo({ authFetch }) {
         canvas.width = img.width; canvas.height = img.height;
         const ctx = canvas.getContext("2d");
         ctx.drawImage(img, 0, 0);
-        const metniVar = metin && metin.trim();
+
+        const G = img.width, Y = img.height;
+        const numaraSeridi = Y * SAYFA_NO_SERIDI;
+        const metniVar = !!(metin && metin.trim());
+
+        // ── Yumuşak alt geçiş (KUTU DEĞİL) — yoğunluğu ayarlanabilir ──
+        if (st.bant > 0) {
+          const ust = Y * (1 - st.bantYuksekligi / 100);
+          const en = st.bant / 100;
+          const gr = ctx.createLinearGradient(0, ust, 0, Y);
+          gr.addColorStop(0.00, "rgba(26,18,6,0)");
+          gr.addColorStop(0.35, `rgba(26,18,6,${(en * 0.24).toFixed(3)})`);
+          gr.addColorStop(0.65, `rgba(26,18,6,${(en * 0.62).toFixed(3)})`);
+          gr.addColorStop(1.00, `rgba(26,18,6,${en.toFixed(3)})`);
+          ctx.fillStyle = gr;
+          ctx.fillRect(0, ust, G, Y - ust);
+        }
+
         if (metniVar) {
-          const bantH = img.height * 0.2;
-          ctx.fillStyle = "rgba(255,255,255,0.9)"; ctx.fillRect(0, img.height - bantH, img.width, bantH);
-          ctx.fillStyle = "#18181a"; ctx.textAlign = "center";
-          ctx.font = `${Math.round(img.width * 0.062)}px Capriola, Georgia, serif`;
-          metniSar(ctx, metin.trim(), img.width / 2, img.height - bantH + img.width * 0.085, img.width * 0.86, img.width * 0.075);
+          const { punto, satirlar, satirAraligi } = metinYerlesimiHesapla(ctx, metin, G, st);
+          const blok = satirlar.length * satirAraligi;
+          // st.y metin bloğunun MERKEZİ — sürükleyerek konumlandırma böyle
+          // daha sezgisel oluyor (kutuyu tutup taşıyorsun, üst kenarını değil).
+          const merkezY = Y * (st.y / 100);
+          const ilkSatirY = merkezY - blok / 2 + satirAraligi * 0.78;
+          const x = G * (st.x / 100);
+
+          ctx.textAlign = st.hiza;
+          ctx.fillStyle = st.renk;
+          ctx.shadowColor = `rgba(0,0,0,${(st.golge / 100).toFixed(2)})`;
+          ctx.shadowBlur = Math.max(3, punto * 0.42 * (st.golge / 62));
+          ctx.shadowOffsetY = Math.max(1, punto * 0.05);
+          satirlar.forEach((sr, i) => ctx.fillText(sr, x, ilkSatirY + i * satirAraligi));
+          ctx.shadowColor = "transparent"; ctx.shadowBlur = 0; ctx.shadowOffsetY = 0;
         }
-        if (sayfaNo) {
+
+        if (sayfaNo && st.sayfaNoGoster) {
           ctx.textAlign = "center";
-          ctx.fillStyle = metniVar ? "#6f6f6c" : "rgba(0,0,0,0.55)";
-          ctx.font = `${Math.round(img.width * 0.03)}px Capriola, Georgia, serif`;
-          ctx.fillText(String(sayfaNo), img.width / 2, img.height - img.width * 0.025);
+          ctx.font = `${Math.round(G * 0.019)}px Capriola, Georgia, serif`;
+          ctx.fillStyle = "rgba(255,253,245,0.78)";
+          ctx.shadowColor = "rgba(0,0,0,0.5)";
+          ctx.shadowBlur = Math.max(2, G * 0.005);
+          ctx.fillText(String(sayfaNo), G / 2, Y - numaraSeridi * 0.34);
+          ctx.shadowColor = "transparent"; ctx.shadowBlur = 0;
         }
-        resolve(canvas.toDataURL("image/png").split(",")[1]);
+        // Baskı çıktısı: 0.86 → 0.92. 1920 px'lik sayfada JPEG artefaktı
+        // basımda görünür hâle geliyordu.
+        resolve(canvas.toDataURL("image/jpeg", 0.92).split(",")[1]);
       };
       img.src = "data:image/png;base64," + hamB64;
     });
@@ -4105,23 +4745,200 @@ function KitapStudyo({ authFetch }) {
     if (!s.sahne?.trim()) { if (hedefId === seciliId) setHata("Önce bu sayfa çifti için bir sahne yaz."); return; }
     if (hedefId === seciliId) { setSpreadUretiliyorIdx(idx); setHata(""); }
     try {
-      const genisUrl = await gorselIsteYenidenDeneyerek({ karakterTanimi: p.stilTanimi, sahne: s.sahne, model: p.model, kalite: p.kalite, boyut: "1536x1024", referansGorseller: referansHavuzuTopla(hedefId) });
-      const genisB64 = await urlDenB64Al(genisUrl);
-      const { sol, sag } = await gorseliIkiyeBol(genisB64);
       const { solSayfa, sagSayfa } = spreadNumaralariGetir(idx);
-      const solFinal = await sayfaMetniBindir(sol, s.solMetinsiz ? "" : s.solMetin, solSayfa);
-      const sagFinal = await sayfaMetniBindir(sag, s.sagMetinsiz ? "" : s.sagMetin, sagSayfa);
-      const solUrl = await gorselYukle(solFinal, "sayfa");
-      const sagUrl = await gorselYukle(sagFinal, "sayfa");
-      // p.spreadler yerine EN GÜNCEL kopyayı (projeOku ile) tekrar okuyoruz —
-      // arka planda üretim sırasında bu spread'e ait metin/sahne başka bir
-      // adımda değişmiş olabilir.
+
+      const metinAlaniNotu = (s.solMetinsiz && s.sagMetinsiz)
+        ? ""
+        : "\n\nMETİN ALANI (ÖNEMLİ): Görselin ALT %28'lik bandında, hem sol hem sağ yarıda, SAKİN ve AZ DETAYLI bir alan bırak — düz toprak, yumuşak çayır, sığ su, gölgeli zemin, sisli ön plan gibi. Bu bandın üzerine sonradan kitap metni yerleştirilecek. Oraya karakter yüzü, gözler, keskin kontrast, yoğun desen veya hikâyenin kritik detayı KOYMA. Bu bant boş bir şerit ya da kesilmiş bir alan gibi DURMASIN; manzaranın doğal ve yumuşak bir devamı olsun.";
+
+      const spreadSahne =
+        `${s.sahne.trim()}\n\n` +
+        "BU TEK BİR KESİNTİSİZ ÇİFT SAYFA İLLÜSTRASYONUDUR (double-page spread). " +
+        "Görsel tam ortadan ikiye bölünüp bir kitabın sol ve sağ sayfası olarak basılacak; " +
+        "her sayfa KARE (20x20 cm) olacak, yani kompozisyon 2:1 oranında geniş bir alandır. " +
+        "Ufuk çizgisi, zemin, gökyüzü, ışık yönü ve renk geçişleri soldan sağa KESİNTİSİZ devam etmeli — " +
+        "iki ayrı sahne yan yana konmuş gibi DEĞİL, tek bir geniş manzara gibi. " +
+        "Tam ortada (cilt payı) ana karakterin yüzü, gözü veya hikâyenin kritik detayı BULUNMASIN; " +
+        "orta bölge manzaranın sakin bir parçası olsun. " +
+        "Her iki yarı da kendi başına dengeli bir kare kompozisyon oluşturmalı. " +
+        "Görselin içinde HİÇBİR yazı, harf, rakam, imza veya filigran olmasın." +
+        metinAlaniNotu;
+
+      // BASKI ÇÖZÜNÜRLÜĞÜ (16 Ağu 2026, Bedirhan: "baskıya uygun olmaz,
+      // her sayfa 20x20 olmalı"):
+      //
+      // Önceki boyut 1536x1024'tü; ortadan bölününce sayfa başına 768 px
+      // kalıyordu — 20 cm'lik bir sayfada 98 dpi, yani baskıda kullanılamaz.
+      //
+      // gpt-image-2 artık 3840x2160'a kadar serbest boyut kabul ediyor.
+      // 3840x1920 seçildi: tam 2:1, yani ortadan bölününce iki adet
+      // 1920x1920 KARE sayfa çıkıyor — 20x20 cm'de 244 dpi.
+      //
+      // Neden 300 dpi değil: 300 dpi 2363 px/sayfa, yani 4726 px'lik bir
+      // yayılım ister; model 3840'ta duruyor. 244 dpi bu modelden
+      // SÜREKLİLİĞİ BOZMADAN alınabilecek en yüksek değer. Sayfaları ayrı
+      // ayrı üretmek 2160x2160'a (274 dpi) çıkarırdı ama süreklilik giderdi —
+      // asıl şikâyet oydu, o yüzden tercih edilmedi.
+      const YAYILIM_BOYUTU = p.yayilimBoyutu || "3840x1920";
+
+      const genisUrl = await gorselIsteYenidenDeneyerek({
+        karakterTanimi: p.stilTanimi, sahne: spreadSahne, model: p.model,
+        kalite: p.kalite, boyut: YAYILIM_BOYUTU, referansGorseller: referansHavuzuTopla(hedefId),
+      });
+      const genisB64 = await urlDenB64Al(genisUrl);
+      const { sol: solHamB64, sag: sagHamB64 } = await gorseliIkiyeBol(genisB64);
+
+      // HAM GÖRSELLER ARTIK SAKLANIYOR (önceden atılıyordu).
+      // Sebep: metin görselin İÇİNE basılıyor. Ham kopya olmadan puntoyu,
+      // rengi ya da konumu değiştirmek için sahnenin YENİDEN ÜRETİLMESİ
+      // gerekiyordu — hem para harcıyor hem de resim değişiyordu. Artık
+      // ham kare bir kez üretiliyor, tipografi üstüne istendiği kadar
+      // yeniden diziliyor.
+      const solHamUrl = await gorselYukle(solHamB64, "ham-sayfa");
+      const sagHamUrl = await gorselYukle(sagHamB64, "ham-sayfa");
+
+      // DEĞİŞTİRİLDİ (16 Ağu 2026, Bedirhan: "şu anda görsel yazılı şekilde mi
+      // üretiliyor? eğer öyleyse yazılı üretilmesin, yazıyı biz ekleyelim"):
+      //
+      // Burada üretimin hemen ardından metin canvas ile görselin İÇİNE
+      // basılıyordu. Yani her yeni üretim, daha bakılmadan yazılı geliyordu ve
+      // yazının yeri/puntosu yanlışsa düzeltmenin tek yolu yeniden üretimdi.
+      //
+      // Artık üretim TEMİZ GÖRSEL bırakıyor. Metin ayrı bir adım: "Yazı
+      // Tasarımını Düzenle" ile konumlandırılıp "Uygula" denince basılıyor.
+      // Gösterilen görsel (solGorselUrl) başlangıçta ham görselin kendisidir —
+      // fazladan yükleme yapılmıyor, aynı Blob adresi kullanılıyor.
       const guncelP = projeOku(hedefId);
-      const yeniSpreadler = guncelP.spreadler.map((sp, i) => i === idx ? { ...sp, solGorselUrl: solUrl, sagGorselUrl: sagUrl } : sp);
+      const yeniSpreadler = guncelP.spreadler.map((sp, i) => i === idx
+        ? { ...sp, solHamUrl, sagHamUrl, solGorselUrl: solHamUrl, sagGorselUrl: sagHamUrl, yaziBasildi: false }
+        : sp);
       const guncelMeta = { ...guncelP, spreadler: yeniSpreadler };
       await projeGuncelle(hedefId, guncelMeta);
     } catch (err) { if (hedefId === seciliId) setHata("Hata: " + err.message); }
     finally { if (hedefId === seciliId) setSpreadUretiliyorIdx(null); }
+  };
+
+  // Metni YENİDEN DİZ — sahneyi yeniden üretmeden.
+  // Ham görseller saklandığı için AI'ya hiç gidilmiyor: para harcanmıyor,
+  // resim değişmiyor, saniyeler içinde bitiyor. Stil düzenleyicideki
+  // "Uygula" bunu çağırır.
+  // ═══════════════════════════════════════════════════════════════
+  // METİN STİLİ DÜZENLEYİCİ — canlı önizleme, sürükle-bırak konumlandırma
+  //
+  // Neden HTML önizleme, canvas değil: her ayar değişikliğinde 1920x1920'lik
+  // bir canvas'ı yeniden çizmek ağır ve takılmalı olurdu. Önizleme, ham
+  // görselin üstüne konumlanmış bir <div> — anında tepki veriyor. "Uygula"ya
+  // basınca AYNI değerlerle canvas'ta baskı çıktısı üretiliyor.
+  //
+  // Yerleşim hesabı iki tarafta da metinYerlesimiHesapla ile yapılıyor, yani
+  // önizlemede gördüğün satır bölünmesi ve punto çıktıdakiyle aynı.
+  const MetinStiliDuzenleyici = ({ spread, sayfaNo, stil, setStil, tarafAdi }) => {
+    const kutuRef = React.useRef(null);
+    const [surukluyor, setSurukluyor] = React.useState(false);
+    const st = metinStiliCoz(stil);
+    const metin = tarafAdi === "sol"
+      ? (spread.solMetinsiz ? "" : spread.solMetin)
+      : (spread.sagMetinsiz ? "" : spread.sagMetin);
+    const hamUrl = tarafAdi === "sol" ? spread.solHamUrl : spread.sagHamUrl;
+
+    // Önizlemedeki punto/satır bölünmesi, çıktıdakiyle birebir aynı hesaptan
+    // gelsin diye ölçüm canvas'ı kullanılıyor.
+    const yerlesim = React.useMemo(() => {
+      if (!metin?.trim()) return null;
+      const c = document.createElement("canvas");
+      const ctx = c.getContext("2d");
+      return metinYerlesimiHesapla(ctx, metin, 1000, st);
+    }, [metin, st.punto, st.enKucukPunto, st.otomatikPunto, st.genislik, st.maksSatir, st.satirAraligi]);
+
+    const surukle = (e) => {
+      if (!surukluyor || !kutuRef.current) return;
+      const r = kutuRef.current.getBoundingClientRect();
+      const nokta = e.touches ? e.touches[0] : e;
+      const x = Math.max(4, Math.min(96, ((nokta.clientX - r.left) / r.width) * 100));
+      const y = Math.max(6, Math.min(96, ((nokta.clientY - r.top) / r.height) * 100));
+      setStil({ ...st, x: Math.round(x), y: Math.round(y) });
+    };
+
+    return (
+      <div
+        ref={kutuRef}
+        onMouseMove={surukle} onMouseUp={() => setSurukluyor(false)} onMouseLeave={() => setSurukluyor(false)}
+        onTouchMove={surukle} onTouchEnd={() => setSurukluyor(false)}
+        style={{ position: "relative", width: "100%", aspectRatio: "1 / 1", borderRadius: 8,
+                 overflow: "hidden", background: "#2a2118", userSelect: "none",
+                 // containerType BURADA olmalı: cqw birimi en yakın ÜST
+                 // kapsayıcıya göre ölçülür, kendi üstünde tanımlıysa çalışmaz.
+                 containerType: "inline-size",
+                 cursor: surukluyor ? "grabbing" : "default" }}>
+        {hamUrl && <img src={hamUrl} alt="" draggable={false}
+          style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }} />}
+        {st.bant > 0 && (
+          <div style={{ position: "absolute", left: 0, right: 0, bottom: 0, height: `${st.bantYuksekligi}%`,
+            background: `linear-gradient(to bottom, rgba(26,18,6,0) 0%, rgba(26,18,6,${(st.bant / 100 * 0.24).toFixed(3)}) 35%, rgba(26,18,6,${(st.bant / 100 * 0.62).toFixed(3)}) 65%, rgba(26,18,6,${(st.bant / 100).toFixed(3)}) 100%)` }} />
+        )}
+        {yerlesim && (
+          <div
+            onMouseDown={() => setSurukluyor(true)} onTouchStart={() => setSurukluyor(true)}
+            title="Sürükleyerek taşı"
+            style={{
+              position: "absolute", left: `${st.x}%`, top: `${st.y}%`,
+              transform: `translate(${st.hiza === "center" ? "-50%" : st.hiza === "right" ? "-100%" : "0"}, -50%)`,
+              width: `${st.genislik}%`, textAlign: st.hiza, cursor: "grab",
+              color: st.renk, fontFamily: "Capriola, Georgia, serif",
+              fontSize: `${(yerlesim.punto / 1000) * 100}cqw`,
+              lineHeight: st.satirAraligi,
+              textShadow: `0 1px 3px rgba(0,0,0,${(st.golge / 100).toFixed(2)}), 0 0 10px rgba(0,0,0,${(st.golge / 160).toFixed(2)})`,
+              // Sürüklenebilir olduğu HER ZAMAN belli olsun — kullanıcı
+              // "yazının konumunu değiştirmekte zorlanıyorum" dedi.
+              outline: surukluyor ? "2px dashed rgba(255,255,255,.85)" : "1px dashed rgba(255,255,255,.28)",
+              outlineOffset: "6px",
+              padding: "6px 0",   // tutma alanını büyüt
+              touchAction: "none",
+            }}>
+            {yerlesim.satirlar.map((sr, i) => <div key={i}>{sr}</div>)}
+          </div>
+        )}
+        {st.sayfaNoGoster && (
+          <div style={{ position: "absolute", left: 0, right: 0, bottom: "1.6%", textAlign: "center",
+            color: "rgba(255,253,245,.78)", fontFamily: "Capriola, Georgia, serif", fontSize: "1.9cqw",
+            textShadow: "0 1px 2px rgba(0,0,0,.5)" }}>{sayfaNo}</div>
+        )}
+      </div>
+    );
+  };
+
+  const spreadMetniYenidenDiz = async (idx, hedefId, stilUstuneYaz) => {
+    hedefId = hedefId || seciliId;
+    const p = projeOku(hedefId);
+    const s = p.spreadler[idx];
+    if (!s.solHamUrl || !s.sagHamUrl) {
+      setHata("Bu sayfa çiftinin ham görseli yok — eski bir üretim. Metni yeniden dizmek için bir kez daha üretilmeli.");
+      return false;
+    }
+    const { solSayfa, sagSayfa } = spreadNumaralariGetir(idx);
+    const stil = stilUstuneYaz || s.metinStili || p.metinStili;
+    const [solHamB64, sagHamB64] = await Promise.all([urlDenB64Al(s.solHamUrl), urlDenB64Al(s.sagHamUrl)]);
+    const solFinal = await sayfaMetniBindir(solHamB64, s.solMetinsiz ? "" : s.solMetin, solSayfa, stil);
+    const sagFinal = await sayfaMetniBindir(sagHamB64, s.sagMetinsiz ? "" : s.sagMetin, sagSayfa, stil);
+    const [solUrl, sagUrl] = await Promise.all([gorselYukle(solFinal, "sayfa"), gorselYukle(sagFinal, "sayfa")]);
+    const guncelP = projeOku(hedefId);
+    const yeniSpreadler = guncelP.spreadler.map((sp, i) => i === idx
+      ? { ...sp, solGorselUrl: solUrl, sagGorselUrl: sagUrl, metinStili: stil, yaziBasildi: true } : sp);
+    await projeGuncelle(hedefId, { ...guncelP, spreadler: yeniSpreadler });
+    return true;
+  };
+
+  // Basılı yazıyı KALDIR — ham görsele geri dön. Yeniden üretim yok, AI çağrısı
+  // yok; sadece gösterilen görsel ham kopyaya işaret ediyor.
+  const spreadYaziyiKaldir = async (idx, hedefId) => {
+    hedefId = hedefId || seciliId;
+    const p = projeOku(hedefId);
+    const s = p.spreadler[idx];
+    if (!s.solHamUrl) { setHata("Ham görsel yok — bu sayfa çifti bir kez daha üretilmeli."); return false; }
+    const yeniSpreadler = p.spreadler.map((sp, i) => i === idx
+      ? { ...sp, solGorselUrl: sp.solHamUrl, sagGorselUrl: sp.sagHamUrl, yaziBasildi: false } : sp);
+    await projeGuncelle(hedefId, { ...p, spreadler: yeniSpreadler });
+    return true;
   };
 
   const spreadMetniYenidenYerlestir = async (idx) => {
@@ -4171,13 +4988,36 @@ function KitapStudyo({ authFetch }) {
     }
   };
 
-  const uretimiSifirla = async () => {
-    if (!window.confirm('Tüm sayfa çiftlerinin ve kapakların "tamamlandı" durumu sıfırlanacak (metinler korunur). Onaylıyor musun?')) return;
-    const yeniSpreadler = (seciliProje.spreadler || []).map((s) => ({ ...s, solGorselUrl: null, sagGorselUrl: null }));
-    const guncelMeta = { ...seciliProje, spreadler: yeniSpreadler, onKapakGorselUrl: null, onKapakHamUrl: null, arkaKapakGorselUrl: null, arkaKapakHamUrl: null };
-    setSeciliProje(guncelMeta);
-    await metaKaydet(guncelMeta);
+  // DÜZELTİLDİ (16 Ağu 2026, Bedirhan'ın bildirdiği kritik bug: "ne
+  // silebiliyorum ne de baştan üretme mekanizmasını devreye sokabiliyorum"):
+  // bu fonksiyon 14 Ağu'daki paralel üretim refactor'una hiç dahil
+  // edilmemişti — setSeciliProje+metaKaydet kullanıyordu, aktifUretimVerisiRef'i
+  // (tumunuUret/spreadUret'in GERÇEKTEN okuduğu kaynak) hiç güncellemiyordu.
+  // Sonuç: "sil"e basılsa bile, arka plandaki üretim fonksiyonları hâlâ eski
+  // (silinmemiş) veriyi görüp "zaten tamam" sanıyor, hiçbir şey üretmiyordu.
+  // Artık projeGuncelle kullanıyor (diğer üretim fonksiyonlarıyla aynı desen).
+  const uretimiSifirla = async (hedefId) => {
+    hedefId = hedefId || seciliId;
+    if (hedefId === seciliId && !window.confirm('Tüm sayfa çiftlerinin ve kapakların "tamamlandı" durumu sıfırlanacak (metinler korunur). Onaylıyor musun?')) return;
+    const p = projeOku(hedefId);
+    const yeniSpreadler = (p.spreadler || []).map((s) => ({ ...s, solGorselUrl: null, sagGorselUrl: null }));
+    const guncelMeta = { ...p, spreadler: yeniSpreadler, onKapakGorselUrl: null, onKapakHamUrl: null, arkaKapakGorselUrl: null, arkaKapakHamUrl: null };
+    await projeGuncelle(hedefId, guncelMeta, true);  // bilinçli silme — onay yukarıda alındı
   };
+
+  // EKLENDİ (16 Ağu 2026, Bedirhan'ın talebi: "tek tuşta tümünü yeniden
+  // üret olmalı"): uretimiSifirla + tumunuUret'i tek adımda birleştiriyor —
+  // önce onay alıp temizliyor, hemen ardından üretimi otomatik başlatıyor.
+  const tumunuYenidenUret = async (hedefId) => {
+    hedefId = hedefId || seciliId;
+    if (!window.confirm('Tüm sayfa çiftleri ve kapaklar SİLİNİP baştan üretilecek (metinler korunur, kredi harcanır). Onaylıyor musun?')) return;
+    const p = projeOku(hedefId);
+    const yeniSpreadler = (p.spreadler || []).map((s) => ({ ...s, solGorselUrl: null, sagGorselUrl: null }));
+    const guncelMeta = { ...p, spreadler: yeniSpreadler, onKapakGorselUrl: null, onKapakHamUrl: null, arkaKapakGorselUrl: null, arkaKapakHamUrl: null };
+    await projeGuncelle(hedefId, guncelMeta, true);  // bilinçli silme — onay yukarıda alındı
+    await tumunuUret(hedefId);
+  };
+
 
   // ================= EKLENDİ: 5. parça — kitap listesi, çevirerek önizleme,
   // PDF çıktısı ================= 
@@ -4205,6 +5045,21 @@ function KitapStudyo({ authFetch }) {
     document.head.appendChild(s);
   });
 
+  // DÜZELTİLDİ (16 Ağu 2026 — ÖLÇÜLEREK BULUNDU, baskı çıktısını bozan hata):
+  //
+  // Sayfa boyutu PİKSEL biriminde veriliyordu: new jsPDF({unit:"px",
+  // format:[1920,1920]}). jsPDF'te 1 px = 1 pt = 1/72 inç sayılır. Sonuç:
+  // 1920 px'lik bir sayfa PDF'e 1920 pt = 26,7 inç = **67,7 x 67,7 cm**
+  // olarak yazılıyor ve gömülü görselin çözünürlüğü **72 dpi** görünüyordu.
+  //
+  // Yani sayfaları 244 dpi'a çıkarmamız son çıktıya hiç yansımıyordu —
+  // matbaaya giden dosya hem yanlış fiziksel ölçüde hem de baskı için
+  // kabul edilemez çözünürlükte beyan ediliyordu.
+  //
+  // Artık sayfa boyutu MİLİMETRE cinsinden, projenin kendi ölçüsünden
+  // (Genişlik/Yükseklik cm alanları, tanımsızsa 20x20) kuruluyor. Görselin
+  // en-boy oranı korunur: sayfa genişliği projeden gelir, yüksekliği görselin
+  // oranından türetilir — böylece kapak gibi farklı oranlı sayfalar ezilmez.
   const pdfIndir = async () => {
     const liste = kitapSayfaListesiOlustur();
     if (liste.length === 0) { setHata("Henüz indirilecek bir görsel yok."); return; }
@@ -4212,15 +5067,43 @@ function KitapStudyo({ authFetch }) {
     try {
       await jspdfYukle();
       const { jsPDF } = window.jspdf;
+
+      const genislikCm = Number(seciliProje.ozellikler?.genislikCm) || 20;
+      const genislikMm = genislikCm * 10;
       let doc;
+      const dpiler = [];
+
       for (let i = 0; i < liste.length; i++) {
         const b64 = await urlDenB64Al(liste[i].url);
-        const boyut = await new Promise((resolve) => { const img = new Image(); img.onload = () => resolve({ w: img.width, h: img.height }); img.src = "data:image/png;base64," + b64; });
-        if (i === 0) doc = new jsPDF({ unit: "px", format: [boyut.w, boyut.h] });
-        else doc.addPage([boyut.w, boyut.h]);
-        doc.addImage("data:image/png;base64," + b64, "PNG", 0, 0, boyut.w, boyut.h);
+        // JPEG mi PNG mi — veriden anlaşılır. Yanlış etiket jsPDF'i gereksiz
+        // yeniden kodlamaya zorluyor, dosya şişiyordu.
+        const jpegMi = b64.startsWith("/9j/");
+        const mime = jpegMi ? "image/jpeg" : "image/png";
+        const veriUrl = `data:${mime};base64,` + b64;
+        const boyut = await new Promise((resolve) => {
+          const img = new Image();
+          img.onload = () => resolve({ w: img.width, h: img.height });
+          img.src = veriUrl;
+        });
+
+        const sayfaG = genislikMm;
+        const sayfaY = genislikMm * (boyut.h / boyut.w);   // oran korunur
+        if (i === 0) doc = new jsPDF({ unit: "mm", format: [sayfaG, sayfaY], compress: true });
+        else doc.addPage([sayfaG, sayfaY]);
+        doc.addImage(veriUrl, jpegMi ? "JPEG" : "PNG", 0, 0, sayfaG, sayfaY);
+
+        dpiler.push(boyut.w / (sayfaG / 25.4));
       }
+
       doc.save(`${(seciliProje.kitapAdi || "kitap").replace(/[^a-zA-Z0-9ığüşöçİĞÜŞÖÇ_-]+/g, "-")}.pdf`);
+
+      // Çıktının gerçek çözünürlüğünü SÖYLE — "baskıya hazır" diye sessizce
+      // geçme. En düşük sayfa neyse ölçüt odur.
+      const enDusuk = Math.round(Math.min(...dpiler));
+      setPdfSonDurum({
+        sayfa: liste.length, enDusukDpi: enDusuk, genislikCm,
+        yeterli: enDusuk >= 240,
+      });
     } catch (err) { setHata("PDF oluşturulamadı: " + err.message); }
     finally { setPdfHazirlaniyorMu(false); }
   };
@@ -4278,10 +5161,149 @@ function KitapStudyo({ authFetch }) {
     } catch { setHata("Sunucuya ulaşılamadı."); }
   };
 
+  // EKLENDİ (16 Ağu 2026): ESC ile tam ekranı kapat.
+  React.useEffect(() => {
+    if (!buyukGorsel) return;
+    const kapat = (e) => { if (e.key === "Escape") setBuyukGorsel(null); };
+    window.addEventListener("keydown", kapat);
+    return () => window.removeEventListener("keydown", kapat);
+  }, [buyukGorsel]);
+
   return (
     <div style={stil.sayfa}>
       <h2 style={stil.baslik}>🌈 MST Çocuk Stüdyo</h2>
       <p style={stil.alt}>Kitap resim atölyesi — projeler artık kalıcı, her cihazdan erişilebilir.</p>
+
+      {/* ── GÖRSEL DEPOSU — KURTARMA ────────────────────────────
+          Kaybolan üretimlerde silinen şey dosyalar değil, dosyaların hangi
+          sayfaya ait olduğu bilgisiydi. Depodaki her görsel hâlâ duruyor;
+          buradan görülüp istenen sayfaya geri bağlanabiliyor. */}
+      {depoAcik && (
+        <div onClick={() => setDepoAcik(null)}
+          style={{ position: "fixed", inset: 0, zIndex: 9998, background: "rgba(10,9,7,.9)", display: "flex", padding: 24 }}>
+          <div onClick={(e) => e.stopPropagation()}
+            style={{ background: "#1c1a15", color: "#efe9da", borderRadius: 14, width: "100%", maxWidth: 1100,
+                     margin: "auto", maxHeight: "90vh", display: "flex", flexDirection: "column",
+                     border: "1px solid rgba(255,255,255,.12)" }}>
+            <div style={{ padding: "16px 20px", borderBottom: "1px solid rgba(255,255,255,.1)" }}>
+              <div style={{ fontFamily: "'Fredoka', sans-serif", fontWeight: 600, fontSize: 16 }}>
+                🗂 Görsel Deposu {depoAcik.mod === "ata" && `— Sayfa ${spreadNumaralariGetir(depoAcik.idx)[depoAcik.taraf === "sol" ? "solSayfa" : "sagSayfa"]} için seç`}
+              </div>
+              <div style={{ fontSize: 12, color: "#a09a89", marginTop: 4, lineHeight: 1.5 }}>
+                Şimdiye kadar üretilmiş <b style={{ color: "#efe9da" }}>tüm</b> görseller burada — hiçbiri silinmedi.
+                {" "}<b style={{ color: "#e0ac79" }}>Bağsız</b> olanlar hiçbir projede kullanılmıyor; kaybolan üretimler bunlardır.
+                {depoAcik.mod === "ata" && " Bir görsele tıklayınca o sayfaya bağlanır."}
+              </div>
+              <div style={{ display: "flex", gap: 12, alignItems: "center", marginTop: 10, flexWrap: "wrap", fontSize: 12 }}>
+                <button style={{ ...stil.buton, fontSize: 12, ...(depoYukleniyor ? stil.butonPasif : {}) }}
+                  disabled={depoYukleniyor} onClick={depoYukle}>
+                  {depoYukleniyor ? "Yükleniyor..." : depoVeri ? "Yenile" : "Depoyu Listele"}
+                </button>
+                {depoVeri && (
+                  <>
+                    <label style={{ display: "flex", alignItems: "center", gap: 5, color: "#c9c2ae" }}>
+                      <input type="checkbox" checked={depoSadeceBagsiz} onChange={(e) => setDepoSadeceBagsiz(e.target.checked)} />
+                      Sadece bağsız olanlar
+                    </label>
+                    <span style={{ color: "#8e897a" }}>
+                      {depoVeri.toplam} görsel · {depoVeri.bagliSayisi} bağlı · {depoVeri.toplam - depoVeri.bagliSayisi} bağsız
+                    </span>
+                  </>
+                )}
+                <span onClick={() => setDepoAcik(null)} style={{ marginLeft: "auto", color: "#8e897a", cursor: "pointer" }}>Kapat</span>
+              </div>
+            </div>
+            <div style={{ overflow: "auto", padding: 16 }}>
+              {!depoVeri && !depoYukleniyor && (
+                <div style={{ color: "#a09a89", fontSize: 13, padding: 20, textAlign: "center" }}>
+                  “Depoyu Listele”ye bas — Vercel Blob'daki tüm kitap görselleri taranacak.
+                </div>
+              )}
+              {depoVeri && (() => {
+                const liste = depoVeri.gorseller.filter((g) => !depoSadeceBagsiz || !g.projeyeBagli);
+                if (!liste.length) return <div style={{ color: "#a09a89", fontSize: 13, padding: 20, textAlign: "center" }}>Bu filtreyle görsel yok.</div>;
+                return (
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(160px,1fr))", gap: 12 }}>
+                    {liste.map((g) => (
+                      <div key={g.goruntuUrl}
+                        onClick={() => depoAcik.mod === "ata"
+                          ? depodanAta(depoAcik.idx, depoAcik.taraf, g.goruntuUrl, g.tur)
+                          : setBuyukGorsel({ url: g.goruntuUrl, baslik: g.yol.split("/").pop() })}
+                        style={{ background: "#12110d", borderRadius: 9, overflow: "hidden", cursor: "pointer",
+                                 border: g.projeyeBagli ? "1px solid rgba(255,255,255,.12)" : "1px solid #B0663A" }}>
+                        <img src={g.goruntuUrl} alt="" loading="lazy"
+                          style={{ width: "100%", aspectRatio: "1/1", objectFit: "cover", display: "block" }} />
+                        <div style={{ padding: "6px 8px", fontSize: 10.5, lineHeight: 1.45 }}>
+                          <div style={{ color: g.projeyeBagli ? "#8e897a" : "#e0ac79", fontWeight: 600 }}>
+                            {g.projeyeBagli ? "bağlı" : "BAĞSIZ"} · {g.etiket}
+                          </div>
+                          <div style={{ color: "#6f6a5c" }}>
+                            {g.yuklendi ? new Date(g.yuklendi).toLocaleString("tr-TR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : ""}
+                            {g.boyutBayt ? ` · ${Math.round(g.boyutBayt / 1024)} KB` : ""}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── TAM EKRAN GÖRÜNTÜLEYİCİ ──────────────────────────────
+          Baskı kalitesi küçük önizlemeden değerlendirilemiyordu.
+          İki mod var: "sığdır" (tüm sayfayı gör) ve "1:1" (gerçek
+          piksel — asıl kalite kontrolü bu, tarayıcı ölçekleme yapmaz). */}
+      {buyukGorsel && (
+        <div onClick={() => setBuyukGorsel(null)}
+          style={{ position: "fixed", inset: 0, zIndex: 9999, background: "rgba(10,9,7,.95)",
+                   display: "flex", flexDirection: "column", cursor: "zoom-out" }}>
+          <div onClick={(e) => e.stopPropagation()}
+            style={{ display: "flex", alignItems: "center", gap: 14, padding: "12px 18px",
+                     color: "#efe9da", fontSize: 13, cursor: "default", flexShrink: 0,
+                     borderBottom: "1px solid rgba(255,255,255,.1)" }}>
+            <b style={{ fontFamily: "'Fredoka', sans-serif" }}>{buyukGorsel.baslik}</b>
+            <span style={{ color: "#a09a89" }}>
+              {/* DÜZELTİLDİ (17 Ağu 2026): ölçü 20 cm diye SABİT KODLANMIŞTI
+                  ve sayfa kare varsayılıyordu. Artık projenin kendi
+                  "Genişlik (cm)" değeri kullanılıyor ve yükseklik görselin
+                  gerçek oranından hesaplanıyor — kare olmayan görselde
+                  "20×20" yazmak yanlış bilgiydi. */}
+              {buyukGorsel.olcu ? (() => {
+                const gCm = Number(seciliProje?.ozellikler?.genislikCm) || 20;
+                const yCm = gCm * (buyukGorsel.olcu.y / buyukGorsel.olcu.g);
+                const dpi = Math.round(buyukGorsel.olcu.g / (gCm / 2.54));
+                const kareMi = Math.abs(buyukGorsel.olcu.g - buyukGorsel.olcu.y) < 2;
+                return `${buyukGorsel.olcu.g}×${buyukGorsel.olcu.y} px · ${gCm.toFixed(0)}×${yCm.toFixed(1)} cm · ${dpi} dpi${kareMi ? "" : "  ⚠ kare değil"}`;
+              })() : "ölçülüyor…"}
+            </span>
+            <button onClick={() => setBuyukGorsel({ ...buyukGorsel, birebir: !buyukGorsel.birebir })}
+              style={{ padding: "5px 12px", fontSize: 12, borderRadius: 7, cursor: "pointer", color: "#efe9da",
+                       border: "1px solid rgba(255,255,255,.25)",
+                       background: buyukGorsel.birebir ? "rgba(244,168,62,.2)" : "transparent" }}>
+              {buyukGorsel.birebir ? "Sığdır" : "1:1 gerçek piksel"}
+            </button>
+            <a href={buyukGorsel.url} target="_blank" rel="noreferrer"
+              style={{ color: "#9fb6cd", fontSize: 12 }}>Yeni sekmede aç</a>
+            <span style={{ marginLeft: "auto", color: "#8e897a", fontSize: 12 }}>ESC ile kapat</span>
+          </div>
+          <div style={{ flex: 1, overflow: "auto", display: "flex",
+                        alignItems: buyukGorsel.birebir ? "flex-start" : "center",
+                        justifyContent: buyukGorsel.birebir ? "flex-start" : "center", padding: 18 }}>
+            <img src={buyukGorsel.url} alt=""
+              onClick={(e) => e.stopPropagation()}
+              onLoad={(e) => {
+                const g = e.target.naturalWidth, y = e.target.naturalHeight;
+                setBuyukGorsel((b) => (b && b.url === buyukGorsel.url && !b.olcu) ? { ...b, olcu: { g, y } } : b);
+              }}
+              style={buyukGorsel.birebir
+                ? { width: "auto", maxWidth: "none", imageRendering: "auto", cursor: "default" }
+                : { maxWidth: "100%", maxHeight: "100%", objectFit: "contain", cursor: "default" }} />
+          </div>
+        </div>
+      )}
 
       {hata && <div style={{ background: "#FDECEA", color: "#C0392B", padding: "10px 14px", borderRadius: 10, marginBottom: 16, fontSize: 13 }}>{hata}</div>}
 
@@ -4303,7 +5325,8 @@ function KitapStudyo({ authFetch }) {
           {!projeler && <div style={{ fontSize: 13, color: "#6f6f6c" }}>Yükleniyor...</div>}
           {projeler && !projeler.length && <div style={{ fontSize: 13, color: "#6f6f6c" }}>Henüz proje yok — yukarıdan ilk kitabı oluşturun.</div>}
           {(projeler || []).map((p) => (
-            <div key={p.id} style={{ ...stil.kart, ...(seciliId === p.id ? { borderColor: "#E85D75" } : {}) }} onClick={() => projeAc(p.id)}>
+            <div key={p.id} style={{ ...stil.kart, ...(seciliId === p.id ? { borderColor: "#E85D75" } : {}) }}
+              onClick={() => { if (seciliId === p.id) { setSeciliId(null); setSeciliProje(null); } else { projeAc(p.id); } }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
                 <div style={stil.kartBaslik}>{p.kitap_adi}</div>
                 <span onClick={(e) => projeSil(p.id, e)} style={{ color: "#C0392B", cursor: "pointer", fontSize: 12 }}>✕</span>
@@ -4326,11 +5349,49 @@ function KitapStudyo({ authFetch }) {
             {!seciliProje && <div style={{ fontSize: 13, color: "#6f6f6c" }}>Proje açılıyor...</div>}
             {seciliProje && (
               <div style={{ background: "#FBF9F6", borderRadius: 16, border: "2px solid #F4A83E", padding: 20 }}>
+                {/* EKLENDİ (15 Ağu 2026, Bedirhan'ın bildirdiği hata: "projenin
+                    üstüne tıkladığımda kapanmıyor, sayfa küçülmesi olmuyor yeni
+                    projeye geçmek için"): açık, tıklanır "panoya dön" linki —
+                    proje kartına tekrar tıklamanın (yukarıda toggle edildi)
+                    yanı sıra ikinci bir yol. */}
+                <span onClick={() => { setSeciliId(null); setSeciliProje(null); }}
+                  style={{ fontSize: 12, color: "#6f6f6c", cursor: "pointer", display: "inline-block", marginBottom: 10 }}>
+                  ← Proje Panosuna Dön
+                </span>
                 <div style={{ fontFamily: "'Fredoka', sans-serif", fontWeight: 700, fontSize: 18, marginBottom: 4 }}>{seciliProje.kitapAdi}</div>
                 <div style={{ fontSize: 12, color: "#6f6f6c", marginBottom: 16 }}>
                   Aşama: <b>{{ metin: "Metin ve Sahneler", stil: "Stil Seçimi", karakter: "Karakter", uretim: "Kitap Üretimi" }[seciliProje.asama] || seciliProje.asama}</b>
                   {" · "}{(seciliProje.karakterler || []).length} karakter{" · "}{(seciliProje.spreadler || []).length} sayfa çifti
                   {kaydediliyor && <span style={{ color: "#9a9a96" }}> · kaydediliyor...</span>}
+                </div>
+
+                {/* EKLENDİ (18 Ağu 2026, "sayfayı kaydet olmalı, kaydettiğim
+                    zaman öyle kalmalı"): kaydın sunucuya gerçekten yazılıp
+                    yazılmadığı artık görünüyor. Daha önce başarısız bir kayıt
+                    sessizce geçiyordu; ekranda değişiklik duruyor, sunucuda
+                    durmuyordu. */}
+                <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 14,
+                  padding: "8px 12px", borderRadius: 10,
+                  background: kayitDurumu === "kaydedildi" ? "#E8F3EC"
+                            : kayitDurumu === "hata" || kayitDurumu === "geri-alindi" ? "#FDECEC"
+                            : "#F5F2EC",
+                  border: `1px solid ${kayitDurumu === "kaydedildi" ? "#A8D5B8"
+                            : kayitDurumu === "hata" || kayitDurumu === "geri-alindi" ? "#E3B4B4" : "#E4DFD1"}` }}>
+                  <button style={{ ...stil.buton, fontSize: 12, background: "#4FAF7A", padding: "7px 16px",
+                    ...(kayitDurumu === "kaydediliyor" ? stil.butonPasif : {}) }}
+                    disabled={kayitDurumu === "kaydediliyor"}
+                    onClick={() => metaKaydet(seciliProje)}>
+                    {kayitDurumu === "kaydediliyor" ? "Kaydediliyor…" : "💾 Sayfayı Kaydet"}
+                  </button>
+                  <span style={{ fontSize: 12,
+                    color: kayitDurumu === "kaydedildi" ? "#1E5E30"
+                         : kayitDurumu === "hata" || kayitDurumu === "geri-alindi" ? "#8B2E2E" : "#6f6f6c" }}>
+                    {kayitDurumu === "kaydedildi" ? `✓ Sunucuya kaydedildi${sonKayitZamani ? " · " + sonKayitZamani.toLocaleTimeString("tr-TR") : ""} — çıkıp girsen de böyle kalır.`
+                     : kayitDurumu === "hata" ? "✖ KAYDEDİLMEDİ — yukarıdaki hata mesajına bak."
+                     : kayitDurumu === "geri-alindi" ? "↩ Kayıt iptal edildi, ekran sunucudaki hâle döndü."
+                     : kayitDurumu === "kaydediliyor" ? "Yazılıyor…"
+                     : "Değişiklikler alan dışına çıkınca ve her üretimde otomatik kaydedilir."}
+                  </span>
                 </div>
 
                 {/* EKLENDİ (14 Ağu 2026): ① STİL SEÇİMİ aşaması — gerçek akış.
@@ -4361,9 +5422,9 @@ function KitapStudyo({ authFetch }) {
                       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 8 }}>
                         <select style={stil.input} value={seciliProje.kalite || "low"}
                           onChange={(e) => { const gm = { ...seciliProje, kalite: e.target.value }; setSeciliProje(gm); metaKaydet(gm); }}>
-                          <option value="low">Düşük (test için)</option>
-                          <option value="medium">Orta</option>
-                          <option value="high">Yüksek</option>
+                          <option value="low">Düşük — sadece taslak</option>
+                          <option value="medium">Orta — baskı için asgari</option>
+                          <option value="high">Yüksek — baskı önerilen</option>
                         </select>
                         <select style={stil.input} value={seciliProje.boyut || "1024x1536"}
                           onChange={(e) => { const gm = { ...seciliProje, boyut: e.target.value }; setSeciliProje(gm); metaKaydet(gm); }}>
@@ -4375,8 +5436,37 @@ function KitapStudyo({ authFetch }) {
                         <input style={stil.input} placeholder="Yükseklik (cm)" value={seciliProje.ozellikler?.yukseklikCm || ""}
                           onChange={(e) => ozellikGuncelle("yukseklikCm", e.target.value)} onBlur={() => metaKaydet(seciliProje)} />
                       </div>
-                      <p style={{ fontSize: 11, color: "#6f6f6c", marginTop: 8, marginBottom: 0 }}>
-                        Düşük kalite ile ucuza test edip beğendiğinde, Kitap Üretimi aşamasındaki "Kalite Değişti, Yeniden Üretime Hazırla" ile orta/yükseğe geçebilirsin.
+
+                      {/* EKLENDİ (16 Ağu 2026): "en ucuzu seçtik ama görseller
+                          kalitesiz geldi" — sebebi buydu. "Düşük" ayarı test
+                          içindir; basılacak bir kitapta yetersiz kalır. Seçim
+                          engellenmiyor, ama SONUCU ÖNCEDEN yazılıyor. */}
+                      {(seciliProje.kalite || "low") === "low" && (
+                        <div style={{ marginTop: 8, padding: "9px 12px", borderRadius: 8, fontSize: 12, lineHeight: 1.55,
+                                      background: "#FFF4E5", border: "1px solid #F0C48A", color: "#7A4A12" }}>
+                          <b>Kalite “Düşük” — baskı için yetersiz.</b> Bu ayar sahne ve metin yerleşimini ucuza denemek içindir;
+                          çıkan görsellerde detay kaybı ve bulanıklık normaldir. Basılacak sayfalar için <b>Orta</b> ya da <b>Yüksek</b> seçilmeli.
+                          {(() => {
+                            const b = seciliProje.yayilimBoyutu || "3840x1920";
+                            const t = FIYAT_TABLOSU[seciliProje.model] || FIYAT_TABLOSU["gpt-image-2"];
+                            const olcek = boyutMP(b) / REFERANS_MP;
+                            const adet = (seciliProje.spreadler || []).length || 1;
+                            const hesap = (k) => (t.diger[k] * olcek * 1.15 * adet);
+                            return (
+                              <div style={{ marginTop: 6, color: "#6b4a20" }}>
+                                {adet} sayfa çifti · {b} için tahmini toplam —
+                                {" "}düşük <b>${hesap("low").toFixed(2)}</b> ·
+                                {" "}orta <b>${hesap("medium").toFixed(2)}</b> ·
+                                {" "}yüksek <b>${hesap("high").toFixed(2)}</b>
+                                <div style={{ fontSize: 11, marginTop: 3, color: "#8a6a3a" }}>
+                                  Liste fiyatlarından hesaplanmış tahmindir, fatura değildir.
+                                </div>
+                              </div>
+                            );
+                          })()}
+                        </div>
+                      )}                      <p style={{ fontSize: 11, color: "#6f6f6c", marginTop: 8, marginBottom: 0 }}>
+                        Düşük kalite ile ucuza test edip beğendiğinde, Kitap Üretimi aşamasındaki "🔄 Tümünü Yeniden Üret" ile orta/yükseğe geçebilirsin.
                         ISBN, basım tarihi gibi diğer künye bilgileri Kitap Üretimi aşamasında.
                       </p>
                     </div>
@@ -4436,7 +5526,15 @@ function KitapStudyo({ authFetch }) {
                             </div>
                           );
                         })}
+                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
                         <button style={stil.buton} onClick={spreadEkle}>+ Sayfa Çifti Ekle</button>
+                        {/* Kaybolan görseller buradan bulunur — depodaki hiçbir
+                            dosya silinmedi, yalnız sayfa bağlantıları gitti. */}
+                        <button style={{ ...stil.buton, background: "#8A6A38" }}
+                          onClick={() => { setDepoAcik({ mod: "gozat" }); if (!depoVeri) depoYukle(); }}>
+                          🗂 Görsel Deposu (eski üretimler)
+                        </button>
+                      </div>
                       </div>
                     )}
 
@@ -4693,29 +5791,275 @@ function KitapStudyo({ authFetch }) {
                                 </label>
                               </div>
                             </div>
-                            <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+                            <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
                               <button style={{ ...stil.buton, fontSize: 12, ...(spreadUretiliyorIdx !== null ? stil.butonPasif : {}) }}
                                 disabled={spreadUretiliyorIdx !== null} onClick={() => spreadUret(idx)}>
                                 {spreadUretiliyorIdx === idx ? "Üretiliyor..." : "Bu Sayfa Çiftini Üret"}
                               </button>
+                              {/* Görseli olmayan sayfa için kurtarma yolu: depoda
+                                  duran eski üretimi yeniden bağla — ücret yok. */}
+                              {!s.solGorselUrl && (
+                                <>
+                                  <button style={{ ...stil.buton, fontSize: 12, background: "#8A6A38" }}
+                                    onClick={() => { setDepoAcik({ mod: "ata", idx, taraf: "sol" }); if (!depoVeri) depoYukle(); }}>
+                                    🗂 Sol sayfayı depodan seç
+                                  </button>
+                                  <button style={{ ...stil.buton, fontSize: 12, background: "#8A6A38" }}
+                                    onClick={() => { setDepoAcik({ mod: "ata", idx, taraf: "sag" }); if (!depoVeri) depoYukle(); }}>
+                                    🗂 Sağ sayfayı depodan seç
+                                  </button>
+                                </>
+                              )}
                               {s.solGorselUrl && (
                                 <button style={{ ...stil.buton, fontSize: 12, ...(spreadUretiliyorIdx !== null ? stil.butonPasif : {}) }}
                                   disabled={spreadUretiliyorIdx !== null} onClick={() => spreadMetniYenidenYerlestir(idx)}>
                                   Metni Yenile
                                 </button>
                               )}
-                              <span onClick={() => spreadSil(idx)} style={{ color: "#C0392B", cursor: "pointer", fontSize: 12, alignSelf: "center" }}>Sil</span>
+                              {/* EKLENDİ (18 Ağu 2026, "görsel oluşturulmuş ama
+                                  hatalı, tekrar oluştur veya sayfanın görselini
+                                  sil diyemiyorum"): iki ayrı yol, ikisi de açık
+                                  isimli. Yeniden üret ÜCRETLİ olduğu için öyle
+                                  yazıyor; silmek ücretsiz ve geri alınabilir. */}
+                              {s.solGorselUrl && (
+                                <button style={{ ...stil.buton, fontSize: 12, background: "#B0663A", ...(spreadUretiliyorIdx !== null ? stil.butonPasif : {}) }}
+                                  disabled={spreadUretiliyorIdx !== null}
+                                  onClick={() => { if (window.confirm("Bu sayfa çifti YENİDEN üretilsin mi?\n\nMevcut görselin üzerine yazılır (dosya depoda kalır).\nYeni bir üretim = yeni ücret.")) spreadUret(idx); }}>
+                                  🔄 Yeniden Üret (ücretli)
+                                </button>
+                              )}
+                              {(s.solGorselUrl || s.solHamUrl) && (
+                                <span onClick={() => spreadGorselleriniSil(idx)}
+                                  style={{ color: "#B0663A", cursor: "pointer", fontSize: 12, alignSelf: "center", textDecoration: "underline" }}>
+                                  Görselleri sil (sahne kalır)
+                                </span>
+                              )}
+                              <span onClick={() => spreadSil(idx)} style={{ color: "#C0392B", cursor: "pointer", fontSize: 12, alignSelf: "center" }}>Sayfa çiftini sil</span>
                             </div>
                             {s.solGorselUrl && (
                               <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
-                                <div style={{ width: "calc(50% - 3px)" }}>
-                                  <img src={s.solGorselUrl} style={{ width: "100%", borderRadius: 8 }} />
-                                  <span onClick={() => gorselIndir(s.solGorselUrl, `sayfa-${solSayfa}`)} style={{ fontSize: 11, color: "#3E8ED0", cursor: "pointer", display: "inline-block", marginTop: 4 }}>⬇ İndir</span>
-                                </div>
-                                <div style={{ width: "calc(50% - 3px)" }}>
-                                  <img src={s.sagGorselUrl} style={{ width: "100%", borderRadius: 8 }} />
-                                  <span onClick={() => gorselIndir(s.sagGorselUrl, `sayfa-${sagSayfa}`)} style={{ fontSize: 11, color: "#3E8ED0", cursor: "pointer", display: "inline-block", marginTop: 4 }}>⬇ İndir</span>
-                                </div>
+                                {[["sol", s.solGorselUrl, solSayfa], ["sag", s.sagGorselUrl, sagSayfa]].map(([taraf, url, no]) => (
+                                  <div key={taraf} style={{ width: "calc(50% - 3px)" }}>
+                                    {/* Tıklayınca tam ekran — baskı kalitesi küçük
+                                        önizlemeden değerlendirilemiyordu. */}
+                                    {/* DÜZELTİLDİ (17 Ağu 2026): ölü bir Blob adresi
+                                        tarayıcının kırık-resim ikonunu ve alt metnini
+                                        gösteriyordu ("Tam ekran açmak için tıkla" yazısı
+                                        ekranda öyle çıkıyordu). Artık hata yakalanıp
+                                        anlaşılır bir kutu ve kurtarma yolu veriliyor. */}
+                                    {bozukGorseller[url] ? (
+                                      <div style={{ width: "100%", aspectRatio: "1/1", borderRadius: 8, display: "flex",
+                                        flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 8,
+                                        background: "#FFF4E5", border: "1px dashed #F0C48A", color: "#7A4A12",
+                                        fontSize: 12, textAlign: "center", padding: 12 }}>
+                                        <b>Görsel yüklenemedi</b>
+                                        <span style={{ fontSize: 11, lineHeight: 1.5 }}>Bu sayfanın dosyasına ulaşılamıyor.</span>
+                                        <button style={{ ...stil.buton, fontSize: 11, padding: "6px 12px", background: "#8A6A38" }}
+                                          onClick={() => { setDepoAcik({ mod: "ata", idx, taraf }); if (!depoVeri) depoYukle(); }}>
+                                          🗂 Depodan seç
+                                        </button>
+                                      </div>
+                                    ) : (
+                                      <img src={url} alt="" title="Tam ekran açmak için tıkla"
+                                        onError={() => setBozukGorseller((b) => ({ ...b, [url]: true }))}
+                                        onClick={() => setBuyukGorsel({ url, baslik: `Sayfa ${no}` })}
+                                        style={{ width: "100%", borderRadius: 8, cursor: "zoom-in", display: "block" }} />
+                                    )}
+                                    <div style={{ display: "flex", gap: 10, marginTop: 4 }}>
+                                      <span onClick={() => setBuyukGorsel({ url, baslik: `Sayfa ${no}` })}
+                                        style={{ fontSize: 11, color: "#3E8ED0", cursor: "pointer" }}>⤢ Tam ekran</span>
+                                      <span onClick={() => gorselIndir(url, `sayfa-${no}`)}
+                                        style={{ fontSize: 11, color: "#3E8ED0", cursor: "pointer" }}>⬇ İndir</span>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+
+                            {/* ── TASARIM DÜZENLEYİCİ ────────────────────────── */}
+                            {s.solGorselUrl && (
+                              <div style={{ marginTop: 10 }}>
+                                {stilDuzenleIdx !== idx ? (
+                                  <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                                    <button style={{ ...stil.buton, fontSize: 12, background: "#5B7FA6" }}
+                                      onClick={() => { setStilDuzenleIdx(idx); setStilTaslak(metinStiliCoz(s.metinStili || seciliProje.metinStili)); }}>
+                                      ✎ Yazı Tasarımını Düzenle
+                                    </button>
+                                    {/* Üretim artık TEMİZ görsel bırakıyor; yazının basılıp
+                                        basılmadığı açıkça görünsün. */}
+                                    <span style={{ fontSize: 11.5, padding: "3px 10px", borderRadius: 20,
+                                      background: s.yaziBasildi ? "#E8F3EC" : "#FFF4E5",
+                                      color: s.yaziBasildi ? "#2E7D32" : "#7A4A12",
+                                      border: `1px solid ${s.yaziBasildi ? "#A8D5B8" : "#F0C48A"}` }}>
+                                      {s.yaziBasildi ? "Yazı basılı" : "Yazısız — temiz görsel"}
+                                    </span>
+                                    {s.yaziBasildi && (
+                                      <span onClick={async () => { setStilUyguluyor(true); try { await spreadYaziyiKaldir(idx); } finally { setStilUyguluyor(false); } }}
+                                        style={{ fontSize: 12, color: "#B0663A", cursor: "pointer" }}>Yazıyı kaldır</span>
+                                    )}
+                                  </div>
+                                ) : (
+                                  <div style={{ background: "#221d16", borderRadius: 12, padding: 14, color: "#efe9da" }}>
+                                    {(!s.solHamUrl || !s.sagHamUrl) ? (
+                                      <div style={{ fontSize: 12.5, lineHeight: 1.65 }}>
+                                        <b style={{ color: "#e0ac79" }}>Bu sayfa çiftinin yazısız (temiz) kopyası yok.</b>
+                                        <div style={{ marginTop: 6, color: "#c9c2ae" }}>
+                                          Yazı doğrudan resmin içine basılmış durumda. Pişmiş yazı geri alınamaz — üstüne
+                                          yeni yazı eklenirse <b>iki yazı üst üste biner</b>. Bu yüzden düzenleyici burada
+                                          çalışmıyor.
+                                        </div>
+                                        <div style={{ marginTop: 8, color: "#c9c2ae" }}>
+                                          Yazıyı değiştirmek için iki yol var:
+                                          <div style={{ marginTop: 4 }}>• <b>“Bu Sayfa Çiftini Üret”</b> — yeni, temiz görsel üretir (ücretli)</div>
+                                          <div>• <b>🗂 depodan</b> aynı sahnenin <b>“Sayfa — ham (yazısız)”</b> etiketli kopyasını seç (ücretsiz)</div>
+                                        </div>
+                                        <div style={{ marginTop: 10 }}>
+                                          <span onClick={() => setStilDuzenleIdx(null)} style={{ color: "#9fb6cd", cursor: "pointer", fontSize: 12 }}>Kapat</span>
+                                        </div>
+                                      </div>
+                                    ) : (
+                                      <>
+                                        <div style={{ fontSize: 12, color: "#a09a89", marginBottom: 10 }}>
+                                          Yazıyı <b style={{ color: "#efe9da" }}>tutup sürükleyerek</b> taşıyabilirsin. Değişiklikler anında önizlemede görünür;
+                                          “Uygula” demeden baskı çıktısı değişmez. <b style={{ color: "#efe9da" }}>Resim yeniden üretilmez</b> — AI çağrısı yok, ücret yok.
+                                        </div>
+                                        <div style={{ display: "flex", gap: 8 }}>
+                                          {["sol", "sag"].map((taraf) => (
+                                            <div key={taraf} style={{ width: "calc(50% - 4px)" }}>
+                                              <MetinStiliDuzenleyici spread={s} tarafAdi={taraf}
+                                                sayfaNo={taraf === "sol" ? solSayfa : sagSayfa}
+                                                stil={stilTaslak} setStil={setStilTaslak} />
+                                            </div>
+                                          ))}
+                                        </div>
+
+                                        {(() => {
+                                          const st = metinStiliCoz(stilTaslak);
+                                          const g = (alan, deger) => setStilTaslak({ ...st, [alan]: deger });
+                                          const kaydirici = (etiket, alan, min, max, adim, birim) => (
+                                            <label style={{ display: "block", fontSize: 11.5, color: "#c9c2ae", marginTop: 9 }}>
+                                              <span style={{ display: "flex", justifyContent: "space-between" }}>
+                                                <span>{etiket}</span>
+                                                <span style={{ color: "#8e897a" }}>{st[alan]}{birim || ""}</span>
+                                              </span>
+                                              <input type="range" min={min} max={max} step={adim} value={st[alan]}
+                                                onChange={(e) => g(alan, Number(e.target.value))}
+                                                style={{ width: "100%", accentColor: "#F4A83E" }} />
+                                            </label>
+                                          );
+                                          const renkler = [["#fffdf5", "Krem"], ["#f7e9c8", "Açık altın"], ["#20201a", "Koyu"], ["#7a2f1e", "Kiremit"]];
+                                          return (
+                                            <div style={{ marginTop: 12 }}>
+                                              {/* SADELEŞTİRİLDİ (17 Ağu 2026): 11 kaydırıcı bir arada
+                                                  fazla geliyordu. Günlük işte gereken DÖRT ayar önde,
+                                                  gerisi "Gelişmiş" altında. */}
+                                              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 18px" }}>
+                                                <div>
+                                                  <label style={{ fontSize: 12, color: "#c9c2ae", display: "flex", alignItems: "center", gap: 6 }}>
+                                                    <input type="checkbox" checked={st.otomatikPunto} onChange={(e) => g("otomatikPunto", e.target.checked)} />
+                                                    Punto otomatik (uzun metin sığsın)
+                                                  </label>
+                                                  {kaydirici(st.otomatikPunto ? "Punto — üst sınır" : "Punto", "punto", 1.6, 6, 0.1, "%")}
+                                                  <label style={{ display: "block", fontSize: 12, color: "#c9c2ae", marginTop: 10 }}>
+                                                    Hizalama
+                                                    <div style={{ display: "flex", gap: 5, marginTop: 4 }}>
+                                                      {[["left", "Sola"], ["center", "Ortala"], ["right", "Sağa"]].map(([v, ad]) => (
+                                                        <button key={v} onClick={() => g("hiza", v)}
+                                                          style={{ flex: 1, padding: "6px 0", fontSize: 11.5, borderRadius: 6, cursor: "pointer",
+                                                            border: st.hiza === v ? "1px solid #F4A83E" : "1px solid rgba(255,255,255,.16)",
+                                                            background: st.hiza === v ? "rgba(244,168,62,.16)" : "transparent", color: "#efe9da" }}>{ad}</button>
+                                                      ))}
+                                                    </div>
+                                                  </label>
+                                                </div>
+                                                <div>
+                                                  <label style={{ display: "block", fontSize: 12, color: "#c9c2ae" }}>
+                                                    Yazı rengi
+                                                    <div style={{ display: "flex", gap: 6, marginTop: 5, alignItems: "center" }}>
+                                                      {renkler.map(([c, ad]) => (
+                                                        <span key={c} onClick={() => g("renk", c)} title={ad}
+                                                          style={{ width: 26, height: 26, borderRadius: 6, background: c, cursor: "pointer",
+                                                            border: st.renk === c ? "2px solid #F4A83E" : "1px solid rgba(255,255,255,.25)" }} />
+                                                      ))}
+                                                      <input type="color" value={st.renk} onChange={(e) => g("renk", e.target.value)}
+                                                        style={{ width: 32, height: 26, background: "none", border: "none", cursor: "pointer" }} />
+                                                    </div>
+                                                  </label>
+                                                  {kaydirici("Alt karartma (okunurluk)", "bant", 0, 100, 1, "")}
+                                                </div>
+                                              </div>
+
+                                              <div onClick={() => setGelismisAcik(!gelismisAcik)}
+                                                style={{ marginTop: 12, fontSize: 12, color: "#9fb6cd", cursor: "pointer", userSelect: "none" }}>
+                                                {gelismisAcik ? "▾" : "▸"} Gelişmiş ayarlar
+                                              </div>
+                                              {gelismisAcik && (
+                                                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 18px", marginTop: 6,
+                                                  paddingTop: 8, borderTop: "1px solid rgba(255,255,255,.1)" }}>
+                                                  <div>
+                                                    {st.otomatikPunto && kaydirici("Punto — alt sınır", "enKucukPunto", 1.2, 4, 0.1, "%")}
+                                                    {kaydirici("Metin kutusu genişliği", "genislik", 40, 96, 1, "%")}
+                                                    {kaydirici("Satır aralığı", "satirAraligi", 1, 2.2, 0.02, "×")}
+                                                    {kaydirici("Yazı gölgesi", "golge", 0, 100, 1, "")}
+                                                  </div>
+                                                  <div>
+                                                    {kaydirici("Alt karartma yüksekliği", "bantYuksekligi", 8, 60, 1, "%")}
+                                                    {kaydirici("Dikey konum", "y", 6, 96, 1, "%")}
+                                                    {kaydirici("Yatay konum", "x", 4, 96, 1, "%")}
+                                                    <label style={{ fontSize: 12, color: "#c9c2ae", display: "flex", alignItems: "center", gap: 6, marginTop: 10 }}>
+                                                      <input type="checkbox" checked={st.sayfaNoGoster} onChange={(e) => g("sayfaNoGoster", e.target.checked)} />
+                                                      Sayfa numarası görünsün
+                                                    </label>
+                                                  </div>
+                                                </div>
+                                              )}
+                                            </div>
+                                          );
+                                        })()}
+
+                                        <div style={{ display: "flex", gap: 8, marginTop: 14, flexWrap: "wrap", alignItems: "center" }}>
+                                          <button style={{ ...stil.buton, fontSize: 12, ...(stilUyguluyor ? stil.butonPasif : {}) }}
+                                            disabled={stilUyguluyor}
+                                            onClick={async () => {
+                                              setStilUyguluyor(true); setHata("");
+                                              try { await spreadMetniYenidenDiz(idx, seciliId, stilTaslak); setStilDuzenleIdx(null); }
+                                              catch (e) { setHata("Yazı yeniden dizilemedi: " + e.message); }
+                                              finally { setStilUyguluyor(false); }
+                                            }}>
+                                            {stilUyguluyor ? "Uygulanıyor..." : "Uygula (bu sayfa çifti)"}
+                                          </button>
+                                          <button style={{ ...stil.buton, fontSize: 12, background: "#5B7FA6", ...(stilUyguluyor ? stil.butonPasif : {}) }}
+                                            disabled={stilUyguluyor}
+                                            onClick={async () => {
+                                              // TÜM KİTABA UYGULA — "bazısının puntosu büyük bazısının küçük"
+                                              // şikâyetinin asıl çözümü bu: tek bir stil, bütün sayfalarda.
+                                              const p0 = projeOku(seciliId);
+                                              const hedefler = (p0.spreadler || []).map((sp, i) => ({ sp, i })).filter(({ sp }) => sp.solHamUrl);
+                                              const hamsiz = (p0.spreadler || []).length - hedefler.length;
+                                              if (!window.confirm(
+                                                `Bu stil ${hedefler.length} sayfa çiftine uygulanacak.` +
+                                                (hamsiz ? `\n\n${hamsiz} sayfa çifti ATLANACAK — ham görselleri yok (eski üretim), önce yeniden üretilmeleri gerekiyor.` : "") +
+                                                `\n\nResimler yeniden üretilmez, yalnız yazı yeniden dizilir.`)) return;
+                                              setStilUyguluyor(true); setHata("");
+                                              try {
+                                                await projeGuncelle(seciliId, { ...projeOku(seciliId), metinStili: stilTaslak });
+                                                for (const { i } of hedefler) await spreadMetniYenidenDiz(i, seciliId, stilTaslak);
+                                                setStilDuzenleIdx(null);
+                                                if (hamsiz) setHata(`Bitti. ${hamsiz} sayfa çifti atlandı — ham görselleri yok, yeniden üretilmeleri gerekiyor.`);
+                                              } catch (e) { setHata("Toplu uygulama yarıda kaldı: " + e.message); }
+                                              finally { setStilUyguluyor(false); }
+                                            }}>
+                                            Tüm kitaba uygula
+                                          </button>
+                                          <span onClick={() => setStilTaslak({ ...VARSAYILAN_METIN_STILI })}
+                                            style={{ color: "#9fb6cd", cursor: "pointer", fontSize: 12 }}>Varsayılana dön</span>
+                                          <span onClick={() => setStilDuzenleIdx(null)}
+                                            style={{ color: "#8e897a", cursor: "pointer", fontSize: 12 }}>Vazgeç</span>
+                                        </div>
+                                      </>
+                                    )}
+                                  </div>
+                                )}
                               </div>
                             )}
                           </div>
@@ -4757,9 +6101,56 @@ function KitapStudyo({ authFetch }) {
                           <label style={{ fontSize: 11, color: "#6f6f6c", display: "block" }}>İstekler arası bekleme (sn)</label>
                           <input style={{ ...stil.input, width: 80 }} value={beklemeSn} onChange={(e) => setBeklemeSn(e.target.value)} />
                         </div>
+                        {/* DÜZELTİLDİ (16 Ağu 2026): kur `* 48` olarak SABİT
+                            KODLANMIŞTI ve rakam kesinmiş gibi gösteriliyordu.
+                            Çalışma kuralları madde 9: "Tahmin edilen sonuç
+                            kesin gibi gösterilmez", "hesaplanan sayı ile
+                            doğrulanmış sayı ayrılır". Fatura zaten dolar
+                            üzerinden kesiliyor — dolar öne alındı, TL
+                            karşılığı kullanılan kur AÇIKÇA yazılarak veriliyor
+                            ve kur elle düzeltilebiliyor. */}
+                        {/* DEĞİŞTİRİLDİ (17 Ağu 2026): ÖLÇÜLEN harcama öne
+                            alındı. Sunucu artık her üretimde OpenAI'nin
+                            döndürdüğü gerçek token sayısını kaydediyor; fiyat
+                            ayarı girilmişse tutar ölçümden çıkıyor. Tahmin
+                            yalnızca ölçülemeyen üretimler için kalıyor ve ayrı
+                            satırda, ayrı etiketle duruyor — ikisi
+                            KARIŞTIRILMIYOR. */}
                         <div style={{ fontSize: 13 }}>
-                          <div style={{ fontSize: 11, color: "#6f6f6c" }}>Tahmini harcama (bu oturumda)</div>
-                          <div style={{ fontWeight: 700 }}>${toplamMaliyet.toFixed(2)} (~₺{Math.round(toplamMaliyet * 48)})</div>
+                          {olculenSayi > 0 ? (
+                            <>
+                              <div style={{ fontSize: 11, color: "#1E5E30" }}>Ölçülen harcama ({olculenSayi} görsel)</div>
+                              <div style={{ fontWeight: 700, color: "#1E5E30" }}>${olculenMaliyet.toFixed(4)}</div>
+                              <div style={{ fontSize: 10.5, color: "#8e897a", display: "flex", alignItems: "center", gap: 4, marginTop: 2 }}>
+                                ≈ ₺{(olculenMaliyet * (Number(kurTL) || 0)).toFixed(2)} · kur
+                                <input value={kurTL} onChange={(e) => setKurTL(e.target.value)}
+                                  style={{ width: 44, fontSize: 10.5, padding: "1px 4px", borderRadius: 4, border: "1px solid #d8d2c4" }} />
+                              </div>
+                              <div style={{ fontSize: 10.5, color: "#1E5E30", marginTop: 3, maxWidth: 280, lineHeight: 1.45 }}>
+                                OpenAI'nin bildirdiği <b>gerçek token sayısından</b> hesaplandı — tahmin değil.
+                              </div>
+                            </>
+                          ) : (
+                            <>
+                              <div style={{ fontSize: 11, color: "#6f6f6c" }}>Tahmini harcama (bu oturumda)</div>
+                              <div style={{ fontWeight: 700 }}>${toplamMaliyet.toFixed(3)}</div>
+                              <div style={{ fontSize: 10.5, color: "#8e897a", display: "flex", alignItems: "center", gap: 4, marginTop: 2 }}>
+                                ≈ ₺{(toplamMaliyet * (Number(kurTL) || 0)).toFixed(0)} · kur
+                                <input value={kurTL} onChange={(e) => setKurTL(e.target.value)}
+                                  style={{ width: 44, fontSize: 10.5, padding: "1px 4px", borderRadius: 4, border: "1px solid #d8d2c4" }} />
+                              </div>
+                              <div style={{ fontSize: 10.5, color: "#b0663a", marginTop: 3, maxWidth: 280, lineHeight: 1.45 }}>
+                                Yayımlanmış liste fiyatlarından <b>hesaplanmış tahmindir</b>, fatura değildir.
+                                Kesin rakam için en alttaki <b>Test Alanı</b>'na fiyatı bir kez girin —
+                                sonraki üretimlerin tutarı ölçümden çıkar.
+                              </div>
+                            </>
+                          )}
+                          {olculenSayi > 0 && toplamMaliyet > 0 && (
+                            <div style={{ fontSize: 10.5, color: "#b0663a", marginTop: 4 }}>
+                              Ayrıca ölçülemeyen üretimler için tahmin: ${toplamMaliyet.toFixed(3)}
+                            </div>
+                          )}
                         </div>
                       </div>
                       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -4772,7 +6163,31 @@ function KitapStudyo({ authFetch }) {
                           disabled={pdfHazirlaniyorMu || kitapSayfaListesiOlustur().length === 0} onClick={pdfIndir}>
                           {pdfHazirlaniyorMu ? "Hazırlanıyor..." : "PDF Olarak İndir"}
                         </button>
-                        <button style={{ ...stil.buton, color: "#C0392B" }} onClick={uretimiSifirla}>Kalite Değişti, Yeniden Üretime Hazırla</button>
+                        {/* Çıktının GERÇEK çözünürlüğü söylenir — "baskıya hazır"
+                            diye sessizce geçilmez (CALISMA-KURALLARI madde 9). */}
+                        {pdfSonDurum && (
+                          <div style={{ width: "100%", marginTop: 8, padding: "10px 12px", borderRadius: 8, fontSize: 12, lineHeight: 1.55,
+                            background: pdfSonDurum.yeterli ? "#E8F3EC" : "#FFF4E5",
+                            border: `1px solid ${pdfSonDurum.yeterli ? "#A8D5B8" : "#F0C48A"}`,
+                            color: pdfSonDurum.yeterli ? "#1E5E30" : "#7A4A12" }}>
+                            <b>PDF indirildi — {pdfSonDurum.sayfa} sayfa, {pdfSonDurum.genislikCm}×{pdfSonDurum.genislikCm} cm.</b>{" "}
+                            En düşük sayfa çözünürlüğü <b>{pdfSonDurum.enDusukDpi} dpi</b>.
+                            {pdfSonDurum.yeterli
+                              ? " Baskı için yeterli."
+                              : " Baskı için düşük — matbaa 240-300 dpi ister. Sayfaları daha yüksek çözünürlükte yeniden üretmek gerekebilir."}
+                            <div style={{ marginTop: 4, fontSize: 11, opacity: .85 }}>
+                              Not: PDF <b>RGB</b> renk uzayında. Matbaa CMYK istiyorsa dönüştürme baskı öncesi yapılmalı — bu dosya doğrudan “print ready” değildir.
+                            </div>
+                          </div>
+                        )}
+                        {/* EKLENDİ (16 Ağu 2026, Bedirhan'ın talebi: "tek tuşta
+                            tümünü yeniden üret olmalı, ne silebiliyorum ne de
+                            baştan üretebiliyorum"): tek tıkla sil+baştan üret. */}
+                        <button style={{ ...stil.buton, background: "#C0392B", ...(aktifUretimIlerleme[seciliProje.id] ? stil.butonPasif : {}) }}
+                          disabled={!!aktifUretimIlerleme[seciliProje.id]} onClick={() => tumunuYenidenUret()}>
+                          🔄 Tümünü Yeniden Üret
+                        </button>
+                        <button style={{ ...stil.buton, color: "#C0392B" }} onClick={() => uretimiSifirla()}>Sadece Sıfırla (Üretme)</button>
                       </div>
                       <p style={{ fontSize: 11, color: "#6f6f6c", marginTop: 10, lineHeight: 1.6 }}>
                         Eksik olanları üret sadece görseli olmayanları üretir — tamamlananları tekrar üretip para harcamaz. Başarısız bir görsel otomatik olarak
@@ -4805,7 +6220,590 @@ function KitapStudyo({ authFetch }) {
             )}
           </div>
         )}
+
+        {/* ============================================================
+            EN ALT — KAYIP KORUMA ve TEST ALANI (17 Ağu 2026)
+            ============================================================ */}
+        {/* DÜZELTİLDİ (17 Ağu 2026): bu iki bölüm `stil` nesnesini
+            kullanıyor ama `stil` KitapStudyo'nun İÇİNDE tanımlı — modül
+            düzeyindeki bileşenler ona erişemiyordu ve bölüm açılınca sayfa
+            tamamen boşalıyordu. Artık prop olarak geçiyor.
+
+            Ayrıca ikisi de HataSinir ile sarıldı: buradaki bir hata bir
+            daha ASLA tüm paneli karartmasın — üretim ekranı, alttaki bir
+            test bölümü yüzünden kaybedilemez. */}
+        <HataSinir ad="Kayıp Koruma">
+          <SurumGecmisi authFetch={authFetch} stil={stil} projeId={seciliId} projeAdi={seciliProje?.kitapAdi} onGeriYuklendi={() => projeAc(seciliId)} />
+        </HataSinir>
+        <HataSinir ad="Test Alanı">
+          <KitapStudyoTestAlani authFetch={authFetch} stil={stil} seciliProje={seciliProje} seciliId={seciliId} sonOlcum={sonOlcum} />
+        </HataSinir>
       </div>
+    </div>
+  );
+}
+
+// ============================================================
+// HATA SINIRI (17 Ağu 2026)
+//
+// Test Alanı ilk denemede tüm sayfayı karartmıştı: bileşen, KitapStudyo'nun
+// içinde tanımlı `stil` nesnesine erişemiyordu ve React tek bir hatada tüm
+// ağacı söküyor. Asıl hata düzeltildi, ama tek bir bölümün üretim ekranını
+// götürebilmesi kabul edilemez — bu sınır onu engelliyor.
+//
+// Hata gizlenmiyor: kullanıcıya ne olduğu ve nerede olduğu yazılıyor.
+// ============================================================
+class HataSinir extends React.Component {
+  constructor(p) { super(p); this.state = { hata: null }; }
+  static getDerivedStateFromError(hata) { return { hata }; }
+  componentDidCatch(hata, bilgi) {
+    console.error(`[MST-PANEL] "${this.props.ad}" bölümü hata verdi:`, hata, bilgi?.componentStack);
+  }
+  render() {
+    if (this.state.hata) {
+      return (
+        <div style={{ marginTop: 16, padding: "12px 15px", borderRadius: 12, fontSize: 12.5, lineHeight: 1.6,
+          background: "#FFF4E5", border: "1px solid #F0C48A", color: "#7A4A12" }}>
+          <b>“{this.props.ad}” bölümü açılamadı.</b> Sayfanın geri kalanı çalışmaya devam ediyor.
+          <div style={{ marginTop: 5, fontFamily: FONT_MONO, fontSize: 11.5 }}>{String(this.state.hata?.message || this.state.hata)}</div>
+          <div style={{ marginTop: 5, fontSize: 11 }}>Bu metni bana ilet — düzeltilebilir. (Ayrıntı tarayıcı konsolunda.)</div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+// ============================================================
+// SÜRÜM GEÇMİŞİ — "bir daha kitap kaybolmasın" (17 Ağu 2026)
+//
+// Bedirhan: "Kaybolan 5 kitap projesi geri getirilemez… bunun önüne
+// geçebilmeliyiz yeni yaptığımız projelerde."
+//
+// Backend artık HER kayıttan önce projenin o anki hâlini saklıyor. Bu bölüm
+// o kayıtları gösterir ve tek tıkla geri döndürür. Ayrıca silinmiş projeler
+// de burada — silinen bir kitap tamamen yok olmuyor.
+// ============================================================
+function SurumGecmisi({ authFetch, stil, projeId, projeAdi, onGeriYuklendi }) {
+  const [acik, setAcik] = React.useState(false);
+  const [surumler, setSurumler] = React.useState(null);
+  const [silinenler, setSilinenler] = React.useState([]);
+  const [durum, setDurum] = React.useState("");
+  const [calisiyor, setCalisiyor] = React.useState(false);
+
+  const yukle = async () => {
+    setDurum("");
+    try {
+      const istekler = [authFetch("/api/admin/kitap-studyo/silinen-projeler")];
+      if (projeId) istekler.unshift(authFetch(`/api/admin/kitap-studyo/projeler/${projeId}/surumler`));
+      const yanitlar = await Promise.all(istekler);
+      const veriler = await Promise.all(yanitlar.map((r) => r.json()));
+      if (projeId) {
+        setSurumler(veriler[0].ok ? veriler[0] : { surumler: [] });
+        setSilinenler(veriler[1].ok ? veriler[1].projeler : []);
+      } else {
+        setSurumler({ surumler: [] });
+        setSilinenler(veriler[0].ok ? veriler[0].projeler : []);
+      }
+    } catch { setDurum("Sürüm geçmişi okunamadı."); }
+  };
+
+  React.useEffect(() => { if (acik) yukle(); }, [acik, projeId]);
+
+  const geriYukle = async (s) => {
+    if (calisiyor) return;
+    if (!window.confirm(`Proje bu sürüme döndürülsün mü?\n\n${new Date(s.tarih).toLocaleString("tr-TR")} — ${s.gorselSayisi} görsel, ${s.sayfaCifti} sayfa çifti.\n\nŞu anki hâl de sürüm olarak saklanacak, bu işlem de geri alınabilir.`)) return;
+    setCalisiyor(true); setDurum("");
+    try {
+      const r = await authFetch(`/api/admin/kitap-studyo/projeler/${projeId}/surum-geri-yukle`, {
+        method: "POST", body: JSON.stringify({ surumId: s.id }),
+      });
+      const d = await r.json();
+      if (d.ok) { setDurum(`Geri yüklendi — ${d.gorselSayisi} görsel.`); await yukle(); if (onGeriYuklendi) onGeriYuklendi(); }
+      else setDurum(d.error || "Geri yüklenemedi.");
+    } catch { setDurum("Sunucuya ulaşılamadı."); }
+    finally { setCalisiyor(false); }
+  };
+
+  const projeyiGeriGetir = async (sp) => {
+    if (calisiyor) return;
+    if (!window.confirm(`"${sp.kitapAdi}" yeni bir proje olarak geri getirilsin mi? (${sp.gorselSayisi} görsel)`)) return;
+    setCalisiyor(true);
+    try {
+      const r = await authFetch("/api/admin/kitap-studyo/surumden-proje-olustur", {
+        method: "POST", body: JSON.stringify({ surumId: sp.sonSurumId }),
+      });
+      const d = await r.json();
+      setDurum(d.ok ? `Geri getirildi — yeni proje no: ${d.id}. Proje listesini yenileyin.` : (d.error || "Geri getirilemedi."));
+      if (d.ok) await yukle();
+    } catch { setDurum("Sunucuya ulaşılamadı."); }
+    finally { setCalisiyor(false); }
+  };
+
+  return (
+    <div style={{ marginTop: 20, background: "#fff", border: "1px solid #E4DFD1", borderRadius: 14, padding: "14px 16px" }}>
+      <div onClick={() => setAcik(!acik)} style={{ cursor: "pointer", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        <span style={{ fontSize: 15 }}>🛟</span>
+        <b style={{ fontFamily: "'Fredoka', sans-serif", fontSize: 14 }}>Kayıp Koruma — Sürüm Geçmişi</b>
+        <span style={{ fontSize: 11.5, color: "#6f6f6c" }}>her kayıttan önceki hâl saklanıyor, geri alınabilir</span>
+        <span style={{ marginLeft: "auto", fontSize: 12, color: "#3E8ED0" }}>{acik ? "▴ gizle" : "▾ aç"}</span>
+      </div>
+
+      {acik && (
+        <div style={{ marginTop: 12 }}>
+          <div style={{ padding: "9px 12px", borderRadius: 8, fontSize: 11.5, lineHeight: 1.6,
+            background: "#E8F3EC", border: "1px solid #A8D5B8", color: "#1E5E30" }}>
+            <b>Nasıl korunuyor:</b> Proje her kaydedildiğinde, kaydın <b>öncesindeki</b> hâli ayrı bir tabloya yazılır
+            (son 50 sürüm). Görseller Vercel Blob'da zaten duruyordu — kaybolan şey "hangi görsel hangi sayfada"
+            bilgisiydi; sürüm tam olarak onu saklar. Silinen projeler de burada kalır.
+            <div style={{ marginTop: 5, color: "#3f6a4c" }}>
+              Ağustos 2026'dan önceki kayıplar bu korumadan önceydi — onlar için hâlâ Görsel Deposu'ndan tek tek eşleştirme gerekiyor.
+            </div>
+          </div>
+
+          {durum && <div style={{ marginTop: 10, fontSize: 12, color: "#1E5E30" }}>{durum}</div>}
+
+          {projeId ? (
+            <div style={{ marginTop: 12 }}>
+              <div style={{ fontSize: 12.5, fontWeight: 600, marginBottom: 6 }}>
+                {projeAdi || "Seçili proje"} — sürümler
+              </div>
+              {!surumler ? <div style={{ fontSize: 12, color: "#6f6f6c" }}>Yükleniyor…</div>
+                : surumler.surumler.length === 0 ? (
+                  <div style={{ fontSize: 12, color: "#6f6f6c" }}>
+                    Bu projede henüz sürüm yok — koruma kurulu, ilk kayıttan sonra dolacak.
+                  </div>
+                ) : (
+                  <div style={{ maxHeight: 260, overflowY: "auto", border: "1px solid #EFEAE0", borderRadius: 8 }}>
+                    {surumler.surumler.map((s) => (
+                      <div key={s.id} style={{ display: "flex", gap: 10, alignItems: "center", padding: "8px 10px", borderBottom: "1px solid #F3EFE6", fontSize: 12 }}>
+                        <div style={{ minWidth: 128, color: "#6f6f6c" }}>{new Date(s.tarih).toLocaleString("tr-TR")}</div>
+                        <div style={{ flex: 1 }}>
+                          <b>{s.gorselSayisi}</b> görsel · {s.sayfaCifti} sayfa çifti · {s.karakter} karakter
+                          {s.sebep && <div style={{ fontSize: 11, color: "#8e897a" }}>{s.sebep}</div>}
+                        </div>
+                        <button style={{ ...stil.buton, padding: "4px 10px", fontSize: 11.5 }} disabled={calisiyor} onClick={() => geriYukle(s)}>
+                          Bu hâle dön
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+            </div>
+          ) : (
+            <div style={{ marginTop: 12, fontSize: 12, color: "#6f6f6c" }}>Sürümleri görmek için bir proje seçin.</div>
+          )}
+
+          {silinenler.length > 0 && (
+            <div style={{ marginTop: 14 }}>
+              <div style={{ fontSize: 12.5, fontWeight: 600, marginBottom: 6 }}>Silinmiş projeler ({silinenler.length})</div>
+              {silinenler.map((sp) => (
+                <div key={sp.projeId} style={{ display: "flex", gap: 10, alignItems: "center", padding: "8px 10px", border: "1px solid #EFEAE0", borderRadius: 8, marginBottom: 6, fontSize: 12 }}>
+                  <div style={{ flex: 1 }}>
+                    <b>{sp.kitapAdi}</b> <span style={{ color: "#8e897a" }}>· {sp.gorselSayisi} görsel · {sp.surumSayisi} sürüm</span>
+                    <div style={{ fontSize: 11, color: "#8e897a" }}>son kayıt {new Date(sp.tarih).toLocaleString("tr-TR")}</div>
+                  </div>
+                  <button style={{ ...stil.buton, padding: "4px 10px", fontSize: 11.5 }} disabled={calisiyor} onClick={() => projeyiGeriGetir(sp)}>
+                    Geri getir
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ============================================================
+// TEST ALANI (17 Ağu 2026)
+//
+// Bedirhan: "en altta bir test alanı yapalım kredi harcamalarını tam olarak
+// belirlemek için… hiçbir şey tahmini olmamalı."
+//
+// İLKE: Bu bölümdeki her sayı ya ÖLÇÜLMÜŞTÜR ya da "ölçülmedi" yazar.
+// Tahmin gösterilmez. Kredi harcayan tek düğme açıkça işaretlidir; geri
+// kalan her kontrol ücretsizdir ve OpenAI'yi hiç çağırmaz.
+// ============================================================
+function KitapStudyoTestAlani({ authFetch, stil, seciliProje, seciliId, sonOlcum }) {
+  const [acik, setAcik] = React.useState(false);
+  const [fiyat, setFiyat] = React.useState(null);
+  const [form, setForm] = React.useState({ girdiMetin1M: "", girdiGorsel1M: "", cikti1M: "", usdTry: "", kaynak: "" });
+  const [fiyatDurum, setFiyatDurum] = React.useState("");
+  const [kontrol, setKontrol] = React.useState(null);
+  const [kontrolCalisiyor, setKontrolCalisiyor] = React.useState(false);
+  const [ozet, setOzet] = React.useState(null);
+  const [log, setLog] = React.useState(null);
+  const [testBoyut, setTestBoyut] = React.useState("1024x1024");
+  const [testKalite, setTestKalite] = React.useState("low");
+  const [testCalisiyor, setTestCalisiyor] = React.useState(false);
+  const [testSonuc, setTestSonuc] = React.useState(null);
+  const [testHata, setTestHata] = React.useState("");
+
+  const oku = async () => {
+    try {
+      const [rf, ro, rl] = await Promise.all([
+        authFetch("/api/admin/kitap-studyo/fiyat-ayari"),
+        authFetch("/api/admin/kitap-studyo/maliyet-ozeti"),
+        authFetch("/api/admin/kitap-studyo/uretim-log?limit=30"),
+      ]);
+      const [df, doz, dl] = await Promise.all([rf.json(), ro.json(), rl.json()]);
+      if (df.ok && df.fiyat) {
+        setFiyat(df.fiyat);
+        setForm({
+          girdiMetin1M: String(df.fiyat.girdiMetin1M ?? ""), girdiGorsel1M: String(df.fiyat.girdiGorsel1M ?? ""),
+          cikti1M: String(df.fiyat.cikti1M ?? ""), usdTry: String(df.fiyat.usdTry ?? ""), kaynak: df.fiyat.kaynak || "",
+        });
+      }
+      if (doz.ok) setOzet(doz);
+      if (dl.ok) setLog(dl);
+    } catch { /* sessiz — bölüm açılmamış olabilir */ }
+  };
+
+  React.useEffect(() => { if (acik) oku(); }, [acik]);
+
+  const fiyatKaydet = async () => {
+    setFiyatDurum("");
+    try {
+      const r = await authFetch("/api/admin/kitap-studyo/fiyat-ayari", { method: "PUT", body: JSON.stringify(form) });
+      const d = await r.json();
+      if (d.ok) { setFiyat(d.fiyat); setFiyatDurum("Kaydedildi. Bundan sonraki tutarlar ölçümden hesaplanacak."); await oku(); }
+      else setFiyatDurum(d.error || "Kaydedilemedi.");
+    } catch { setFiyatDurum("Sunucuya ulaşılamadı."); }
+  };
+
+  const sistemKontrol = async () => {
+    setKontrolCalisiyor(true); setKontrol(null);
+    try {
+      const r = await authFetch("/api/admin/kitap-studyo/sistem-kontrol");
+      const d = await r.json();
+      setKontrol(d.ok ? d : { kontroller: [{ ad: "Kontrol çalıştırılamadı", durum: "kaldi", detay: d.error || "" }], ozet: {} });
+    } catch { setKontrol({ kontroller: [{ ad: "Sunucuya ulaşılamadı", durum: "kaldi", detay: "" }], ozet: {} }); }
+    finally { setKontrolCalisiyor(false); }
+  };
+
+  // TEK GERÇEK ÜRETİM — kredi harcar. Ölçtükleri:
+  //  · sunucudan: token sayısı, OpenAI süresi, dosya boyutu, tutar
+  //  · tarayıcıdan: dosyanın GERÇEK piksel boyutu (istenen boyut geldi mi?)
+  //    ve projenin cm ölçüsünde kaç dpi ettiği
+  const testUret = async () => {
+    if (testCalisiyor) return;
+    if (!window.confirm(`Bu işlem GERÇEK bir görsel üretir ve OpenAI kredisi harcar.\n\nBoyut: ${testBoyut}\nKalite: ${testKalite}\n\nDevam edilsin mi?`)) return;
+    setTestCalisiyor(true); setTestHata(""); setTestSonuc(null);
+    const t0 = Date.now();
+    try {
+      const r = await authFetch("/api/admin/kitap-studyo/gorsel-uret", {
+        method: "POST",
+        body: JSON.stringify({
+          sahne: "Bir ölçüm testi görseli: düz gri arka plan üzerinde tek bir kırmızı daire.",
+          model: "gpt-image-2", boyut: testBoyut, kalite: testKalite,
+          projeId: seciliId || null, amac: "test-olcum", testMi: true,
+        }),
+      });
+      const d = await r.json();
+      if (!d.ok) { setTestHata(d.error || "Üretilemedi."); return; }
+
+      // Gerçek piksel ölçümü — istenen boyut gerçekten geldi mi?
+      const olculenPiksel = await new Promise((coz) => {
+        const im = new Image();
+        im.onload = () => coz({ g: im.naturalWidth, y: im.naturalHeight });
+        im.onerror = () => coz(null);
+        im.src = d.gorselUrl;
+      });
+
+      const cm = Number(seciliProje?.ozellikler?.genislikCm) || null;
+      const dpi = cm && olculenPiksel ? Math.round(olculenPiksel.g / (cm / 2.54)) : null;
+
+      setTestSonuc({
+        url: d.gorselUrl, olcum: d.olcum || null, olculenPiksel, dpi, cm,
+        istenenBoyut: testBoyut,
+        boyutTuttuMu: olculenPiksel ? `${olculenPiksel.g}x${olculenPiksel.y}` === testBoyut : null,
+        tarayiciToplamMs: Date.now() - t0,
+      });
+      await oku();
+    } catch (e) { setTestHata(e.message || "Hata"); }
+    finally { setTestCalisiyor(false); }
+  };
+
+  const renk = { gecti: "#1E5E30", kaldi: "#8B2E2E", uyari: "#7A4A12", bilinmiyor: "#6f6f6c" };
+  const simge = { gecti: "✔", kaldi: "✖", uyari: "!", bilinmiyor: "?" };
+
+  // Ölçülmüş bir grup varsa, seçili projenin sayfa sayısıyla GERÇEK toplam
+  // maliyet hesaplanır. Ölçüm yoksa hiçbir rakam gösterilmez.
+  const sayfaCifti = (seciliProje?.spreadler || []).length;
+  const uygunGrup = ozet?.gruplar?.find((g) => g.gorselBasinaUsd != null && g.boyut === (seciliProje?.yayilimBoyutu || "3840x1920") && g.kalite === (seciliProje?.kalite || "low"));
+
+  return (
+    <div style={{ marginTop: 16, marginBottom: 30, background: "#fff", border: "2px dashed #C9C2B2", borderRadius: 14, padding: "14px 16px" }}>
+      <div onClick={() => setAcik(!acik)} style={{ cursor: "pointer", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        <span style={{ fontSize: 15 }}>🧪</span>
+        <b style={{ fontFamily: "'Fredoka', sans-serif", fontSize: 14 }}>Test Alanı — ölçüm, kredi ve sistem kontrolü</b>
+        <span style={{ fontSize: 11.5, color: "#6f6f6c" }}>tahmin yok, sadece ölçülen</span>
+        <span style={{ marginLeft: "auto", fontSize: 12, color: "#3E8ED0" }}>{acik ? "▴ gizle" : "▾ aç"}</span>
+      </div>
+
+      {acik && (
+        <div style={{ marginTop: 14 }}>
+
+          {/* ---------- 1 · FİYAT AYARI ---------- */}
+          <div style={{ border: "1px solid #EFEAE0", borderRadius: 10, padding: "12px 14px" }}>
+            <div style={{ fontSize: 13, fontWeight: 700 }}>1 · Fiyat ayarı <span style={{ fontWeight: 400, color: "#6f6f6c", fontSize: 11.5 }}>(bir kez girilir)</span></div>
+            <div style={{ fontSize: 11.5, color: "#6f6f6c", marginTop: 5, lineHeight: 1.6 }}>
+              Token sayısını OpenAI ölçüp gönderiyor. Token <b>başına fiyatı</b> ise ilan ettikleri sayfadan
+              buraya bir kez giriyoruz. Böylece gösterilen tutar “tahmin” değil, <b>ölçüm × ilan edilmiş fiyat</b> oluyor.
+              Fiyat girilmezse tutar boş kalır — uydurulmaz.
+              <div style={{ marginTop: 4 }}>Değerler: <span style={{ fontFamily: FONT_MONO }}>platform.openai.com/docs/pricing</span> → görsel modelleri, 1M token başına dolar.</div>
+            </div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
+              {[
+                ["girdiMetin1M", "Girdi — metin ($/1M)"],
+                ["girdiGorsel1M", "Girdi — görsel ($/1M)"],
+                ["cikti1M", "Çıktı — görsel ($/1M)"],
+                ["usdTry", "Kur (₺/$)"],
+              ].map(([k, etiket]) => (
+                <div key={k}>
+                  <label style={{ fontSize: 10.5, color: "#6f6f6c", display: "block" }}>{etiket}</label>
+                  <input style={{ ...stil.input, width: 128 }} value={form[k]}
+                    onChange={(e) => setForm((f) => ({ ...f, [k]: e.target.value }))} />
+                </div>
+              ))}
+              <div style={{ flex: 1, minWidth: 180 }}>
+                <label style={{ fontSize: 10.5, color: "#6f6f6c", display: "block" }}>Kaynak / not</label>
+                <input style={{ ...stil.input, width: "100%" }} placeholder="örn. OpenAI fiyat sayfası, 17 Ağu 2026"
+                  value={form.kaynak} onChange={(e) => setForm((f) => ({ ...f, kaynak: e.target.value }))} />
+              </div>
+            </div>
+            <div style={{ marginTop: 10, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+              <button style={stil.buton} onClick={fiyatKaydet}>Fiyatı kaydet</button>
+              {fiyatDurum && <span style={{ fontSize: 12, color: "#1E5E30" }}>{fiyatDurum}</span>}
+              {!fiyat && <span style={{ fontSize: 12, color: "#7A4A12" }}>Henüz girilmedi — tutarlar boş görünecek.</span>}
+            </div>
+          </div>
+
+          {/* ---------- 2 · TEK GÖRSEL ÜRET VE ÖLÇ ---------- */}
+          <div style={{ border: "2px solid #F0C48A", background: "#FFFBF4", borderRadius: 10, padding: "12px 14px", marginTop: 12 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: "#7A4A12" }}>2 · Tek görsel üret ve ölç <span style={{ fontWeight: 400, fontSize: 11.5 }}>— bu düğme KREDİ HARCAR</span></div>
+            <div style={{ fontSize: 11.5, color: "#7A4A12", marginTop: 5, lineHeight: 1.6 }}>
+              Tek bir görsel üretilir ve şunlar ölçülür: harcanan gerçek token, OpenAI'nin yanıt süresi,
+              dosya boyutu, dönen görselin <b>gerçek piksel ölçüsü</b> (istenen boyut gerçekten geldi mi)
+              ve projenin cm ölçüsünde kaç <b>dpi</b> ettiği. Bir sayfanın gerçekte kaça mal olduğu buradan çıkar.
+            </div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10, alignItems: "flex-end" }}>
+              <div>
+                <label style={{ fontSize: 10.5, color: "#6f6f6c", display: "block" }}>Boyut</label>
+                <select style={{ ...stil.input, width: 150 }} value={testBoyut} onChange={(e) => setTestBoyut(e.target.value)}>
+                  <option value="1024x1024">1024×1024 (en ucuz)</option>
+                  <option value="1536x1024">1536×1024</option>
+                  <option value="1920x1920">1920×1920 (tek sayfa)</option>
+                  <option value="3840x1920">3840×1920 (sayfa çifti)</option>
+                </select>
+              </div>
+              <div>
+                <label style={{ fontSize: 10.5, color: "#6f6f6c", display: "block" }}>Kalite</label>
+                <select style={{ ...stil.input, width: 110 }} value={testKalite} onChange={(e) => setTestKalite(e.target.value)}>
+                  <option value="low">Düşük</option>
+                  <option value="medium">Orta</option>
+                  <option value="high">Yüksek</option>
+                </select>
+              </div>
+              <button style={{ ...stil.buton, background: "#C0392B", ...(testCalisiyor ? stil.butonPasif : {}) }}
+                disabled={testCalisiyor} onClick={testUret}>
+                {testCalisiyor ? "Üretiliyor ve ölçülüyor…" : "Üret ve ölç (kredi harcar)"}
+              </button>
+            </div>
+
+            {testHata && <div style={{ marginTop: 10, fontSize: 12, color: "#8B2E2E" }}>Hata: {testHata}</div>}
+
+            {testSonuc && (
+              <div style={{ marginTop: 12, display: "flex", gap: 14, flexWrap: "wrap" }}>
+                <img src={testSonuc.url} style={{ width: 140, borderRadius: 8, border: "1px solid #E4DFD1" }} />
+                <div style={{ flex: 1, minWidth: 260, fontSize: 12, lineHeight: 1.7 }}>
+                  <table style={{ borderCollapse: "collapse" }}>
+                    <tbody>
+                      {[
+                        ["İstenen boyut", testSonuc.istenenBoyut],
+                        ["Gelen gerçek boyut", testSonuc.olculenPiksel ? `${testSonuc.olculenPiksel.g}×${testSonuc.olculenPiksel.y} px ${testSonuc.boyutTuttuMu ? "✔ tuttu" : "✖ FARKLI"}` : "ölçülemedi"],
+                        ["Sayfa ölçüsünde çözünürlük", testSonuc.dpi ? `${testSonuc.dpi} dpi (${testSonuc.cm} cm genişlikte)${testSonuc.dpi >= 300 ? " ✔ baskıya uygun" : testSonuc.dpi >= 200 ? " · sınırda" : " ✖ baskı için düşük"}` : "projeye genişlik (cm) girilmemiş"],
+                        ["OpenAI süresi", testSonuc.olcum?.sureMs != null ? `${(testSonuc.olcum.sureMs / 1000).toFixed(1)} sn` : "ölçülemedi"],
+                        ["Baştan sona (yükleme dahil)", `${(testSonuc.tarayiciToplamMs / 1000).toFixed(1)} sn`],
+                        ["Dosya boyutu", testSonuc.olcum?.baytSayisi != null ? `${(testSonuc.olcum.baytSayisi / 1048576).toFixed(2)} MB` : "ölçülemedi"],
+                        ["Girdi token", testSonuc.olcum?.girdiToken ?? "gelmedi"],
+                        ["Çıktı token", testSonuc.olcum?.ciktiToken ?? "gelmedi"],
+                        ["Tutar", testSonuc.olcum?.maliyetUsd != null
+                          ? `$${testSonuc.olcum.maliyetUsd.toFixed(4)}${testSonuc.olcum.maliyetTry != null ? ` (₺${testSonuc.olcum.maliyetTry.toFixed(2)})` : ""}`
+                          : (testSonuc.olcum?.maliyetNeden || "hesaplanamadı")],
+                      ].map(([a, b]) => (
+                        <tr key={a}>
+                          <td style={{ padding: "2px 12px 2px 0", color: "#6f6f6c", whiteSpace: "nowrap", verticalAlign: "top" }}>{a}</td>
+                          <td style={{ padding: "2px 0", fontFamily: FONT_MONO }}>{String(b)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {testSonuc.olcum?.maliyetUsd != null && sayfaCifti > 0 && (
+                    <div style={{ marginTop: 8, padding: "8px 11px", borderRadius: 7, background: "#E8F3EC", border: "1px solid #A8D5B8", color: "#1E5E30" }}>
+                      Bu ölçüme göre <b>{sayfaCifti} sayfa çifti</b> ={" "}
+                      <b>${(testSonuc.olcum.maliyetUsd * sayfaCifti).toFixed(2)}</b>
+                      {testSonuc.olcum.maliyetTry != null && ` (₺${(testSonuc.olcum.maliyetTry * sayfaCifti).toFixed(0)})`}
+                      <div style={{ fontSize: 11, marginTop: 3 }}>
+                        Aynı boyut ve kalitede üretilirse geçerli. Kapak, karakter ve yeniden denemeler bunun dışında.
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {!testSonuc && sonOlcum && (
+              <div style={{ marginTop: 10, fontSize: 11.5, color: "#6f6f6c" }}>
+                Son normal üretim: {sonOlcum.boyut} · {sonOlcum.sureMs != null ? `${(sonOlcum.sureMs / 1000).toFixed(1)} sn` : "?"}
+                {sonOlcum.ciktiToken != null && ` · ${sonOlcum.ciktiToken} çıktı token`}
+                {sonOlcum.maliyetUsd != null && ` · $${sonOlcum.maliyetUsd.toFixed(4)}`}
+              </div>
+            )}
+          </div>
+
+          {/* ---------- 3 · ÖLÇÜLEN MALİYET TABLOSU ---------- */}
+          <div style={{ border: "1px solid #EFEAE0", borderRadius: 10, padding: "12px 14px", marginTop: 12 }}>
+            <div style={{ fontSize: 13, fontWeight: 700 }}>3 · Ölçülen maliyet — boyut ve kaliteye göre</div>
+            {!ozet ? <div style={{ fontSize: 12, color: "#6f6f6c", marginTop: 6 }}>Yükleniyor…</div>
+              : ozet.gruplar.length === 0 ? (
+                <div style={{ fontSize: 12, color: "#7A4A12", marginTop: 6, lineHeight: 1.6 }}>
+                  Henüz hiç ölçüm yok — bu yüzden burada rakam göstermiyoruz.
+                  Yukarıdaki “Üret ve ölç” ile her boyut/kalite için birer görsel üretildiğinde tablo dolar.
+                </div>
+              ) : (
+                <div style={{ marginTop: 8, overflowX: "auto" }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                    <thead>
+                      <tr style={{ color: "#6f6f6c", textAlign: "left" }}>
+                        <th style={{ padding: "5px 8px" }}>Boyut</th>
+                        <th style={{ padding: "5px 8px" }}>Kalite</th>
+                        <th style={{ padding: "5px 8px", textAlign: "right" }}>Ölçüm</th>
+                        <th style={{ padding: "5px 8px", textAlign: "right" }}>Ort. çıktı token</th>
+                        <th style={{ padding: "5px 8px", textAlign: "right" }}>Ort. süre</th>
+                        <th style={{ padding: "5px 8px", textAlign: "right" }}>Görsel başına</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {ozet.gruplar.map((g, i) => (
+                        <tr key={i} style={{ borderTop: "1px solid #F3EFE6" }}>
+                          <td style={{ padding: "6px 8px", fontFamily: FONT_MONO }}>{g.boyut}</td>
+                          <td style={{ padding: "6px 8px" }}>{g.kalite}{g.uc === "edits" ? " · referanslı" : ""}</td>
+                          <td style={{ padding: "6px 8px", textAlign: "right", fontFamily: FONT_MONO }}>{g.olculenAdet}/{g.adet}</td>
+                          <td style={{ padding: "6px 8px", textAlign: "right", fontFamily: FONT_MONO }}>{g.ortCiktiToken ?? "—"}</td>
+                          <td style={{ padding: "6px 8px", textAlign: "right", fontFamily: FONT_MONO }}>{g.ortSureMs != null ? `${(g.ortSureMs / 1000).toFixed(1)} sn` : "—"}</td>
+                          <td style={{ padding: "6px 8px", textAlign: "right", fontFamily: FONT_MONO, fontWeight: 700 }}>
+                            {g.gorselBasinaUsd != null
+                              ? `$${g.gorselBasinaUsd.toFixed(4)}`
+                              : <span title={g.neden || ""} style={{ color: "#7A4A12", fontWeight: 400 }}>ölçülmedi</span>}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {uygunGrup && sayfaCifti > 0 && (
+                    <div style={{ marginTop: 10, padding: "9px 12px", borderRadius: 8, background: "#E8F3EC", border: "1px solid #A8D5B8", color: "#1E5E30", fontSize: 12 }}>
+                      <b>Bu kitabın ölçülmüş maliyeti:</b> {sayfaCifti} sayfa çifti × ${uygunGrup.gorselBasinaUsd.toFixed(4)} ={" "}
+                      <b>${(uygunGrup.gorselBasinaUsd * sayfaCifti).toFixed(2)}</b>
+                      {uygunGrup.gorselBasinaTry != null && ` ≈ ₺${(uygunGrup.gorselBasinaTry * sayfaCifti).toFixed(0)}`}
+                      <div style={{ fontSize: 11, marginTop: 3 }}>{uygunGrup.olculenAdet} gerçek üretimin ortalamasından. Kapak, karakter ve başarısız denemeler hariç.</div>
+                    </div>
+                  )}
+                </div>
+              )}
+          </div>
+
+          {/* ---------- 4 · SİSTEM KONTROLÜ ---------- */}
+          <div style={{ border: "1px solid #EFEAE0", borderRadius: 10, padding: "12px 14px", marginTop: 12 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+              <div style={{ fontSize: 13, fontWeight: 700 }}>4 · Sistem kontrolü <span style={{ fontWeight: 400, color: "#1E5E30", fontSize: 11.5 }}>— ücretsiz, kredi harcamaz</span></div>
+              <button style={{ ...stil.buton, padding: "4px 12px", fontSize: 12, ...(kontrolCalisiyor ? stil.butonPasif : {}) }}
+                disabled={kontrolCalisiyor} onClick={sistemKontrol}>
+                {kontrolCalisiyor ? "Kontrol ediliyor…" : "Kontrolleri çalıştır"}
+              </button>
+              {kontrol?.ozet && (
+                <span style={{ fontSize: 12, color: "#6f6f6c" }}>
+                  {kontrol.ozet.gecti} geçti · {kontrol.ozet.kaldi} kaldı · {kontrol.ozet.uyari} uyarı
+                </span>
+              )}
+            </div>
+            {kontrol && (
+              <div style={{ marginTop: 10 }}>
+                {kontrol.kontroller.map((k, i) => (
+                  <div key={i} style={{ display: "flex", gap: 10, padding: "6px 0", borderTop: i ? "1px solid #F3EFE6" : "none", fontSize: 12 }}>
+                    <div style={{ width: 16, color: renk[k.durum] || "#6f6f6c", fontWeight: 700 }}>{simge[k.durum] || "?"}</div>
+                    <div style={{ flex: 1 }}>
+                      <b style={{ color: renk[k.durum] || "#333" }}>{k.ad}</b>
+                      <div style={{ color: "#6f6f6c", fontSize: 11.5, marginTop: 1 }}>{k.detay}</div>
+                      {k.nasil && <div style={{ color: "#a8a294", fontSize: 10.5, marginTop: 1 }}>nasıl ölçüldü: {k.nasil}</div>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* ---------- 5 · ÜRETİM KAYITLARI ---------- */}
+          <div style={{ border: "1px solid #EFEAE0", borderRadius: 10, padding: "12px 14px", marginTop: 12 }}>
+            <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
+              <div style={{ fontSize: 13, fontWeight: 700 }}>5 · Üretim kayıtları</div>
+              <span style={{ fontSize: 11.5, color: "#6f6f6c" }}>her üretim tek tek kaydediliyor</span>
+              <button style={{ ...stil.buton, padding: "3px 10px", fontSize: 11.5, marginLeft: "auto" }} onClick={oku}>⟳ Yenile</button>
+            </div>
+            {log?.ozet && (
+              <div style={{ marginTop: 8, fontSize: 12, color: "#6f6f6c" }}>
+                Son {log.ozet.kayitSayisi} kayıt · {log.ozet.basariliSayisi} başarılı ·{" "}
+                {log.ozet.maliyetiOlculen > 0
+                  ? <>toplam ölçülen tutar <b style={{ color: "#1E5E30" }}>${log.ozet.toplamUsd.toFixed(4)}</b>
+                      {log.ozet.toplamTry != null && ` (₺${log.ozet.toplamTry.toFixed(2)})`}</>
+                  : "tutar hesaplanamadı (fiyat girilmedi ya da token bilgisi gelmedi)"}
+                {log.ozet.ortalamaSureMs != null && ` · ortalama ${(log.ozet.ortalamaSureMs / 1000).toFixed(1)} sn`}
+              </div>
+            )}
+            {log?.kayitlar?.length ? (
+              <div style={{ marginTop: 8, maxHeight: 240, overflowY: "auto" }}>
+                {log.kayitlar.map((k) => (
+                  <div key={k.id} style={{ display: "flex", gap: 10, padding: "5px 0", borderTop: "1px solid #F3EFE6", fontSize: 11.5 }}>
+                    <div style={{ minWidth: 112, color: "#8e897a" }}>{new Date(k.tarih).toLocaleString("tr-TR")}</div>
+                    <div style={{ minWidth: 84, fontFamily: FONT_MONO }}>{k.boyut}</div>
+                    <div style={{ minWidth: 56 }}>{k.kalite}</div>
+                    <div style={{ minWidth: 58, fontFamily: FONT_MONO, color: "#6f6f6c" }}>{k.sureMs != null ? `${(k.sureMs / 1000).toFixed(1)}s` : "—"}</div>
+                    <div style={{ flex: 1, color: k.basarili ? "#6f6f6c" : "#8B2E2E" }}>
+                      {k.basarili ? (k.amac || "üretim") : `HATA: ${(k.hata || "").slice(0, 70)}`}
+                      {k.testMi && <span style={{ marginLeft: 6, fontSize: 10, background: "#F4E7D0", borderRadius: 4, padding: "1px 5px" }}>test</span>}
+                    </div>
+                    <div style={{ fontFamily: FONT_MONO, minWidth: 66, textAlign: "right" }}>
+                      {k.maliyetUsd != null ? `$${k.maliyetUsd.toFixed(4)}` : "—"}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : <div style={{ marginTop: 8, fontSize: 12, color: "#6f6f6c" }}>Kayıt yok.</div>}
+          </div>
+
+          {/* ---------- 6 · ELLE TEST EDİLECEKLER ---------- */}
+          <div style={{ border: "1px solid #EFEAE0", borderRadius: 10, padding: "12px 14px", marginTop: 12 }}>
+            <div style={{ fontSize: 13, fontWeight: 700 }}>6 · Yazılımın ölçemediği, gözle bakılması gerekenler</div>
+            <div style={{ fontSize: 11.5, color: "#6f6f6c", marginTop: 5, lineHeight: 1.6 }}>
+              Aşağıdakiler otomatik kontrol edilemez — çünkü “iyi görünüyor mu” sorusunun ölçüsü yok.
+              Kredi yüklendiğinde sırayla bakılmalı. Yanlarında hangi ayarla test edileceği yazıyor.
+            </div>
+            <ol style={{ fontSize: 12, lineHeight: 1.75, marginTop: 8, paddingLeft: 20, color: "#3a3a38" }}>
+              <li><b>Baskı çözünürlüğü gerçekten geliyor mu</b> — 3840×1920, orta kalite ile bir sayfa çifti üret; yukarıdaki ölçüm “tuttu” demeli ve dpi ≥ 300 çıkmalı.</li>
+              <li><b>Vercel süre sınırı</b> — aynı üretimde süre 60 sn'yi geçerse Hobby planında istek kesilir. Ölçüm bunu gösterir; kesilirse plan ya da boyut değişmeli.</li>
+              <li><b>Sayfa çifti sürekliliği</b> — tek geniş görsel ikiye bölünüyor; ortadaki birleşme yerinde kopukluk var mı, gözle bakılmalı.</li>
+              <li><b>Karakter tutarlılığı</b> — art arda 3 sayfa üret; aynı karakter aynı görünüyor mu.</li>
+              <li><b>Yazı yerleşimi</b> — üretilen görsel <u>yazısız</u> gelmeli. Yazı panelde ekleniyor; konumu sürüklenebiliyor mu, uzun metin taşıyor mu.</li>
+              <li><b>PDF ölçüsü</b> — PDF indir, Acrobat'ta “Belge özellikleri”nde sayfa boyutu projede yazan cm ile birebir aynı mı.</li>
+              <li><b>Kalite farkı gerçekten görünüyor mu</b> — aynı sahneyi düşük ve orta kalitede üretip yan yana koy; fark maliyeti hak ediyor mu.</li>
+              <li><b>Kayıp koruması</b> — bir projeyi kaydet, sonra “Kayıp Koruma” bölümünden önceki sürüme dön; görseller geri gelmeli.</li>
+            </ol>
+          </div>
+
+        </div>
+      )}
     </div>
   );
 }
@@ -10429,7 +12427,7 @@ export default function AdminPanel() {
         {view === "reklamTeklif" && <ReklamBasvurulari authFetch={authFetch} />}
         {view === "eslesme" && <EslesmeTeshisi authFetch={authFetch} onSelectAuthor={(id) => { setView("authors"); setSelectedId(id); }} />}
         {view === "isbn" && <BulkIsbnUpload onSubmit={bulkIsbn} />}
-        {view === "kitapStudyo" && <KitapStudyo authFetch={authFetch} />}
+        {view === "kitapStudyo" && <KitapStudyo authFetch={authFetch} token={session?.token} />}
         {view === "kullanicilar" && <KullaniciYonetimi authFetch={authFetch} />}
       </div>
 
