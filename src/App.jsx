@@ -1505,19 +1505,45 @@ function EditorRaporu({ authFetch, eserId, eserAdi, karakterSayisi, acikBaslangi
     setUretiliyor(true); setMesaj(""); durdurRef.current = false;
     setIlerleme({ asama: "okuma", okunan: 0, toplam: Math.ceil((karakterSayisi || 0) / 24000) || 1 });
     try {
-      for (let tur = 0; tur < 60; tur++) {
-        if (durdurRef.current) { setMesaj("Durduruldu — okunan bölümler kaydedildi, kaldığı yerden sürdürebilirsin."); break; }
-        const r = await authFetch(`/api/admin/eserler/${eserId}/editor-raporu/uret`, {
-          method: "POST", body: JSON.stringify({ bastanBasla: bastanBasla && tur === 0 }),
-        });
-        const d = await r.json();
+      // Her tur BİR bölüm okur. Kilit doluysa (başka bir sekme/istek sürüyorsa)
+      // sunucu beklemede döner; o zaman kısa bekleyip tekrar denenir —
+      // aksi hâlde döngü boşa dönüp saniyeler içinde tükeniyordu.
+      let bosTur = 0;
+      for (let tur = 0; tur < 400; tur++) {
+        if (durdurRef.current) { setMesaj("Durduruldu — okunan bölümler kaydedildi, “Kaldığı yerden sürdür” ile devam edebilirsin."); break; }
+        let r, d;
+        try {
+          r = await authFetch(`/api/admin/eserler/${eserId}/editor-raporu/uret`, {
+            method: "POST", body: JSON.stringify({ bastanBasla: bastanBasla && tur === 0 }),
+          });
+          d = await r.json();
+        } catch (agHatasi) {
+          // Sunucu isteği süre sınırında kesmiş olabilir. Okunan bölümler
+          // kayıtlı olduğu için birkaç saniye sonra kaldığı yerden sürüyoruz;
+          // üst üste üç kez olursa bırakıp durumu söylüyoruz.
+          bosTur++;
+          if (bosTur >= 3) { setMesaj("Sunucuya ulaşılamıyor: " + agHatasi.message + " — okunan bölümler kayıtlı, sonra sürdürebilirsin."); break; }
+          await new Promise((c) => setTimeout(c, 4000));
+          continue;
+        }
         if (!r.ok) {
-          if (d.kod === "onayli") setMesaj("Bu rapor onaylanmış. Yeniden üretmek için “Baştan üret” düğmesini kullan.");
-          else setMesaj(d.error || `Üretim başarısız (HTTP ${r.status}).`);
+          if (d?.kod === "onayli") setMesaj("Bu rapor onaylanmış. Yeniden üretmek için “Baştan üret” düğmesini kullan.");
+          else setMesaj((d?.error || `Üretim başarısız (HTTP ${r.status}).`) + " — okunan bölümler kayıtlı.");
           break;
         }
         if (d.tamam) { setIlerleme(null); setMesaj("Rapor üretildi — aşağıdan okuyup düzenleyebilirsin."); await oku(); break; }
-        setIlerleme({ asama: d.asama || "okuma", okunan: d.okunan ?? 0, toplam: d.toplam ?? 0, yuzde: d.ilerleme });
+
+        setIlerleme({
+          asama: d.asama || "okuma", okunan: d.okunan ?? 0, toplam: d.toplam ?? 0,
+          yuzde: d.ilerleme, beklemede: !!d.beklemede, okunamayan: d.okunamayan || 0,
+          yenidenDeniyor: !!d.yenidenDeniyor, deneme: d.deneme, not: d.mesaj,
+        });
+        if (d.beklemede) {
+          // İlerleme yok — kilit başkasında. Boşuna hızlı denemek yerine bekle.
+          bosTur++;
+          if (bosTur >= 25) { setMesaj(d.mesaj || "Başka bir okuma işlemi kilidi bırakmıyor. Birkaç dakika sonra tekrar dene."); break; }
+          await new Promise((c) => setTimeout(c, 5000));
+        } else bosTur = 0;
       }
     } catch (err) { setMesaj("Sunucuya ulaşılamadı: " + err.message); }
     finally { setUretiliyor(false); }
@@ -1607,8 +1633,11 @@ function EditorRaporu({ authFetch, eserId, eserAdi, karakterSayisi, acikBaslangi
       {/* Üretim kaynağı — raporun neye dayandığı görünür olmalı. */}
       {paket?.uretim && (
         <div style={{ ...kutu, background: THEME.panelBgAlt, fontSize: 12, color: THEME.textMuted }}>
-          Eserin <b style={{ color: THEME.textLight }}>tamamı</b> okundu: {paket.uretim.okunanBolum} bölüm
-          ({(paket.uretim.karakter || 0).toLocaleString("tr-TR")} karakter) · {paket.uretim.model}
+          {paket.uretim.tamMetinOkundu
+            ? <>Eserin <b style={{ color: THEME.textLight }}>tamamı</b> okundu: {paket.uretim.okunanBolum} bölüm</>
+            : <><b style={{ color: THEME.warn }}>Eksik okuma</b> — {(paket.uretim.okunamayanBolumler || []).join(", ")}. bölüm okunamadı
+                ({paket.uretim.okunanBolum} bölümden). Bu rapor eksik veriye dayanıyor; “Baştan üret” denemeye değer.</>}
+          {" "}({(paket.uretim.karakter || 0).toLocaleString("tr-TR")} karakter) · {paket.uretim.model}
           {paket.denetim?.kelimeSayisi ? ` · rapor ${paket.denetim.kelimeSayisi} kelime` : ""}
           {veri?.editor_raporu_surum > 1 ? ` · ${veri.editor_raporu_surum}. üretim` : ""}
         </div>
@@ -1628,15 +1657,23 @@ function EditorRaporu({ authFetch, eserId, eserAdi, karakterSayisi, acikBaslangi
       {ilerleme && (
         <div style={{ ...kutu, background: THEME.panelBgAlt }}>
           <div style={{ fontSize: 12.5, color: THEME.textLight, marginBottom: 6 }}>
-            {ilerleme.asama === "okuma"
-              ? `Eser okunuyor — ${ilerleme.okunan}/${ilerleme.toplam} bölüm`
-              : "Rapor yazılıyor…"}
+            {ilerleme.beklemede
+              ? `Sıra bekleniyor — ${ilerleme.okunan}/${ilerleme.toplam} bölüm okundu. Bu eser için başka bir okuma sürüyor.`
+              : ilerleme.yenidenDeniyor
+                ? (ilerleme.not || `Yeniden deneniyor (${ilerleme.deneme}. deneme)…`)
+                : ilerleme.asama === "yazim" || (ilerleme.okunan >= ilerleme.toplam && ilerleme.toplam)
+                  ? "Bütün bölümler okundu — rapor yazılıyor…"
+                  : `Eser okunuyor — ${ilerleme.okunan}/${ilerleme.toplam} bölüm`}
+            {ilerleme.okunamayan > 0 && (
+              <b style={{ color: THEME.warn }}> · {ilerleme.okunamayan} bölüm okunamadı</b>
+            )}
           </div>
           <div style={{ height: 6, background: THEME.divider, borderRadius: 99, overflow: "hidden" }}>
             <div style={{ height: "100%", width: `${ilerleme.yuzde ?? 0}%`, background: THEME.cyan, transition: "width .3s" }} />
           </div>
           <div style={{ fontSize: 11, color: THEME.textMuted, marginTop: 5 }}>
-            Bu işlem birkaç dakika sürebilir; sekmeyi açık tut. Okunan her bölüm kaydediliyor, yarıda kalırsa baştan başlamaz.
+            Her bölüm ayrı bir istekte okunuyor; bölüm başına yaklaşık 30-60 saniye sürer.
+            Sekmeyi açık tut. Okunan her bölüm kaydediliyor — yarıda kalırsa baştan başlamaz.
           </div>
         </div>
       )}
