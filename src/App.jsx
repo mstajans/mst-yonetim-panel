@@ -1480,6 +1480,7 @@ function EditorRaporu({ authFetch, eserId, eserAdi, karakterSayisi, acikBaslangi
   const [ilerleme, setIlerleme] = React.useState(null);
   const [mesaj, setMesaj] = React.useState("");
   const [taslak, setTaslak] = React.useState(null);   // düzenlenebilir kopya
+  const [okunamayanlar, setOkunamayanlar] = React.useState([]);
   const [kaydediliyor, setKaydediliyor] = React.useState(false);
   const durdurRef = React.useRef(false);
 
@@ -1491,6 +1492,7 @@ function EditorRaporu({ authFetch, eserId, eserAdi, karakterSayisi, acikBaslangi
       if (d.ok) {
         setVeri(d.eser);
         setTaslak(d.eser.editor_raporu?.bolumler || null);
+        setOkunamayanlar(d.okunamayanlar || []);
       } else setMesaj(d.error || "Rapor okunamadı.");
     } catch { setMesaj("Sunucuya ulaşılamadı."); }
     finally { setYukleniyor(false); }
@@ -1540,6 +1542,7 @@ function EditorRaporu({ authFetch, eserId, eserAdi, karakterSayisi, acikBaslangi
           asama: d.asama || "okuma", okunan: d.okunan ?? 0, toplam: d.toplam ?? 0,
           yuzde: d.ilerleme, beklemede: !!d.beklemede, okunamayan: d.okunamayan || 0,
           yenidenDeniyor: !!d.yenidenDeniyor, deneme: d.deneme, not: d.mesaj,
+          sonHata: d.sonHata,
         });
         if (d.beklemede) {
           // İlerleme yok — kilit başkasında. Boşuna hızlı denemek yerine bekle.
@@ -1550,6 +1553,30 @@ function EditorRaporu({ authFetch, eserId, eserAdi, karakterSayisi, acikBaslangi
       }
     } catch (err) { setMesaj("Sunucuya ulaşılamadı: " + err.message); }
     finally { setUretiliyor(false); }
+  };
+
+  // Okunamayan bölümleri tek tek yeniden okur. "Baştan üret", başarıyla
+  // okunmuş bölümlerin parasını da yakar; bu yalnız eksikleri hedefler.
+  const eksikleriOku = async () => {
+    if (uretiliyor) return;
+    setUretiliyor(true); setMesaj(""); durdurRef.current = false;
+    try {
+      for (let tur = 0; tur < 200; tur++) {
+        if (durdurRef.current) { setMesaj("Durduruldu."); break; }
+        const r = await authFetch(`/api/admin/eserler/${eserId}/editor-raporu/eksikleri-oku`, { method: "POST" });
+        const d = await r.json();
+        if (!r.ok) { setMesaj(d?.error || `Başarısız (HTTP ${r.status}).`); break; }
+        if (d.tamam) { setMesaj("Eksik bölümlerin hepsi okundu — şimdi “Kaldığı yerden sürdür” ile raporu yazdır."); break; }
+        if (d.beklemede) { await new Promise((c) => setTimeout(c, 5000)); continue; }
+        setIlerleme({ asama: "eksik", okunan: 0, toplam: 0, yuzde: 0,
+          not: `Eksik bölümler okunuyor — ${d.kalan} kaldı`, sonHata: d.sonHata });
+        if (d.basarisiz) {
+          setMesaj(`${d.bolum}. bölüm yine okunamadı: ${d.sonHata || ""} — kalan ${d.kalan}`);
+          break;
+        }
+      }
+    } catch (e) { setMesaj("Sunucuya ulaşılamadı: " + e.message); }
+    finally { setUretiliyor(false); setIlerleme(null); await oku(); }
   };
 
   const kaydet = async () => {
@@ -1652,6 +1679,11 @@ function EditorRaporu({ authFetch, eserId, eserAdi, karakterSayisi, acikBaslangi
         </button>
         {paket && <button onClick={() => uret(true)} disabled={uretiliyor} style={dugme(false, THEME.warn)}>Baştan üret</button>}
         {uretiliyor && <button onClick={() => { durdurRef.current = true; }} style={dugme(false, THEME.danger)}>Durdur</button>}
+        {okunamayanlar.length > 0 && (
+          <button onClick={eksikleriOku} disabled={uretiliyor} style={dugme(true, THEME.warn)}>
+            {okunamayanlar.length} eksik bölümü yeniden oku
+          </button>
+        )}
         {paket && <button onClick={wordIndir} style={dugme(false, THEME.secondary)}>⬇ Word (.docx) indir</button>}
         {paket && durum !== "onayli" && <button onClick={() => yayinDegistir("yayinla")} style={dugme(true, THEME.success)}>Onayla ve YAZARA AÇ</button>}
         {durum === "onayli" && <button onClick={() => yayinDegistir("geri-cek")} style={dugme(false, THEME.danger)}>Yazardan geri çek</button>}
@@ -1671,6 +1703,14 @@ function EditorRaporu({ authFetch, eserId, eserAdi, karakterSayisi, acikBaslangi
               <b style={{ color: THEME.warn }}> · {ilerleme.okunamayan} bölüm okunamadı</b>
             )}
           </div>
+          {/* Hata metni GÖRÜNMEZSE teşhis edilemez. Önce "8/9'da takıldı",
+              sonra "7 bölüm okunamadı" derken sebebini bilmiyorduk. */}
+          {ilerleme.sonHata && (
+            <div style={{ fontSize: 11.5, color: THEME.danger, marginBottom: 6,
+                          fontFamily: "ui-monospace, monospace", wordBreak: "break-word" }}>
+              Son hata: {ilerleme.sonHata}
+            </div>
+          )}
           <div style={{ height: 6, background: THEME.divider, borderRadius: 99, overflow: "hidden" }}>
             <div style={{ height: "100%", width: `${ilerleme.yuzde ?? 0}%`, background: THEME.cyan, transition: "width .3s" }} />
           </div>
@@ -1682,6 +1722,21 @@ function EditorRaporu({ authFetch, eserId, eserAdi, karakterSayisi, acikBaslangi
       )}
 
       {mesaj && <div style={{ ...kutu, background: THEME.cyanBg, color: THEME.textLight, fontSize: 12.5 }}>{mesaj}</div>}
+
+      {okunamayanlar.length > 0 && (
+        <div style={{ ...kutu, borderColor: THEME.danger, background: THEME.dangerBg }}>
+          <b style={{ fontSize: 12.5, color: THEME.danger }}>{okunamayanlar.length} bölüm okunamadı</b>
+          <div style={{ fontSize: 11.5, color: THEME.textMuted, margin: "4px 0 6px" }}>
+            Rapor bu bölümler olmadan yazılırsa eksik veriye dayanır. Yukarıdaki düğmeyle
+            yalnız bunları yeniden okutabilirsin — okunmuş bölümler yeniden okunmaz, para tekrar harcanmaz.
+          </div>
+          <ul style={{ margin: 0, paddingLeft: 18, fontSize: 11.5, color: THEME.textLight, lineHeight: 1.7 }}>
+            {okunamayanlar.slice(0, 10).map((o) => (
+              <li key={o.bolum}><b>{o.bolum}. bölüm</b> — <span style={{ fontFamily: "ui-monospace, monospace" }}>{o.hata}</span></li>
+            ))}
+          </ul>
+        </div>
+      )}
       {yukleniyor && <div style={{ fontSize: 12.5, color: THEME.textMuted }}>Yükleniyor…</div>}
 
       {/* Denetim uyarıları — kurumsal kuralların ihlali burada görünür. */}
