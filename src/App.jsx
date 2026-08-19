@@ -54,7 +54,7 @@ function fontlariYukle() {
   const link = document.createElement("link");
   link.id = "mst-panel-fontlar";
   link.rel = "stylesheet";
-  link.href = "https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap";
+  link.href = "https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Capriola&display=swap";
   document.head.appendChild(link);
 }
 
@@ -3735,7 +3735,8 @@ function KitapStudyo({ authFetch, token }) {
   // Düzenleyicide ileri ayarlar varsayılan olarak GİZLİ — 11 kaydırıcı bir
   // arada fazla geliyordu ("eklediğimiz özellikler çok karmaşık duruyor").
   const [gelismisAcik, setGelismisAcik] = React.useState(false);
-  const [tumunuUretiliyorMu, setTumunuUretiliyorMu] = React.useState(false);
+  // KALDIRILDI (18 Ağu 2026): tumunuUretiliyorMu yazılıyor ama hiç
+  // okunmuyordu — her yazma gereksiz bir yeniden render tetikliyordu.
   const [beklemeSn, setBeklemeSn] = React.useState("4");
   const [toplamMaliyet, setToplamMaliyet] = React.useState(0);
   // EKLENDİ (17 Ağu 2026, "hiçbir şey tahmini olmamalı"): ölçülen harcama
@@ -3747,6 +3748,18 @@ function KitapStudyo({ authFetch, token }) {
   // EKLENDİ (18 Ağu 2026): "kaydettiğim zaman öyle kalmalı" — kaydın gerçekten
   // sunucuya yazılıp yazılmadığı artık ekranda görünüyor. Sessiz başarısızlık
   // yok.
+  // EKLENDİ (18 Ağu 2026): arka planda üretilen projelerin hataları HİÇBİR
+  // yere gitmiyordu — ne ekrana, ne konsola. Kullanıcı Proje Panosuna
+  // dönüyor, 12 sayfanın 7'si başarısız oluyor, ilerleme %100'e ulaşıyor,
+  // hiçbir hata görünmüyordu. Artık hepsi toplanıp ekranda listeleniyor.
+  const [uretimHatalari, setUretimHatalari] = React.useState([]);
+  const uretimKilidiRef = React.useRef(new Set());
+  const uretimHatasiBildir = (hedefId, nerede, err) => {
+    const mesaj = err?.message || String(err);
+    console.error(`[KITAP-STUDYO] proje ${hedefId} · ${nerede}:`, err);
+    setUretimHatalari((h) => [{ projeId: hedefId, nerede, mesaj, zaman: new Date() }, ...h].slice(0, 50));
+    if (hedefId === seciliId) setHata(`${nerede}: ${mesaj}`);
+  };
   const [kayitDurumu, setKayitDurumu] = React.useState(null);   // kaydediliyor | kaydedildi | hata | geri-alindi
   const [sonKayitZamani, setSonKayitZamani] = React.useState(null);
   // Kur artık sabit kodlu değil — elle düzeltilebiliyor (bkz. maliyet kutusu).
@@ -3986,11 +3999,19 @@ function KitapStudyo({ authFetch, token }) {
   };
   React.useEffect(() => { projeleriYukle(); }, []);
 
+  // DÜZELTİLDİ (18 Ağu 2026 — YARIŞ KOŞULU, veri kaybettirebilirdi):
+  // Yanıt geldiğinde hâlâ AYNI projenin açık olduğu kontrol edilmiyordu.
+  // A'ya tıkla (yavaş), B'ye tıkla (hızlı) → ekranda seciliId=B ama
+  // seciliProje=A'nın verisi. Sonraki her kayıt projeGuncelle(B, A-meta)
+  // yapıyor → B'nin TÜM görselleri düşüyor ve onaylanırsa B siliniyor.
+  const acilanProjeRef = React.useRef(null);
   const projeAc = async (id) => {
+    acilanProjeRef.current = id;
     setSeciliId(id); setSeciliProje(null); setHata("");
     try {
       const r = await authFetch(`/api/admin/kitap-studyo/projeler/${id}`);
       const d = await r.json();
+      if (acilanProjeRef.current !== id) return;   // kullanıcı başka projeye geçti
       if (d.ok) {
         setSeciliProje(d.proje);
         // DÜZELTİLDİ (16 Ağu 2026 — GÖRSEL KAYBININ KÖK NEDENİ):
@@ -4074,6 +4095,52 @@ function KitapStudyo({ authFetch, token }) {
   // — STYLE LOCK'ın karakterin ilk görselinde de korunması için.
   // DÜZELTİLDİ (15 Ağu 2026): projeOku/projeGuncelle desenine geçirildi —
   // bkz. stilOrnegiUret üstündeki not.
+  // EKLENDİ (18 Ağu 2026 — denetim maddesi 70):
+  //
+  // referansHavuzuTopla `p.olcekTablosuUrl`i HER sahneye ekliyordu ama bu
+  // alana yazan TEK BİR SATIR yoktu — ne panelde ne backend'de. Yarım kalmış
+  // özellikti.
+  //
+  // Ölçek tablosu: tüm karakterlerin DOĞRU GÖRELİ BOYUTTA yan yana durduğu
+  // tek referans kare. "Aslan bazen küçük bazen büyük" sorununun doğrudan
+  // karşılığı — model artık her sayfada "aslan zebradan ne kadar büyük"
+  // sorusunu yeniden tahmin etmiyor.
+  const [olcekUretiliyorMu, setOlcekUretiliyorMu] = React.useState(false);
+  const olcekTablosuUret = async () => {
+    if (olcekUretiliyorMu) return;
+    const p = projeOku(seciliId);
+    const kars = (p.karakterler || []).filter((k) => (k.tanimEn || k.aciklama || "").trim());
+    if (kars.length < 2) { setHata("Ölçek tablosu için en az iki karakterin tanımı dolu olmalı."); return; }
+    const olceksiz = kars.filter((k) => !k.olcekCipasi).map((k) => k.ad);
+    if (olceksiz.length && !window.confirm(
+      `Şu karakterlerin ölçek çıpası boş: ${olceksiz.join(", ")}.\n\n` +
+      `Onlar için göreli boyut tahmin edilecek — tabloyu asıl güçlü kılan çıpalardır.\n\nYine de üretilsin mi?`)) return;
+
+    setOlcekUretiliyorMu(true); setHata("");
+    try {
+      const satirlar = kars.map((k) =>
+        `- ${k.ad}: ${(k.tanimEn || k.aciklama).trim()}${k.olcekCipasi ? `. Size: ${k.olcekCipasi}` : ""}`).join("\n");
+      const sahne = [
+        "A character line-up reference sheet, NOT a story scene.",
+        "All characters stand side by side in a single row on a plain neutral light-grey background, full body, side-on to slightly three-quarter view, feet on the same ground line, even flat lighting, no shadows cast on each other.",
+        "THE ONLY PURPOSE OF THIS IMAGE IS RELATIVE SIZE: each character must be drawn at its correct height compared to the others.",
+        "",
+        "CHARACTERS, left to right:",
+        satirlar,
+        "",
+        "MUST NOT APPEAR: no text, letters, numbers or labels; no background scenery; no props; no character repeated; correct anatomy and countable legs for every animal.",
+      ].join("\n");
+
+      const url = await gorselIsteYenidenDeneyerek({
+        karakterTanimi: p.stilTanimi, sahne, model: p.model, kalite: p.kalite,
+        boyut: "3072x2048", referansGorseller: kars.map((k) => k.gorselUrl).filter(Boolean),
+        projeId: seciliId, amac: "olcek-tablosu",
+      });
+      await projeGuncelle(seciliId, { ...projeOku(seciliId), olcekTablosuUrl: url });
+    } catch (err) { uretimHatasiBildir(seciliId, "Ölçek tablosu", err); }
+    finally { setOlcekUretiliyorMu(false); }
+  };
+
   const karakterGorseliUret = async (idx, hedefId) => {
     hedefId = hedefId || seciliId;
     const p = projeOku(hedefId);
@@ -4084,7 +4151,7 @@ function KitapStudyo({ authFetch, token }) {
       const gorselUrl = await gorselIsteYenidenDeneyerek({
         karakterTanimi: p.stilTanimi,
         sahne: `Karakter referans görseli, tam boy, nötr duruş, nötr arka plan: ${karakter.aciklama}`,
-        model: p.model, kalite: p.kalite, boyut: "1024x1024",
+        model: p.model, kalite: p.kalite, boyut: referansBoyutu(p),
       });
       const guncelP = projeOku(hedefId);
       const yeniKarakterler = guncelP.karakterler.map((k, i) => i === idx ? { ...k, gorselUrl } : k);
@@ -4268,18 +4335,33 @@ function KitapStudyo({ authFetch, token }) {
     return cy;
   };
 
-  const fontHazirla = async (px, aile) => { try { await document.fonts.load(`${px}px ${aile}`); } catch {} };
+  // DÜZELTİLDİ (18 Ağu 2026 — DENETİMDE BULUNDU, en ağır tek hata):
+  //
+  // Capriola fontu index.html'deki Google Fonts bağlantısında YOKTU. Canvas
+  // sessizce Georgia'ya, o da yoksa genel serif'e düşüyordu. Sonuç: basılan
+  // kitabın yazı karakteri OPERATÖRÜN İŞLETİM SİSTEMİNE göre değişiyor ve
+  // yedek fontun harf genişlikleri farklı olduğu için aynı proje başka
+  // bilgisayarda yeniden dizilince SAYFA DÜZENİ de değişiyordu.
+  //
+  // Font artık yükleniyor (bkz. Google Fonts bağlantısı). Ayrıca gerçekten
+  // yüklendiği DOĞRULANIYOR — document.fonts.load() bulunmayan bir aile için
+  // hata atmaz, sessizce boş dizi döndürür. Yüklenmediyse artık susmuyoruz.
+  const [fontUyarisi, setFontUyarisi] = React.useState("");
+  const fontHazirla = async (px, aile = "Capriola") => {
+    try {
+      if (!document.fonts) return false;
+      await document.fonts.load(`${px}px "${aile}"`);
+      const hazir = document.fonts.check(`${px}px "${aile}"`);
+      if (!hazir) {
+        setFontUyarisi(`"${aile}" fontu yüklenemedi — yazılar yedek fontla (Georgia) basılacak. Punto ve satır bölünmesi tasarımdan farklı çıkar.`);
+      }
+      return hazir;
+    } catch {
+      setFontUyarisi(`"${aile}" fontu kontrol edilemedi — yazılar yedek fontla basılabilir.`);
+      return false;
+    }
+  };
 
-  // Hazır bir görseli (base64/veri URL) doğrudan Blob'a yükler — künye/kapak
-  // gibi OpenAI'ye hiç gitmeyen görseller için.
-  // DÜZELTİLDİ (15 Ağu 2026, "413 Content Too Large" — client-side Blob
-  // upload da başarısız oldu, kaynak koddan doğrulandı: @vercel/blob/client'ın
-  // handleUpload()'ı statik BLOB_READ_WRITE_TOKEN gerektiriyor, storeId/OIDC
-  // ile çalışmıyor — kitap görselleri store'unun ise hiç statik token'ı yok):
-  // client-side Blob upload tamamen terk edildi. Yerine, ZATEN ÇALIŞAN sunucu
-  // tarafı yükleme (OIDC ile) korunuyor — ama artık görsel küçük parçalara
-  // bölünüp sırayla gönderiliyor, her istek Vercel'in 4.5MB sınırının çok
-  // altında kalıyor. Backend son parçada hepsini birleştirip Blob'a yüklüyor.
   const gorselYukle = async (b64, onEki) => {
     const mime = b64.startsWith("/9j/") ? "image/jpeg" : "image/png"; // JPEG'ler hep bu imzayla başlar
     const uzanti = mime === "image/jpeg" ? "jpg" : "png";
@@ -4350,7 +4432,7 @@ function KitapStudyo({ authFetch, token }) {
       // (0.92) — Vercel'in sunucu isteği boyut sınırını (4.5MB) aşmamak için.
       // İçerik illüstrasyon/metin olduğu için JPEG kalite kaybı gözle
       // görülmüyor, dosya boyutu ise 3-6 kat küçülüyor.
-      const b64 = canvas.toDataURL("image/jpeg", 0.72).split(",")[1];
+      const b64 = canvas.toDataURL("image/jpeg", 0.94).split(",")[1];
       const url = await gorselYukle(b64, "kunye");
       const guncelMeta = { ...p, kunyeGorselUrl: url };
       await projeGuncelle(hedefId, guncelMeta);
@@ -4362,6 +4444,10 @@ function KitapStudyo({ authFetch, token }) {
   // görseline metin bindirmek için ham görsele ihtiyaç var.
   const urlDenB64Al = async (url) => {
     const r = await fetch(url);
+    // EKLENDİ (18 Ağu 2026): durum kodu kontrol EDİLMİYORDU. Ölü bir Blob
+    // adresi 404 döndüğünde hata gövdesi (XML/HTML) base64'e çevrilip
+    // "görsel" olarak akışa giriyordu.
+    if (!r.ok) throw new Error(`Görsel indirilemedi (HTTP ${r.status})`);
     const blob = await r.blob();
     return new Promise((resolve, reject) => {
       const okuyucu = new FileReader();
@@ -4380,9 +4466,15 @@ function KitapStudyo({ authFetch, token }) {
       const blob = await r.blob();
       const geciciUrl = URL.createObjectURL(blob);
       const a = document.createElement("a");
-      a.href = geciciUrl; a.download = dosyaAdi.endsWith(".png") ? dosyaAdi : dosyaAdi + ".png";
+      // DÜZELTİLDİ (18 Ağu 2026): içerik ne olursa olsun ".png" ekleniyordu;
+      // JPEG dosyalar .png adıyla iniyordu ve ön-uçuş kontrolünde reddediliyor.
+      // Uzantı artık dosyanın GERÇEK türünden geliyor.
+      const uzanti = blob.type === "image/jpeg" ? "jpg" : blob.type === "image/webp" ? "webp" : "png";
+      a.href = geciciUrl;
+      a.download = /\.(png|jpe?g|webp)$/i.test(dosyaAdi) ? dosyaAdi : `${dosyaAdi}.${uzanti}`;
       document.body.appendChild(a); a.click(); document.body.removeChild(a);
-      URL.revokeObjectURL(geciciUrl);
+      // Firefox'ta hemen iptal edilirse büyük dosya boş iniyordu.
+      setTimeout(() => URL.revokeObjectURL(geciciUrl), 2000);
     } catch { setHata("Görsel indirilemedi."); }
   };
 
@@ -4390,8 +4482,14 @@ function KitapStudyo({ authFetch, token }) {
   // + yazar adı bindirir (Capriola font, metin AI'ye çizdirilmiyor).
   const onKapakMetniBindir = async (hamB64, p) => {
     await fontHazirla(48, "Capriola");
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
       const img = new Image();
+      // EKLENDİ (18 Ağu 2026): onerror YOKTU — bozuk ya da ölü bir
+      // adres gelirse promise HİÇ sonuçlanmıyor, "Uygulanıyor..."
+      // sonsuza kadar dönüyordu. "Tüm kitaba uygula" ilk bozuk
+      // sayfada tamamen donuyordu.
+      const zamanAsimi = setTimeout(() => reject(new Error("Görsel 20 saniyede yüklenemedi")), 20000);
+      img.onerror = () => { clearTimeout(zamanAsimi); reject(new Error("Görsel yüklenemedi (bozuk ya da ölü adres)")); };
       img.onload = () => {
         const canvas = document.createElement("canvas");
         canvas.width = img.width; canvas.height = img.height;
@@ -4406,9 +4504,15 @@ function KitapStudyo({ authFetch, token }) {
         const sonY = metniSar(ctx, p.kitapAdi || "Kitap Adı", img.width / 2, img.height - bant * 0.62, img.width * 0.86, img.width * 0.09);
         if (p.yazarAdi) {
           ctx.font = `${Math.round(img.width * 0.036)}px Capriola, Georgia, serif`;
-          ctx.fillText(p.yazarAdi, img.width / 2, Math.max(sonY + img.width * 0.07, img.height - img.height * 0.05));
+          // DÜZELTİLDİ (18 Ağu 2026): Math.max yazar adını AŞAĞI itiyordu.
+      // İki satırlık bir başlıkta y=1035 çıkıyor, tuval 1024 — yazar adı
+      // kâğıdın dışında kalıyor ve hiç görünmüyordu. Üç satırda başlık da
+      // kayboluyordu. Sessizdi: hata yok, uyarı yok, önizlemede kapak
+      // "bitmiş" görünüyordu. Math.min ile yazar adı her zaman içeride.
+      ctx.fillText(p.yazarAdi, img.width / 2,
+        Math.min(sonY + img.width * 0.07, img.height - img.height * 0.06));
         }
-        resolve(canvas.toDataURL("image/jpeg", 0.72).split(",")[1]);
+        resolve(canvas.toDataURL("image/jpeg", 0.94).split(",")[1]);
       };
       img.src = "data:image/png;base64," + hamB64;
     });
@@ -4417,8 +4521,14 @@ function KitapStudyo({ authFetch, token }) {
   const arkaKapakMetniBindir = async (hamB64, p) => {
     await fontHazirla(32, "Capriola");
     const yazi = (p.kapakArkasiYazisi || "").trim();
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
       const img = new Image();
+      // EKLENDİ (18 Ağu 2026): onerror YOKTU — bozuk ya da ölü bir
+      // adres gelirse promise HİÇ sonuçlanmıyor, "Uygulanıyor..."
+      // sonsuza kadar dönüyordu. "Tüm kitaba uygula" ilk bozuk
+      // sayfada tamamen donuyordu.
+      const zamanAsimi = setTimeout(() => reject(new Error("Görsel 20 saniyede yüklenemedi")), 20000);
+      img.onerror = () => { clearTimeout(zamanAsimi); reject(new Error("Görsel yüklenemedi (bozuk ya da ölü adres)")); };
       img.onload = () => {
         const canvas = document.createElement("canvas");
         canvas.width = img.width; canvas.height = img.height;
@@ -4429,7 +4539,7 @@ function KitapStudyo({ authFetch, token }) {
         ctx.fillStyle = "#18181a"; ctx.textAlign = "left";
         ctx.font = `${Math.round(img.width * 0.032)}px Capriola, Georgia, serif`;
         metniSar(ctx, yazi, img.width * 0.12, kutuY + img.width * 0.06, img.width * 0.76, img.width * 0.045);
-        resolve(canvas.toDataURL("image/jpeg", 0.72).split(",")[1]);
+        resolve(canvas.toDataURL("image/jpeg", 0.94).split(",")[1]);
       };
       img.src = "data:image/png;base64," + hamB64;
     });
@@ -4493,6 +4603,17 @@ function KitapStudyo({ authFetch, token }) {
   //     kısıt yoktu — "yeni doğmak üzere olan yavru" ifadesi bu yüzden iki
   //     gövdeli zebraya dönüştü.
   // ============================================================
+
+  // EKLENDİ (18 Ağu 2026, denetim maddesi 196/197): karakter ve stil
+  // referansları 1024 SABİT kodluydu. Bu görseller basılmıyor ama BASILAN
+  // sayfanın detayını belirliyorlar — 1024'lük bir referanstan zebra çizgisi
+  // ya da kumaş dokusu okunmuyor, model uyduruyordu. En az 2048.
+  const referansBoyutu = (p) => {
+    const m = String(p?.boyut || "").match(/^(\d+)x(\d+)$/);
+    if (!m) return "2048x2048";
+    const g = Number(m[1]), y = Number(m[2]);
+    return (g >= 2048 || y >= 2048) ? `${g}x${y}` : "2048x2048";
+  };
 
   const YASAKLAR_TEMEL = [
     "No text, letters, numbers, signatures, watermarks, borders or frames anywhere in the image.",
@@ -4755,17 +4876,29 @@ function KitapStudyo({ authFetch, token }) {
       : sp);
     await projeGuncelle(seciliId, { ...seciliProje, spreadler: yeniSpreadler }, true);
   };
+  // DÜZELTİLDİ (18 Ağu 2026 — SESSİZ VERİ KAYBI): bu fonksiyon yalnız ekran
+  // state'ini güncelliyor, bellek kopyasına (aktifUretimVerisiRef)
+  // dokunmuyordu. projeOku() ise ÖNCE ref'e bakıyor. Kullanıcı metni
+  // düzeltip alandan çıkmadan arka plan üretimi kaydederse, ref'teki eski
+  // kopya sunucuya yazılıyor ve yazılan metin yok oluyordu.
   const spreadAlanGuncelle = (idx, alan, deger) => {
     const yeniSpreadler = seciliProje.spreadler.map((s, i) => i === idx ? { ...s, [alan]: deger } : s);
     const guncelMeta = { ...seciliProje, spreadler: yeniSpreadler };
     setSeciliProje(guncelMeta);
+    if (seciliId) aktifUretimVerisiRef.current[seciliId] = guncelMeta;
     return guncelMeta;
   };
   const spreadNumaralariGetir = (idx) => { const sol = 2 + idx * 2; return { solSayfa: sol, sagSayfa: sol + 1 }; };
 
   // Geniş (1536x1024) sayfa çifti görselini tarayıcıda ortadan ikiye böler.
-  const gorseliIkiyeBol = (b64Genis) => new Promise((resolve) => {
+  const gorseliIkiyeBol = (b64Genis) => new Promise((resolve, reject) => {
     const img = new Image();
+    // EKLENDİ (18 Ağu 2026): onerror YOKTU — bozuk ya da ölü bir
+    // adres gelirse promise HİÇ sonuçlanmıyor, "Uygulanıyor..."
+    // sonsuza kadar dönüyordu. "Tüm kitaba uygula" ilk bozuk
+    // sayfada tamamen donuyordu.
+    const zamanAsimi = setTimeout(() => reject(new Error("Görsel 20 saniyede yüklenemedi")), 20000);
+    img.onerror = () => { clearTimeout(zamanAsimi); reject(new Error("Görsel yüklenemedi (bozuk ya da ölü adres)")); };
     img.onload = () => {
       const yarim = img.width / 2;
       const sol = document.createElement("canvas"); sol.width = yarim; sol.height = img.height;
@@ -4885,8 +5018,14 @@ function KitapStudyo({ authFetch, token }) {
   const sayfaMetniBindir = async (hamB64, metin, sayfaNo, stilGirdi) => {
     await fontHazirla(28, "Capriola");
     const st = metinStiliCoz(stilGirdi);
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
       const img = new Image();
+      // EKLENDİ (18 Ağu 2026): onerror YOKTU — bozuk ya da ölü bir
+      // adres gelirse promise HİÇ sonuçlanmıyor, "Uygulanıyor..."
+      // sonsuza kadar dönüyordu. "Tüm kitaba uygula" ilk bozuk
+      // sayfada tamamen donuyordu.
+      const zamanAsimi = setTimeout(() => reject(new Error("Görsel 20 saniyede yüklenemedi")), 20000);
+      img.onerror = () => { clearTimeout(zamanAsimi); reject(new Error("Görsel yüklenemedi (bozuk ya da ölü adres)")); };
       img.onload = () => {
         const canvas = document.createElement("canvas");
         canvas.width = img.width; canvas.height = img.height;
@@ -4950,6 +5089,16 @@ function KitapStudyo({ authFetch, token }) {
     const p = projeOku(hedefId);
     const s = p.spreadler[idx];
     if (!s.sahne?.trim()) { if (hedefId === seciliId) setHata("Önce bu sayfa çifti için bir sahne yaz."); return; }
+    // EKLENDİ (18 Ağu 2026): diğer üretim fonksiyonlarında eşzamanlılık
+    // koruması vardı, burada YOKTU. Arka planda "Tümünü Üret" çalışırken bu
+    // düğme aktif kalıyor, aynı sayfa iki kez üretilip İKİ KEZ
+    // ücretlendiriliyordu.
+    const kilitAnahtari = `${hedefId}:${idx}`;
+    if (uretimKilidiRef.current.has(kilitAnahtari)) {
+      if (hedefId === seciliId) setHata("Bu sayfa çifti zaten üretiliyor.");
+      return;
+    }
+    uretimKilidiRef.current.add(kilitAnahtari);
     if (hedefId === seciliId) { setSpreadUretiliyorIdx(idx); setHata(""); }
     try {
       const { solSayfa, sagSayfa } = spreadNumaralariGetir(idx);
@@ -4998,8 +5147,11 @@ function KitapStudyo({ authFetch, token }) {
         : sp);
       const guncelMeta = { ...guncelP, spreadler: yeniSpreadler };
       await projeGuncelle(hedefId, guncelMeta);
-    } catch (err) { if (hedefId === seciliId) setHata("Hata: " + err.message); }
-    finally { if (hedefId === seciliId) setSpreadUretiliyorIdx(null); }
+    } catch (err) { uretimHatasiBildir(hedefId, `Sayfa çifti ${idx + 1}`, err); }
+    finally {
+      uretimKilidiRef.current.delete(`${hedefId}:${idx}`);
+      if (hedefId === seciliId) setSpreadUretiliyorIdx(null);
+    }
   };
 
   // Metni YENİDEN DİZ — sahneyi yeniden üretmeden.
@@ -5150,7 +5302,7 @@ function KitapStudyo({ authFetch, token }) {
     // {mevcut, toplam} objesi olarak tutuluyor — yüzde ve balon animasyonu
     // hesaplayabilmek için.
     setAktifUretimIlerleme((m) => ({ ...m, [hedefId]: { mevcut: 0, toplam: 1 } }));
-    if (hedefId === seciliId) { setTumunuUretiliyorMu(true); setHata(""); }
+    if (hedefId === seciliId) setHata("");
     const beklemeMs = Math.max(0, (parseFloat(beklemeSn) || 0) * 1000);
     try {
       let p = projeOku(hedefId);
@@ -5168,7 +5320,6 @@ function KitapStudyo({ authFetch, token }) {
       setAktifUretimIlerleme((m) => ({ ...m, [hedefId]: { mevcut: toplamSpread, toplam: toplamSpread } }));
     } finally {
       setAktifUretimIlerleme((m) => { const y = { ...m }; delete y[hedefId]; return y; });
-      if (hedefId === seciliId) setTumunuUretiliyorMu(false);
     }
   };
 
@@ -5244,9 +5395,63 @@ function KitapStudyo({ authFetch, token }) {
   // (Genişlik/Yükseklik cm alanları, tanımsızsa 20x20) kuruluyor. Görselin
   // en-boy oranı korunur: sayfa genişliği projeden gelir, yüksekliği görselin
   // oranından türetilir — böylece kapak gibi farklı oranlı sayfalar ezilmez.
+  // EKLENDİ (18 Ağu 2026 — denetim maddeleri 219/228/229):
+  //
+  // PDF, eksik ve hatalı kitapları SESSİZCE üretiyordu. Zebra projesinde:
+  //  · 4 sayfa çiftinin görseli hiç yoktu → PDF "30 sayfa" diyip son 8 sayfayı
+  //    atlıyordu, uyarı çıkmıyordu
+  //  · 18 çiftin 18'inde de yazı basılmamıştı → içinde tek kelime hikâye
+  //    olmayan bir resim albümü matbaaya gidebiliyordu
+  //  · iç blok 29 sayfaydı (künye + 2N her zaman TEK sayı) → ciltlenemez
+  //  · yazısız sayfalar PNG olduğu için dosya 100-140 MB oluyordu
+  //
+  // Artık PDF'ten ÖNCE kontrol ediliyor ve ne eksikse tek tek söyleniyor.
+  const baskiKontrolListesi = () => {
+    const p = seciliProje;
+    const spreadler = p.spreadler || [];
+    const sorunlar = [];
+
+    const gorselsiz = spreadler.filter((s) => !s.solGorselUrl || !s.sagGorselUrl).length;
+    if (gorselsiz) sorunlar.push({ agirlik: "engel", metin: `${gorselsiz} sayfa çiftinin görseli eksik — bu sayfalar PDF'e HİÇ girmez, kitap eksik basılır.` });
+
+    const yazisiz = spreadler.filter((s) => !s.yaziBasildi && (s.solMetin || s.sagMetin)).length;
+    if (yazisiz) sorunlar.push({ agirlik: "engel", metin: `${yazisiz} sayfa çiftinde metin görsele BASILMAMIŞ — o sayfalar hem yazısız hem numarasız çıkar. "Yazı Tasarımını Düzenle → Tüm kitaba uygula" ile basılmalı.` });
+
+    if (!p.onKapakGorselUrl) sorunlar.push({ agirlik: "engel", metin: "Ön kapak üretilmemiş." });
+    if (!p.arkaKapakGorselUrl) sorunlar.push({ agirlik: "uyari", metin: "Arka kapak üretilmemiş." });
+    if (!p.kunyeGorselUrl) sorunlar.push({ agirlik: "uyari", metin: "Künye sayfası üretilmemiş." });
+
+    // Cilt matematiği: iç blok çift sayı olmalı, tel dikişte 4'ün katı.
+    const icSayfa = (p.kunyeGorselUrl ? 1 : 0) + spreadler.filter((s) => s.solGorselUrl).length * 2;
+    if (icSayfa % 2 !== 0) sorunlar.push({ agirlik: "engel", metin: `İç blok ${icSayfa} sayfa — TEK sayı, ciltlenemez. Bir boş sayfa eklenmeli.` });
+    else if (icSayfa % 4 !== 0) sorunlar.push({ agirlik: "uyari", metin: `İç blok ${icSayfa} sayfa — 4'ün katı değil. Tel dikiş isteniyorsa ${Math.ceil(icSayfa / 4) * 4} sayfaya tamamlanmalı.` });
+
+    const cm = Number(p.ozellikler?.genislikCm);
+    if (!cm) sorunlar.push({ agirlik: "engel", metin: "Sayfa genişliği (cm) girilmemiş — PDF 20 cm varsayacak ve çözünürlük yanlış hesaplanacak." });
+
+    if (!p.ozellikler?.isbn) sorunlar.push({ agirlik: "uyari", metin: "ISBN girilmemiş — barkod üretilemez, kitap perakendede satılamaz." });
+
+    // Taşma payı ve renk profili hattın yapısal eksikleri — gizlenmiyor.
+    sorunlar.push({ agirlik: "bilgi", metin: "Taşma payı (bleed) yok: tam kanana tasarımda kenarda beyaz şerit riski var. Matbaaya 'taşma payı olmadan geldi' denmeli." });
+    sorunlar.push({ agirlik: "bilgi", metin: "PDF RGB — CMYK dönüşümü ve toplam mürekkep sınırı uygulanmadı. Matbaanın dönüştürmesi gerekiyor." });
+
+    return sorunlar;
+  };
+
   const pdfIndir = async () => {
     const liste = kitapSayfaListesiOlustur();
     if (liste.length === 0) { setHata("Henüz indirilecek bir görsel yok."); return; }
+
+    // Engel seviyesindeki sorunlar varsa ÖNCE söyle.
+    const kontrol = baskiKontrolListesi();
+    const engeller = kontrol.filter((k) => k.agirlik === "engel");
+    if (engeller.length) {
+      const devam = window.confirm(
+        `Bu kitap baskıya hazır DEĞİL — ${engeller.length} engel var:\n\n` +
+        engeller.map((e, i) => `${i + 1}. ${e.metin}`).join("\n\n") +
+        `\n\nYine de PDF indirilsin mi? (Kontrol amaçlı indirmek isteyebilirsin — ama bu dosya matbaaya GÖNDERİLMEMELİ.)`);
+      if (!devam) return;
+    }
     setPdfHazirlaniyorMu(true); setHata("");
     try {
       await jspdfYukle();
@@ -5274,7 +5479,7 @@ function KitapStudyo({ authFetch, token }) {
         // adresi, bozuk dosya) promise HİÇBİR ZAMAN sonuçlanmıyor ve "PDF
         // hazırlanıyor" sonsuza kadar dönüyordu. Kullanıcıya da hiçbir şey
         // söylenmiyordu. Artık hem hata hem zaman aşımı yakalanıyor.
-        const boyut = await new Promise((resolve) => {
+        const boyut = await new Promise((resolve, reject) => {
           const img = new Image();
           const zamanAsimi = setTimeout(() => resolve(null), 20000);
           img.onload = () => { clearTimeout(zamanAsimi); resolve({ w: img.width, h: img.height }); };
@@ -5301,6 +5506,7 @@ function KitapStudyo({ authFetch, token }) {
       setPdfSonDurum({
         sayfa: liste.length - atlanan.length, enDusukDpi: enDusuk, genislikCm,
         yeterli: enDusuk >= 240,
+        kontrol,
         // Atlanan sayfa SESSİZCE geçilmiyor — eksik bir kitap dosyası
         // matbaaya gidebilir.
         atlanan,
@@ -5321,7 +5527,7 @@ function KitapStudyo({ authFetch, token }) {
     if (hedefId === seciliId) { setEkPozUretiliyorIdx(karakterIdx); setHata(""); }
     try {
       const sahne = `Aynı karakterin farklı bir poz/ifadesi: ${tarif}. Karakter kimliği birebir korunmalı (yüz, saç, kıyafet aynı) — sadece poz, ifade ya da kamera açısı değişsin.`;
-      const gorselUrl = await gorselIsteYenidenDeneyerek({ karakterTanimi: p.stilTanimi, sahne, model: p.model, kalite: p.kalite, boyut: "1024x1024", referansGorseller: [karakter.gorselUrl] });
+      const gorselUrl = await gorselIsteYenidenDeneyerek({ karakterTanimi: p.stilTanimi, sahne, model: p.model, kalite: p.kalite, boyut: referansBoyutu(p), referansGorseller: [karakter.gorselUrl] });
       const guncelP = projeOku(hedefId);
       const yeniKarakterler = guncelP.karakterler.map((k, i) => i === karakterIdx ? { ...k, ekPozlar: [...(k.ekPozlar || []), { tarif, gorselUrl }] } : k);
       const guncelMeta = { ...guncelP, karakterler: yeniKarakterler };
@@ -5600,6 +5806,36 @@ function KitapStudyo({ authFetch, token }) {
                   </span>
                 </div>
 
+                {/* EKLENDİ (18 Ağu 2026): FONT UYARISI. Capriola yüklenmezse
+                    kitap yedek fontla basılır ve sayfa düzeni değişir —
+                    bu sessizce olamaz. */}
+                {fontUyarisi && (
+                  <div style={{ marginBottom: 12, padding: "10px 13px", borderRadius: 10, fontSize: 12.5, lineHeight: 1.55,
+                    background: "#FDECEC", border: "1px solid #E3B4B4", color: "#8B2E2E" }}>
+                    <b>Yazı tipi sorunu.</b> {fontUyarisi}
+                  </div>
+                )}
+
+                {/* EKLENDİ (18 Ağu 2026): ARKA PLAN HATALARI. Önceden başka
+                    projedeyken oluşan hatalar hiçbir yere gitmiyordu. */}
+                {uretimHatalari.length > 0 && (
+                  <div style={{ marginBottom: 12, padding: "10px 13px", borderRadius: 10, fontSize: 12,
+                    background: "#FDECEC", border: "1px solid #E3B4B4", color: "#8B2E2E" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <b>{uretimHatalari.length} üretim hatası</b>
+                      <span onClick={() => setUretimHatalari([])} style={{ marginLeft: "auto", cursor: "pointer", fontSize: 11.5, textDecoration: "underline" }}>temizle</span>
+                    </div>
+                    <div style={{ marginTop: 6, maxHeight: 130, overflowY: "auto" }}>
+                      {uretimHatalari.map((h, i) => (
+                        <div key={i} style={{ fontSize: 11.5, paddingTop: 3 }}>
+                          <span style={{ color: "#a06060" }}>{h.zaman.toLocaleTimeString("tr-TR")} · proje {h.projeId} · </span>
+                          <b>{h.nerede}</b> — {h.mesaj}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
                 {/* EKLENDİ (14 Ağu 2026): ① STİL SEÇİMİ aşaması — gerçek akış.
                     Bağımsız araçtaki mantıkla aynı: bir örnek sahne yazılır,
                     3 stil adayı için o sahne üretilir, biri onaylanınca
@@ -5635,7 +5871,10 @@ function KitapStudyo({ authFetch, token }) {
                         <select style={stil.input} value={seciliProje.boyut || "1024x1536"}
                           onChange={(e) => { const gm = { ...seciliProje, boyut: e.target.value }; setSeciliProje(gm); metaKaydet(gm); }}>
                           <option value="1024x1536">1024×1536 (dikey)</option>
-                          <option value="1024x1024">1024×1024 (kare)</option>
+                          <option value="1024x1024">1024×1024 (kare) — 130 dpi, sadece test</option>
+                          <option value="2048x2048">2048×2048 (kare) — 260 dpi ✔ baskı</option>
+                          <option value="2048x3072">2048×3072 (dikey) — 260 dpi ✔ baskı</option>
+                          <option value="3072x2048">3072×2048 (yatay) — 260 dpi ✔ baskı</option>
                         </select>
                         <input style={stil.input} placeholder="Genişlik (cm)" value={seciliProje.ozellikler?.genislikCm || ""}
                           onChange={(e) => ozellikGuncelle("genislikCm", e.target.value)} onBlur={() => metaKaydet(seciliProje)} />
@@ -5821,14 +6060,61 @@ function KitapStudyo({ authFetch, token }) {
                     {!(seciliProje.karakterler || []).length && (
                       <div style={{ fontSize: 13, color: "#6f6f6c", marginBottom: 16 }}>Henüz karakter eklenmedi.</div>
                     )}
-                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(160px,1fr))", gap: 12, marginBottom: 20 }}>
+                    {/* ÖLÇEK TABLOSU — devamlılığın en etkili tek hamlesi */}
+                    <div style={{ marginBottom: 16, padding: "12px 14px", borderRadius: 10,
+                      background: seciliProje.olcekTablosuUrl ? "#E8F3EC" : "#FFFBF4",
+                      border: `1px solid ${seciliProje.olcekTablosuUrl ? "#A8D5B8" : "#F0C48A"}` }}>
+                      <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+                        <b style={{ fontSize: 13, color: seciliProje.olcekTablosuUrl ? "#1E5E30" : "#7A4A12" }}>
+                          📏 Ölçek Tablosu {seciliProje.olcekTablosuUrl ? "✔ hazır" : "— henüz yok"}
+                        </b>
+                        <button style={{ ...stil.buton, fontSize: 12, padding: "6px 14px", ...(olcekUretiliyorMu ? stil.butonPasif : {}) }}
+                          disabled={olcekUretiliyorMu} onClick={olcekTablosuUret}>
+                          {olcekUretiliyorMu ? "Üretiliyor…" : seciliProje.olcekTablosuUrl ? "Yeniden üret (ücretli)" : "Üret (ücretli)"}
+                        </button>
+                        {seciliProje.olcekTablosuUrl && (
+                          <span onClick={() => setBuyukGorsel({ url: seciliProje.olcekTablosuUrl, baslik: "Ölçek tablosu" })}
+                            style={{ fontSize: 12, color: "#3E8ED0", cursor: "pointer" }}>⤢ Gör</span>
+                        )}
+                      </div>
+                      <div style={{ fontSize: 11.5, color: seciliProje.olcekTablosuUrl ? "#3f6a4c" : "#8a6a3a", marginTop: 5, lineHeight: 1.55 }}>
+                        Tüm karakterlerin <b>doğru göreli boyutta</b> yan yana durduğu tek referans kare. Varsa
+                        her sayfaya gönderilir — model "aslan zebradan ne kadar büyük" sorusunu her sayfada
+                        yeniden tahmin etmez. <b>"Aslan bazen küçük bazen büyük" sorununun doğrudan karşılığı.</b>
+                        {seciliProje.olcekTablosuUrl && <> Şu an her üretime ekleniyor.</>}
+                      </div>
+                      {seciliProje.olcekTablosuUrl && (
+                        <img src={seciliProje.olcekTablosuUrl} alt="Ölçek tablosu" loading="lazy"
+                          style={{ width: "100%", maxWidth: 520, marginTop: 8, borderRadius: 8, border: "1px solid #E4DFD1", cursor: "zoom-in" }}
+                          onClick={() => setBuyukGorsel({ url: seciliProje.olcekTablosuUrl, baslik: "Ölçek tablosu" })} />
+                      )}
+                    </div>
+
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(240px,1fr))", gap: 12, marginBottom: 20 }}>
                       {(seciliProje.karakterler || []).map((k, idx) => (
                         <div key={idx} style={{ background: "#fff", border: "1.5px solid #E4DFD1", borderRadius: 12, padding: 12 }}>
                           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
                             <div style={{ fontFamily: "'Fredoka', sans-serif", fontWeight: 600, fontSize: 13 }}>{k.ad}</div>
                             <span onClick={() => karakterSil(idx)} style={{ color: "#C0392B", cursor: "pointer", fontSize: 12 }}>✕</span>
                           </div>
-                          <div style={{ fontSize: 11, color: "#6f6f6c", margin: "4px 0 8px", minHeight: 30 }}>{k.aciklama}</div>
+                          {/* EKLENDİ (18 Ağu 2026 — denetim maddesi 69, en
+                              önemli eksik): künye alanları YALNIZ ayrıştırıcıdan
+                              yazılabiliyordu. Zebra projesinde 9 karakterin
+                              9'unun da tanımı boştu; kullanıcı boşluğu görüyor
+                              ama DOLDURAMIYORDU. Tek çare metni yeniden
+                              ayrıştırmaktı, o da tüm görselleri siliyordu.
+                              "Karakter devamlılığı yok" şikâyetinin doğrudan
+                              sebebi buydu. */}
+                          <KarakterKunyesi
+                            k={k} idx={idx} stil={stil}
+                            guncelle={(alan, deger) => {
+                              const yeni = (seciliProje.karakterler || []).map((kk, i) => i === idx ? { ...kk, [alan]: deger } : kk);
+                              const meta = { ...seciliProje, karakterler: yeni };
+                              setSeciliProje(meta);
+                              if (seciliId) aktifUretimVerisiRef.current[seciliId] = meta;
+                              return meta;
+                            }}
+                            kaydet={() => metaKaydet(seciliProje)} />
                           {k.gorselUrl && (
                             <div style={{ marginBottom: 8 }}>
                               <img src={k.gorselUrl} style={{ width: "100%", borderRadius: 8 }} />
@@ -6383,6 +6669,29 @@ function KitapStudyo({ authFetch, token }) {
                           {aktifUretimIlerleme[seciliProje.id] ? `Üretiliyor... (%${Math.round((aktifUretimIlerleme[seciliProje.id].mevcut / Math.max(1, aktifUretimIlerleme[seciliProje.id].toplam)) * 100)})` : "Eksik Olanları Üret (Sırayla)"}
                         </button>
                         <button style={stil.buton} disabled={kitapSayfaListesiOlustur().length === 0} onClick={kitapiOnizle}>Kitabı Önizle</button>
+                        {/* EKLENDİ (18 Ağu 2026): BASKI KONTROL LİSTESİ.
+                            Eksik kitap sessizce PDF'e dönüşüyordu. */}
+                        {(() => {
+                          const kontrol = baskiKontrolListesi();
+                          const engel = kontrol.filter((k) => k.agirlik === "engel");
+                          const uyari = kontrol.filter((k) => k.agirlik === "uyari");
+                          const bilgi = kontrol.filter((k) => k.agirlik === "bilgi");
+                          return (
+                            <div style={{ width: "100%", marginBottom: 10, padding: "11px 13px", borderRadius: 10, fontSize: 12, lineHeight: 1.6,
+                              background: engel.length ? "#FDECEC" : uyari.length ? "#FFF4E5" : "#E8F3EC",
+                              border: `1px solid ${engel.length ? "#E3B4B4" : uyari.length ? "#F0C48A" : "#A8D5B8"}`,
+                              color: engel.length ? "#8B2E2E" : uyari.length ? "#7A4A12" : "#1E5E30" }}>
+                              <b>
+                                {engel.length ? `Baskıya hazır değil — ${engel.length} engel`
+                                 : uyari.length ? `Basılabilir — ${uyari.length} eksik var`
+                                 : "Baskı kontrolleri geçti"}
+                              </b>
+                              {engel.map((k, i) => <div key={"e" + i}>✖ {k.metin}</div>)}
+                              {uyari.map((k, i) => <div key={"u" + i}>! {k.metin}</div>)}
+                              {bilgi.map((k, i) => <div key={"b" + i} style={{ opacity: .75, fontSize: 11.5 }}>· {k.metin}</div>)}
+                            </div>
+                          );
+                        })()}
                         <button style={{ ...stil.buton, ...(pdfHazirlaniyorMu ? stil.butonPasif : {}) }}
                           disabled={pdfHazirlaniyorMu || kitapSayfaListesiOlustur().length === 0} onClick={pdfIndir}>
                           {pdfHazirlaniyorMu
@@ -6396,7 +6705,12 @@ function KitapStudyo({ authFetch, token }) {
                             background: pdfSonDurum.yeterli ? "#E8F3EC" : "#FFF4E5",
                             border: `1px solid ${pdfSonDurum.yeterli ? "#A8D5B8" : "#F0C48A"}`,
                             color: pdfSonDurum.yeterli ? "#1E5E30" : "#7A4A12" }}>
-                            <b>PDF indirildi — {pdfSonDurum.sayfa} sayfa, {pdfSonDurum.genislikCm}×{pdfSonDurum.genislikCm} cm.</b>{" "}
+                            <b>PDF indirildi — {pdfSonDurum.sayfa} sayfa, {pdfSonDurum.genislikCm} cm genişlik.</b>{" "}
+                            {pdfSonDurum.atlanan?.length > 0 && (
+                              <div style={{ marginTop: 4, color: "#8B2E2E" }}>
+                                ✖ <b>{pdfSonDurum.atlanan.length} sayfa PDF'e GİREMEDİ</b> (indirilemedi): {pdfSonDurum.atlanan.join(", ")}
+                              </div>
+                            )}
                             En düşük sayfa çözünürlüğü <b>{pdfSonDurum.enDusukDpi} dpi</b>.
                             {pdfSonDurum.yeterli
                               ? " Baskı için yeterli."
@@ -6488,6 +6802,84 @@ function KitapStudyo({ authFetch, token }) {
           <KitapStudyoTestAlani authFetch={authFetch} stil={stil} seciliProje={seciliProje} seciliId={seciliId} sonOlcum={sonOlcum} />
         </HataSinir>
       </div>
+    </div>
+  );
+}
+
+// ============================================================
+// KARAKTER KÜNYESİ (18 Ağu 2026 — denetim maddesi 69)
+//
+// Zebra projesinin verisi: 9 karakterin 9'unun da tanımı boş, 8'inin
+// referans görseli yok. Prompt motoru bu alanları OKUYOR ama panelde
+// YAZACAK hiçbir input yoktu — yalnız metin ayrıştırıcısı doldurabiliyordu,
+// o da tüm görselleri silerek.
+//
+// Bu bileşen o boşluğu kapatıyor. Kritik alan ÖLÇEK ÇIPASI: karakterin
+// boyunu başka bir karaktere göre tarif eder ve aynı karakterin sayfadan
+// sayfaya küçülüp büyümesini engelleyen tek şeydir.
+// ============================================================
+function KarakterKunyesi({ k, stil, guncelle, kaydet }) {
+  const [acik, setAcik] = React.useState(false);
+
+  const eksikler = [
+    !(k.tanimEn || k.aciklama) && "tanım",
+    !k.olcekCipasi && "ölçek çıpası",
+    !k.ayirtEdiciIsaret && "ayırt edici işaret",
+  ].filter(Boolean);
+
+  const alan = (ad, etiket, ipucu, cokSatir) => (
+    <div style={{ marginTop: 6 }}>
+      <label style={{ fontSize: 10.5, color: "#6f6f6c", display: "block" }}>{etiket}</label>
+      {cokSatir
+        ? <textarea style={{ ...stil.input, fontSize: 11.5, padding: "6px 8px", minHeight: 44 }} placeholder={ipucu}
+            value={k[ad] || ""} onChange={(e) => guncelle(ad, e.target.value)} onBlur={kaydet} />
+        : <input style={{ ...stil.input, fontSize: 11.5, padding: "6px 8px" }} placeholder={ipucu}
+            value={k[ad] || ""} onChange={(e) => guncelle(ad, e.target.value)} onBlur={kaydet} />}
+    </div>
+  );
+
+  return (
+    <div style={{ margin: "4px 0 8px" }}>
+      <div onClick={() => setAcik(!acik)} style={{ cursor: "pointer", fontSize: 11, lineHeight: 1.5,
+        color: eksikler.length ? "#7A4A12" : "#1E5E30" }}>
+        {eksikler.length
+          ? <><b>Künye eksik:</b> {eksikler.join(", ")} <span style={{ color: "#3E8ED0" }}>— {acik ? "gizle" : "doldur"}</span></>
+          : <><b>Künye tam ✔</b> <span style={{ color: "#3E8ED0" }}>— {acik ? "gizle" : "düzenle"}</span></>}
+      </div>
+
+      {!acik && (k.olcekCipasi || k.aciklama) && (
+        <div style={{ fontSize: 10.5, color: "#8e897a", marginTop: 3 }}>
+          {k.olcekCipasi ? `📏 ${k.olcekCipasi}` : k.aciklama}
+        </div>
+      )}
+
+      {acik && (
+        <div style={{ marginTop: 6, paddingTop: 6, borderTop: "1px dashed #E4DFD1" }}>
+          {alan("aciklama", "Tanım (Türkçe)", "örn. üç haftalık zebra yavrusu", true)}
+          {alan("tanimEn", "Tanım (İngilizce — prompt'a bu gider)", "a newborn zebra foal with damp fur", true)}
+          {alan("olcekCipasi", "📏 Ölçek çıpası (İngilizce) — EN ÖNEMLİ", "shoulder height reaches an adult zebra's knee")}
+          <div style={{ fontSize: 10, color: "#8a6a3a", marginTop: 2, lineHeight: 1.45 }}>
+            Boyu BAŞKA bir karaktere göre yaz. Bu alan boşken karakter her sayfada
+            farklı büyüklükte çizilir.
+          </div>
+          {alan("ayirtEdiciIsaret", "Ayırt edici işaret (İngilizce)", "white sock on left hind leg")}
+          <div style={{ marginTop: 6 }}>
+            <label style={{ fontSize: 10.5, color: "#6f6f6c", display: "block" }}>Yaş evresi</label>
+            <select style={{ ...stil.input, fontSize: 11.5, padding: "6px 8px" }}
+              value={k.yasEvresi || ""} onChange={(e) => { guncelle("yasEvresi", e.target.value); }} onBlur={kaydet}>
+              <option value="">—</option>
+              {["yenidogan", "yavru", "genc", "yetiskin", "yasli"].map((y) => <option key={y} value={y}>{y}</option>)}
+            </select>
+          </div>
+          <div style={{ marginTop: 6 }}>
+            <label style={{ fontSize: 10.5, color: "#6f6f6c", display: "block" }}>Bu karaktere özel yasaklar (virgülle)</label>
+            <input style={{ ...stil.input, fontSize: 11.5, padding: "6px 8px" }} placeholder="no horns, not a donkey"
+              value={(k.yasakListesi || []).join(", ")}
+              onChange={(e) => guncelle("yasakListesi", e.target.value.split(",").map((x) => x.trim()).filter(Boolean))}
+              onBlur={kaydet} />
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -7338,6 +7730,9 @@ function KreatifUretim({ authFetch }) {
     const reader = new FileReader();
     reader.onload = () => {
       const img = new Image();
+      // Burası Promise değil, FileReader geri çağrısı — reject yok.
+      // Bozuk dosyada sessiz kalmak yerine kullanıcıya söylüyoruz.
+      img.onerror = () => setUyariFn("Görsel okunamadı — dosya bozuk olabilir.");
       img.onload = () => setOnizlemeFn({ dataUrl: reader.result, dosyaAdi: f.name, genislik: img.naturalWidth, yukseklik: img.naturalHeight });
       img.src = reader.result;
     };
