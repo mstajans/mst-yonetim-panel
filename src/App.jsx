@@ -1515,6 +1515,12 @@ function EditorRaporu({ authFetch, eserId, eserAdi, karakterSayisi, acikBaslangi
       // sunucu beklemede döner; o zaman kısa bekleyip tekrar denenir —
       // aksi hâlde döngü boşa dönüp saniyeler içinde tükeniyordu.
       let bosTur = 0;
+      // İLERLEMESİZ TUR SAYACI. Sunucu tarafında bir mantık hatası olursa
+      // (19 Ağu: yazım yarısı modelin çıktısına bakılarak belirleniyordu ve
+      // model bir başlığı atlayınca aynı yarı sonsuza kadar yazılıyordu)
+      // panel bunu fark etmeli. Her turda para harcanıyor; sessizce dönmek
+      // en pahalı hata biçimi.
+      let sonDurum = "", ayniDurum = 0;
       for (let tur = 0; tur < 400; tur++) {
         if (durdurRef.current) { setMesaj("Durduruldu — okunan bölümler kaydedildi, “Kaldığı yerden sürdür” ile devam edebilirsin."); break; }
         let r, d;
@@ -1543,8 +1549,20 @@ function EditorRaporu({ authFetch, eserId, eserAdi, karakterSayisi, acikBaslangi
           asama: d.asama || "okuma", okunan: d.okunan ?? 0, toplam: d.toplam ?? 0,
           yuzde: d.ilerleme, beklemede: !!d.beklemede, okunamayan: d.okunamayan || 0,
           yenidenDeniyor: !!d.yenidenDeniyor, deneme: d.deneme, not: d.mesaj,
-          sonHata: d.sonHata,
+          sonHata: d.sonHata, yazimGrubu: d.yazimGrubu, yazimToplam: d.yazimToplam,
         });
+
+        // Aynı durumda saymakla bitmeyen tur = ilerleme yok demektir.
+        const durumImzasi = `${d.asama}|${d.okunan}|${d.yazimGrubu ?? ""}|${d.deneme ?? ""}`;
+        if (durumImzasi === sonDurum) {
+          ayniDurum++;
+          if (ayniDurum >= 6 && !d.beklemede) {
+            setMesaj("Üretim aynı adımda takıldı ve ilerlemiyor — boşuna kredi harcamamak için durduruldu. " +
+              (d.mesaj ? `Son durum: ${d.mesaj}` : "") + (d.sonHata ? ` Son hata: ${d.sonHata}` : ""));
+            break;
+          }
+        } else { sonDurum = durumImzasi; ayniDurum = 0; }
+
         if (d.beklemede) {
           // İlerleme yok — kilit başkasında. Boşuna hızlı denemek yerine bekle.
           bosTur++;
@@ -1703,7 +1721,10 @@ function EditorRaporu({ authFetch, eserId, eserAdi, karakterSayisi, acikBaslangi
                   ? (ilerleme.not || "Eksik bölümler okunuyor…")
                   : ilerleme.asama === "yazim" || ilerleme.asama === "yazim-sirada" || (ilerleme.okunan >= ilerleme.toplam && ilerleme.toplam)
                     // Rapor iki yarımda yazılıyor; sunucu hangi yarıda olduğunu bildiriyor.
-                    ? (ilerleme.not || "Bütün bölümler okundu — rapor yazılıyor…")
+                    ? (ilerleme.not ||
+                        (ilerleme.yazimGrubu
+                          ? `Rapor yazılıyor — ${ilerleme.yazimGrubu}/${ilerleme.yazimToplam || 2} yarı bitti`
+                          : "Bütün bölümler okundu — rapor yazılıyor…"))
                     : `Eser okunuyor — ${ilerleme.okunan}/${ilerleme.toplam} bölüm`}
             {ilerleme.okunamayan > 0 && (
               <b style={{ color: THEME.warn }}> · {ilerleme.okunamayan} bölüm okunamadı</b>
