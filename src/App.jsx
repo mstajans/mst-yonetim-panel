@@ -1696,9 +1696,12 @@ function EditorRaporu({ authFetch, eserId, eserAdi, karakterSayisi, acikBaslangi
               ? `Sıra bekleniyor — ${ilerleme.okunan}/${ilerleme.toplam} bölüm okundu. Bu eser için başka bir okuma sürüyor.`
               : ilerleme.yenidenDeniyor
                 ? (ilerleme.not || `Yeniden deneniyor (${ilerleme.deneme}. deneme)…`)
-                : ilerleme.asama === "yazim" || ilerleme.asama === "yazim-sirada" || (ilerleme.okunan >= ilerleme.toplam && ilerleme.toplam)
-                  ? "Bütün bölümler okundu — rapor yazılıyor…"
-                  : `Eser okunuyor — ${ilerleme.okunan}/${ilerleme.toplam} bölüm`}
+                : ilerleme.asama === "eksik"
+                  ? (ilerleme.not || "Eksik bölümler okunuyor…")
+                  : ilerleme.asama === "yazim" || ilerleme.asama === "yazim-sirada" || (ilerleme.okunan >= ilerleme.toplam && ilerleme.toplam)
+                    // Rapor iki yarımda yazılıyor; sunucu hangi yarıda olduğunu bildiriyor.
+                    ? (ilerleme.not || "Bütün bölümler okundu — rapor yazılıyor…")
+                    : `Eser okunuyor — ${ilerleme.okunan}/${ilerleme.toplam} bölüm`}
             {ilerleme.okunamayan > 0 && (
               <b style={{ color: THEME.warn }}> · {ilerleme.okunamayan} bölüm okunamadı</b>
             )}
