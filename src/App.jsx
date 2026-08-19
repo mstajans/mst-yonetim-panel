@@ -1503,7 +1503,10 @@ function EditorRaporu({ authFetch, eserId, eserAdi, karakterSayisi, acikBaslangi
   const uret = async (bastanBasla) => {
     if (uretiliyor) return;
     setUretiliyor(true); setMesaj(""); durdurRef.current = false;
-    setIlerleme({ asama: "okuma", okunan: 0, toplam: Math.ceil((karakterSayisi || 0) / 24000) || 1 });
+    // Bölüm sayısını sunucu bildirir; buradaki değer yalnız ilk saniyeler için
+    // bir tahmindir. Sunucudaki parça boyutu değişirse burası yanıltmasın diye
+    // ilk yanıtla birlikte üzerine yazılıyor.
+    setIlerleme({ asama: "okuma", okunan: 0, toplam: Math.ceil((karakterSayisi || 0) / 12000) || 1 });
     try {
       // Her tur BİR bölüm okur. Kilit doluysa (başka bir sekme/istek sürüyorsa)
       // sunucu beklemede döner; o zaman kısa bekleyip tekrar denenir —
@@ -1661,7 +1664,7 @@ function EditorRaporu({ authFetch, eserId, eserAdi, karakterSayisi, acikBaslangi
               ? `Sıra bekleniyor — ${ilerleme.okunan}/${ilerleme.toplam} bölüm okundu. Bu eser için başka bir okuma sürüyor.`
               : ilerleme.yenidenDeniyor
                 ? (ilerleme.not || `Yeniden deneniyor (${ilerleme.deneme}. deneme)…`)
-                : ilerleme.asama === "yazim" || (ilerleme.okunan >= ilerleme.toplam && ilerleme.toplam)
+                : ilerleme.asama === "yazim" || ilerleme.asama === "yazim-sirada" || (ilerleme.okunan >= ilerleme.toplam && ilerleme.toplam)
                   ? "Bütün bölümler okundu — rapor yazılıyor…"
                   : `Eser okunuyor — ${ilerleme.okunan}/${ilerleme.toplam} bölüm`}
             {ilerleme.okunamayan > 0 && (
@@ -1756,7 +1759,7 @@ function EditorRaporu({ authFetch, eserId, eserAdi, karakterSayisi, acikBaslangi
         <div style={{ ...kutu, background: THEME.panelBgAlt, fontSize: 12.5, color: THEME.textMuted, lineHeight: 1.7 }}>
           Bu eser için henüz editör raporu üretilmemiş. “Editör Raporu Üret” eserin
           <b style={{ color: THEME.textLight }}> tamamını </b>
-          {karakterSayisi ? `(${karakterSayisi.toLocaleString("tr-TR")} karakter, ${Math.ceil(karakterSayisi / 24000)} bölüm) ` : ""}
+          {karakterSayisi ? `(${karakterSayisi.toLocaleString("tr-TR")} karakter, yaklaşık ${Math.ceil(karakterSayisi / 12000)} bölüm) ` : ""}
           okur; sayfanın üstündeki bulgular listesi bundan ayrı bir <i>içerik güvenliği taramasıdır</i>, editör raporu değildir.
         </div>
       )}
