@@ -1493,6 +1493,7 @@ function EditorRaporu({ authFetch, eserId, eserAdi, karakterSayisi, acikBaslangi
         setVeri(d.eser);
         setTaslak(d.eser.editor_raporu?.bolumler || null);
         setOkunamayanlar(d.okunamayanlar || []);
+        setVeri((v) => ({ ...(v || {}), ...d.eser, okunanBolum: d.okunanBolum || 0 }));
       } else setMesaj(d.error || "Rapor okunamadı.");
     } catch { setMesaj("Sunucuya ulaşılamadı."); }
     finally { setYukleniyor(false); }
@@ -1675,7 +1676,9 @@ function EditorRaporu({ authFetch, eserId, eserAdi, karakterSayisi, acikBaslangi
 
       <div style={{ marginBottom: 10 }}>
         <button onClick={() => uret(false)} disabled={uretiliyor} style={dugme(true)}>
-          {uretiliyor ? "Üretiliyor…" : paket ? "Kaldığı yerden sürdür" : "Editör Raporu Üret (tam metin)"}
+          {uretiliyor ? "Üretiliyor…"
+            : (paket || (veri?.okunanBolum ?? 0) > 0) ? "Kaldığı yerden sürdür"
+            : "Editör Raporu Üret (tam metin)"}
         </button>
         {paket && <button onClick={() => uret(true)} disabled={uretiliyor} style={dugme(false, THEME.warn)}>Baştan üret</button>}
         {uretiliyor && <button onClick={() => { durdurRef.current = true; }} style={dugme(false, THEME.danger)}>Durdur</button>}
@@ -1810,6 +1813,24 @@ function EditorRaporu({ authFetch, eserId, eserAdi, karakterSayisi, acikBaslangi
           <span style={{ fontSize: 11.5, color: THEME.textMuted }}>
             Kaydetmek raporu yazara açmaz — açmak için “Onayla ve YAZARA AÇ”.
           </span>
+        </div>
+      )}
+
+      {/* KALDIĞI YERDEN SÜRME. Tarayıcı kapanınca döngü kesiliyor ama okunan
+          her bölüm sunucuda kayıtlı. Bu şerit, geri dönen kullanıcıya nerede
+          kalındığını ve TEK tuşla devam edebileceğini söylüyor — aksi hâlde
+          "baştan üret" düğmesine basma refleksi doğuyor ve okunmuş bölümlerin
+          parası yanıyor. */}
+      {!uretiliyor && veri && veri.editor_raporu_durum !== "onayli" &&
+       (veri.okunanBolum ?? 0) > 0 && !paket && (
+        <div style={{ ...kutu, borderColor: THEME.cyan, background: THEME.cyanBg }}>
+          <b style={{ fontSize: 12.5, color: THEME.cyan }}>Yarım kalmış bir okuma var</b>
+          <div style={{ fontSize: 12, color: THEME.textLight, margin: "4px 0 8px", lineHeight: 1.6 }}>
+            Bu eserin <b>{veri.okunanBolum}</b> bölümü okunmuş ve kayıtlı.
+            “Kaldığı yerden sürdür” bu bölümleri YENİDEN OKUMAZ; kaldığı yerden devam eder.
+            Sekmeyi kapatman bir şey kaybettirmez.
+          </div>
+          <button onClick={() => uret(false)} style={dugme(true)}>Kaldığı yerden sürdür</button>
         </div>
       )}
 
