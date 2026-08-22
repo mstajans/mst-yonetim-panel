@@ -17885,8 +17885,12 @@ export default function AdminPanel() {
     ["reklamTeklif", "Reklam Başvuruları"],
     ["eslesme", "Eşleşme Teşhisi"],
     ["isbn", "Toplu ISBN"],
-    ["kitapStudyo", "Kitap Resim Stüdyosu"],
-    ["yazarStudyoTakip", "Yazar Stüdyo Takibi"],
+    // ── STÜDYO BURADAN ÇIKARILDI (22 Ağu 2026) ──
+    // Kitap Stüdyosu ve Yazar Stüdyo Takibi artık YALNIZ
+    // tasarim.mstyayincilik.com'da. Sebebi yalnız düzen değil, yetki:
+    // stüdyo tasarımcı hesabıyla çalışıyor ve o hesabın satış, stok,
+    // sözleşme, cüzdan verilerine erişmemesi gerekiyor. İki iş aynı
+    // uygulamada durduğu sürece bu ayrım kâğıt üstünde kalıyordu.
     ["kullanicilar", "Kullanıcı Yönetimi"],
   ];
 
@@ -18037,8 +18041,6 @@ export default function AdminPanel() {
         {view === "reklamTeklif" && <ReklamBasvurulari authFetch={authFetch} />}
         {view === "eslesme" && <EslesmeTeshisi authFetch={authFetch} onSelectAuthor={(id) => { setView("authors"); setSelectedId(id); }} />}
         {view === "isbn" && <BulkIsbnUpload onSubmit={bulkIsbn} />}
-        {view === "kitapStudyo" && <KitapStudyo authFetch={authFetch} token={session?.token} />}
-        {view === "yazarStudyoTakip" && <YazarStudyoTakip authFetch={authFetch} />}
         {view === "kullanicilar" && <KullaniciYonetimi authFetch={authFetch} />}
       </div>
 
