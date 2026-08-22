@@ -1137,6 +1137,497 @@ function Overview({ authors, onSyncAll, authFetch }) {
 }
 
 // ============ Kullanıcı (Admin) Yönetimi ============
+// ═══════════════════════════════════════════════════════════════════════
+// YAZAR STÜDYO TAKİBİ — 19 Ağustos 2026
+//
+// Asıl soru "kim hangi adımda" değil, "KİM NE KADARDIR BEKLİYOR". Tıkanan
+// yazarı ancak o şikâyet edince öğrenmek sürecin en pahalı hatası: yazar
+// üç hafta bekler, kimse fark etmez, sonra telefon gelir.
+//
+// Eşikler (3 gün sarı, 7 gün kırmızı) SUNUCUDA hesaplanıyor — panel ile
+// rapor aynı sayıyı söylesin diye.
+// ═══════════════════════════════════════════════════════════════════════
+function YazarStudyoTakip({ authFetch }) {
+  const [veri, setVeri] = React.useState(null);
+  const [yukleniyor, setYukleniyor] = React.useState(true);
+  const [mesaj, setMesaj] = React.useState(null);
+  const [calisan, setCalisan] = React.useState(null);
+
+  const yukle = React.useCallback(async () => {
+    try {
+      const r = await authFetch("/api/admin/yazar-studyo/projeler");
+      const d = await r.json();
+      setVeri(r.ok ? d : null);
+      if (!r.ok) setMesaj({ ok: false, text: d.error || "Yüklenemedi." });
+    } catch { setMesaj({ ok: false, text: "Sunucuya ulaşılamadı." }); }
+    finally { setYukleniyor(false); }
+  }, [authFetch]);
+  React.useEffect(() => { yukle(); }, [yukle]);
+
+  const hatirlat = async (id, yazarAdi) => {
+    setCalisan(id); setMesaj(null);
+    try {
+      const r = await authFetch(`/api/admin/yazar-studyo/${id}/hatirlat`, { method: "POST", body: "{}" });
+      const d = await r.json();
+      setMesaj(r.ok ? { ok: true, text: `${yazarAdi || "Yazara"} hatırlatma gönderildi.` }
+                    : { ok: false, text: d.error || "Gönderilemedi." });
+    } catch { setMesaj({ ok: false, text: "Sunucuya ulaşılamadı." }); }
+    finally { setCalisan(null); }
+  };
+
+  // ── Maliyet ──
+  // İSTEK ÜZERİNE yükleniyor: takip ekranı her açıldığında 5000 satırlık
+  // bir toplama yaptırmanın anlamı yok, bu soru her gün sorulmuyor.
+  const [maliyet, setMaliyet] = React.useState(null);
+  const [maliyetYukleniyor, setMaliyetYukleniyor] = React.useState(false);
+  const maliyetYukle = async () => {
+    setMaliyetYukleniyor(true); setMesaj(null);
+    try {
+      const r = await authFetch("/api/admin/yazar-studyo/maliyet");
+      const d = await r.json();
+      if (r.ok) setMaliyet(d); else setMesaj({ ok: false, text: d.error || "Maliyet raporu alınamadı." });
+    } catch { setMesaj({ ok: false, text: "Sunucuya ulaşılamadı." }); }
+    finally { setMaliyetYukleniyor(false); }
+  };
+  // Görsel üretim maliyetleri kuruşun altında olabiliyor. 3 haneye
+  // yuvarlamak gerçek gideri "$0.000" diye gösterip yok sayar.
+  const usdYaz = (v) => {
+    const n = Number(v || 0);
+    if (n === 0) return "$0";
+    if (n < 0.001) return `$${n.toFixed(6)}`;
+    if (n < 1) return `$${n.toFixed(4)}`;
+    return `$${n.toFixed(2)}`;
+  };
+
+  // ── Devralma talebini kapatma ──
+  // İki yol: ek revize hakkı vermek ya da elden hazırlanmış çizimi yüklemek.
+  // "Bakıldı" deyip kapatmak YOK — yazarın elinde somut bir şey olmalı.
+  const [devirSira, setDevirSira] = React.useState(null);   // "projeId:sira"
+  const [devirEkHak, setDevirEkHak] = React.useState(1);
+  const [devirUrl, setDevirUrl] = React.useState("");
+  const [devirMesaj, setDevirMesaj] = React.useState("");
+  const devirGonder = async (projeId, sira) => {
+    setCalisan(`d${projeId}:${sira}`); setMesaj(null);
+    try {
+      const govde = devirUrl.trim()
+        ? { gorselUrl: devirUrl.trim(), mesaj: devirMesaj.trim() }
+        : { ekHak: Number(devirEkHak) || 1, mesaj: devirMesaj.trim() };
+      const r = await authFetch(`/api/admin/yazar-studyo/${projeId}/karakter/${sira}/devral`,
+        { method: "POST", body: JSON.stringify(govde) });
+      const d = await r.json();
+      if (!r.ok) { setMesaj({ ok: false, text: d.error || "Kapatılamadı." }); return; }
+      setMesaj({ ok: true, text: "Talep kapatıldı, yazara bildirim gitti." });
+      setDevirSira(null); setDevirUrl(""); setDevirMesaj(""); setDevirEkHak(1);
+      await yukle();
+    } catch { setMesaj({ ok: false, text: "Sunucuya ulaşılamadı." }); }
+    finally { setCalisan(null); }
+  };
+
+  // Ürün sağlığı raporu da istek üzerine: her açılışta tüm projeleri
+  // taramanın günlük takip ekranında yeri yok.
+  const [istatistik, setIstatistik] = React.useState(null);
+  const [istatYukleniyor, setIstatYukleniyor] = React.useState(false);
+  const istatYukle = async () => {
+    setIstatYukleniyor(true); setMesaj(null);
+    try {
+      const r = await authFetch("/api/admin/yazar-studyo/istatistik");
+      const d = await r.json();
+      if (r.ok) setIstatistik(d); else setMesaj({ ok: false, text: d.error || "Rapor alınamadı." });
+    } catch { setMesaj({ ok: false, text: "Sunucuya ulaşılamadı." }); }
+    finally { setIstatYukleniyor(false); }
+  };
+
+  // ── Sayfa yorumları (Faz 4.2) ──
+  // Cevaplanmamış yorumlar takip ekranının parçası: yazar yorum bıraktı
+  // ve kimse bakmadıysa, verdiğimiz "her yorum cevaplanır" sözü boşa çıkar.
+  const [yorumlar, setYorumlar] = React.useState(null);
+  const [yorumYukleniyor, setYorumYukleniyor] = React.useState(false);
+  const [acikYanit, setAcikYanit] = React.useState(null);
+  const [yanitMetni, setYanitMetni] = React.useState("");
+  const yorumlariYukle = React.useCallback(async () => {
+    setYorumYukleniyor(true);
+    try {
+      const r = await authFetch("/api/admin/yazar-studyo/yorumlar");
+      const d = await r.json();
+      setYorumlar(r.ok ? d : null);
+    } catch { /* takip ekranının geri kalanı çalışmaya devam etsin */ }
+    finally { setYorumYukleniyor(false); }
+  }, [authFetch]);
+  React.useEffect(() => { yorumlariYukle(); }, [yorumlariYukle]);
+
+  const yorumKapat = async (id, durum) => {
+    // "uygulanmadi" gerekçesiz kapatılamıyor — sunucu da reddediyor,
+    // arayüz de sormadan göndermiyor.
+    if (durum === "uygulanmadi" && yanitMetni.trim().length < 10) {
+      setMesaj({ ok: false, text: "Uygulanmayan yorumu gerekçesiz kapatamazsınız." });
+      return;
+    }
+    setCalisan(`y${id}`); setMesaj(null);
+    try {
+      const r = await authFetch(`/api/admin/yazar-studyo/yorum/${id}`,
+        { method: "POST", body: JSON.stringify({ durum, yanit: yanitMetni.trim() }) });
+      const d = await r.json();
+      if (!r.ok) { setMesaj({ ok: false, text: d.error || "Kapatılamadı." }); return; }
+      setMesaj({ ok: true, text: "Yorum kapatıldı, yazara bildirim gitti." });
+      setAcikYanit(null); setYanitMetni("");
+      await yorumlariYukle();
+    } catch { setMesaj({ ok: false, text: "Sunucuya ulaşılamadı." }); }
+    finally { setCalisan(null); }
+  };
+
+  const ASAMA = { stil: "Stil seçimi bekliyor", karakter: "Karakter onayı bekliyor",
+    kapak: "Kapak seçimi bekliyor", tamamlandi: "Tamamlandı" };
+  const RENK = { kritik: THEME.danger, uyari: THEME.warn, yok: THEME.textMuted };
+
+  if (yukleniyor) return <div style={{ color: THEME.textMuted, fontSize: 13 }}>Yükleniyor…</div>;
+
+  const o = veri?.ozet || {};
+  const kutu = (etiket, deger, renk) => (
+    <div style={{ background: THEME.panelBg, border: `1px solid ${THEME.border}`, borderRadius: 8,
+      padding: "12px 16px", minWidth: 130 }}>
+      <div style={{ fontSize: 11, color: THEME.textMuted, marginBottom: 4 }}>{etiket}</div>
+      <div style={{ fontSize: 22, fontWeight: 700, color: renk || THEME.textLight, fontFamily: FONT_MONO }}>{deger}</div>
+    </div>
+  );
+
+  return (
+    <div>
+      <h2 style={{ color: THEME.textLight, fontFamily: FONT, fontSize: 20, marginBottom: 6 }}>Yazar Stüdyo Takibi</h2>
+      <div style={{ color: THEME.textMuted, fontSize: 12.5, marginBottom: 18 }}>
+        Yazarlar kendi kitaplarının stilini seçiyor ve karakterlerini onaylıyor.
+        Bu ekran kimin nerede <b>tıkandığını</b> gösterir — {veri?.esikler?.uyariGun ?? 3} günden fazla
+        bekleyen sarı, {veri?.esikler?.kritikGun ?? 7} günden fazla bekleyen kırmızı.
+      </div>
+
+      {mesaj && (
+        <div style={{ marginBottom: 16, fontSize: 13, padding: "10px 14px", borderRadius: 8,
+          color: mesaj.ok ? THEME.success : THEME.danger, background: THEME.panelBg,
+          border: `1px solid ${mesaj.ok ? THEME.success : THEME.danger}` }}>{mesaj.text}</div>
+      )}
+
+      <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 22 }}>
+        {kutu("Toplam", o.toplam ?? 0)}
+        {kutu("Stil bekleyen", o.stilBekleyen ?? 0)}
+        {kutu("Karakter bekleyen", o.karakterBekleyen ?? 0)}
+        {kutu("Kapak bekleyen", o.kapakBekleyen ?? 0)}
+        {kutu("Tamamlanan", o.tamamlanan ?? 0, THEME.success)}
+        {kutu("TIKANAN", o.tikanan ?? 0, o.tikanan ? THEME.danger : THEME.textMuted)}
+        {kutu("Revize hakkı dolan", o.hakkiDolan ?? 0, o.hakkiDolan ? THEME.warn : THEME.textMuted)}
+        {kutu("Devir bekleyen", o.devralmaBekleyen ?? 0, o.devralmaBekleyen ? THEME.danger : THEME.textMuted)}
+      </div>
+
+      {(veri?.projeler || []).length === 0 && (
+        <div style={{ color: THEME.textMuted, fontSize: 13, background: THEME.panelBg,
+          border: `1px solid ${THEME.border}`, borderRadius: 8, padding: 20 }}>
+          Henüz yazar stüdyo süreci başlatılmamış.
+        </div>
+      )}
+
+      {(veri?.projeler || []).map((p) => (
+        <div key={p.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between",
+          gap: 14, flexWrap: "wrap", background: THEME.panelBg, borderRadius: 8, marginBottom: 8,
+          padding: "13px 16px",
+          border: `1px solid ${p.tikanma === "kritik" ? THEME.danger
+            : p.tikanma === "uyari" ? THEME.warn : THEME.border}` }}>
+          <div style={{ flex: 1, minWidth: 240 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+              <b style={{ color: THEME.textLight, fontSize: 14 }}>{p.yazarAdi || `Yazar #${p.authorId}`}</b>
+              <span style={{ color: THEME.textMuted, fontSize: 13 }}>{p.kitapAdi || "(kitap adı yok)"}</span>
+            </div>
+            <div style={{ color: THEME.textMuted, fontSize: 12.5, marginTop: 5 }}>
+              {ASAMA[p.asama] || p.asama}
+              {p.stilAdi && <> · stil: <b style={{ color: THEME.textLight }}>{p.stilAdi}</b></>}
+              {p.karakterSayisi > 0 && <> · karakter: <b style={{ color: THEME.textLight }}>{p.onaylanan}/{p.karakterSayisi}</b> onaylı</>}
+              {p.toplamRevize > 0 && <> · {p.toplamRevize} revize</>}
+            </div>
+            {p.hakkiDolan > 0 && (
+              <div style={{ color: THEME.warn, fontSize: 12, marginTop: 5 }}>
+                ⚠ {p.hakkiDolan} karakterde revize hakkı doldu ve hâlâ onaylanmadı — yazar tıkanmış olabilir.
+              </div>
+            )}
+
+            {/* ── DEVRALMA TALEPLERİ ────────────────────────────────────
+                Yazar "siz yapın" dedi. Bu satır görünmezse çıkış kapısı
+                duvara açılmış bir kapı olur. */}
+            {(p.devralmaBekleyen || []).map((d) => (
+              <div key={d.sira} style={{ marginTop: 8, padding: "10px 12px", borderRadius: 8,
+                background: THEME.bg, border: `1px solid ${THEME.warn}` }}>
+                <div style={{ fontSize: 12.5, color: THEME.warn }}>
+                  <b>Devralma talebi — {d.ad}</b>
+                </div>
+                <div style={{ fontSize: 12.5, color: THEME.textMuted, marginTop: 4, lineHeight: 1.55 }}>
+                  “{d.istek}”
+                </div>
+                {d.gorselUrl && (
+                  <a href={d.gorselUrl} target="_blank" rel="noreferrer"
+                    style={{ fontSize: 12, color: THEME.cyan }}>Son çizimi aç</a>
+                )}
+                {devirSira !== `${p.id}:${d.sira}` ? (
+                  <div style={{ marginTop: 8 }}>
+                    <Btn small variant="ghost" onClick={() => { setDevirSira(`${p.id}:${d.sira}`); setDevirUrl(""); setDevirMesaj(""); }}>
+                      Talebi kapat
+                    </Btn>
+                  </div>
+                ) : (
+                  <div style={{ marginTop: 10, display: "grid", gap: 8 }}>
+                    <div style={{ fontSize: 11.5, color: THEME.textMuted }}>
+                      Ya ek revize hakkı verin (istem düzeltildiyse) ya da elden hazırladığınız
+                      çizimin https adresini girin. Adres girilirse ek hak dikkate alınmaz.
+                    </div>
+                    <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                      <span style={{ fontSize: 12, color: THEME.textMuted }}>Ek revize hakkı</span>
+                      <input type="number" min={1} max={5} value={devirEkHak}
+                        onChange={(e) => setDevirEkHak(e.target.value)}
+                        style={{ width: 64, padding: "6px 8px", borderRadius: 6, fontSize: 13,
+                          background: THEME.bg, border: `1px solid ${THEME.border}`, color: THEME.textLight }} />
+                    </div>
+                    <input value={devirUrl} onChange={(e) => setDevirUrl(e.target.value)}
+                      placeholder="https://… elden hazırlanan çizimin adresi (isteğe bağlı)"
+                      style={{ padding: "8px 10px", borderRadius: 6, fontSize: 13,
+                        background: THEME.bg, border: `1px solid ${THEME.border}`, color: THEME.textLight }} />
+                    <input value={devirMesaj} onChange={(e) => setDevirMesaj(e.target.value)}
+                      placeholder="Yazara iletilecek kısa not (isteğe bağlı)"
+                      style={{ padding: "8px 10px", borderRadius: 6, fontSize: 13,
+                        background: THEME.bg, border: `1px solid ${THEME.border}`, color: THEME.textLight }} />
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <Btn small disabled={calisan === `d${p.id}:${d.sira}`}
+                        onClick={() => devirGonder(p.id, d.sira)}>
+                        {calisan === `d${p.id}:${d.sira}` ? "…" : "Gönder"}
+                      </Btn>
+                      <Btn small variant="ghost" onClick={() => setDevirSira(null)}>Vazgeç</Btn>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+
+          <div style={{ display: "flex", alignItems: "center", gap: 12, flexShrink: 0 }}>
+            <div style={{ textAlign: "right" }}>
+              <div style={{ fontSize: 11, color: THEME.textMuted }}>bekleme</div>
+              <div style={{ fontFamily: FONT_MONO, fontSize: 16, fontWeight: 700, color: RENK[p.tikanma] }}>
+                {p.asama === "tamamlandi" ? "—" : `${p.beklemeGun} gün`}
+              </div>
+            </div>
+            {p.asama !== "tamamlandi" && (
+              <Btn small variant={p.tikanma === "kritik" ? "danger" : "ghost"}
+                disabled={calisan === p.id} onClick={() => hatirlat(p.id, p.yazarAdi)}>
+                {calisan === p.id ? "…" : "Hatırlat"}
+              </Btn>
+            )}
+          </div>
+        </div>
+      ))}
+
+      {/* ── SAYFA YORUMLARI ─────────────────────────────────────────────
+          Yazara "her yorum cevaplanır" sözü verildi. O söz ancak bu
+          listeye bakılırsa tutulur. */}
+      {(yorumlar?.yorumlar || []).length > 0 && (
+        <div style={{ marginTop: 26, background: THEME.panelBg, border: `1px solid ${THEME.warn}`,
+          borderRadius: 8, padding: "16px 18px" }}>
+          <b style={{ color: THEME.textLight, fontSize: 14 }}>
+            Cevap bekleyen sayfa yorumu: {yorumYukleniyor ? "…" : yorumlar.bekleyen}
+          </b>
+          <div style={{ color: THEME.textMuted, fontSize: 12.5, marginTop: 3, marginBottom: 12 }}>
+            Yazara her yorumun cevaplanacağı söylendi. Uygulanmayan yorum gerekçesiz kapatılamaz.
+          </div>
+          {yorumlar.yorumlar.map((y) => (
+            <div key={y.id} style={{ padding: "11px 13px", borderRadius: 8, marginBottom: 8,
+              background: THEME.bg, border: `1px solid ${THEME.border}` }}>
+              <div style={{ fontSize: 12.5, color: THEME.textMuted }}>
+                <b style={{ color: THEME.textLight }}>{y.yazarAdi || `Yazar #${y.authorId}`}</b>
+                {" · "}{y.kitapAdi || "(kitap adı yok)"}{" · "}{y.sira + 1}. sayfa çifti
+              </div>
+              <div style={{ fontSize: 13, color: THEME.textLight, marginTop: 6, lineHeight: 1.55 }}>
+                “{y.yorum}”
+              </div>
+              {acikYanit !== y.id ? (
+                <div style={{ marginTop: 9 }}>
+                  <Btn small variant="ghost" onClick={() => { setAcikYanit(y.id); setYanitMetni(""); }}>
+                    Cevapla ve kapat
+                  </Btn>
+                </div>
+              ) : (
+                <div style={{ marginTop: 9, display: "grid", gap: 8 }}>
+                  <input value={yanitMetni} onChange={(e) => setYanitMetni(e.target.value)}
+                    placeholder="Yazara iletilecek not (uygulanmadıysa zorunlu)"
+                    style={{ padding: "8px 10px", borderRadius: 6, fontSize: 13,
+                      background: THEME.panelBg, border: `1px solid ${THEME.border}`, color: THEME.textLight }} />
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    <Btn small disabled={calisan === `y${y.id}`} onClick={() => yorumKapat(y.id, "uygulandi")}>
+                      Uygulandı
+                    </Btn>
+                    <Btn small variant="ghost" disabled={calisan === `y${y.id}`}
+                      onClick={() => yorumKapat(y.id, "uygulanmadi")}>
+                      Uygulanmadı
+                    </Btn>
+                    <Btn small variant="ghost" onClick={() => setAcikYanit(null)}>Vazgeç</Btn>
+                  </div>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* ── ÜRÜN SAĞLIĞI ────────────────────────────────────────────────
+          Hangi stiller seçiliyor, yazarlar en çok neyi düzelttiriyor.
+          İkinci soru daha değerli: cevap sürekli aynı başlıksa sorun
+          revizede değil karakter çıkarımındadır. */}
+      <div style={{ marginTop: 26, background: THEME.panelBg, border: `1px solid ${THEME.border}`,
+        borderRadius: 8, padding: "16px 18px" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+          <div>
+            <b style={{ color: THEME.textLight, fontSize: 14 }}>Ürün sağlığı</b>
+            <div style={{ color: THEME.textMuted, fontSize: 12.5, marginTop: 3 }}>
+              Stil seçim dağılımı ve revize deseni. Veri biriktikçe anlamlanır.
+            </div>
+          </div>
+          <Btn small variant="ghost" disabled={istatYukleniyor} onClick={istatYukle}>
+            {istatYukleniyor ? "…" : istatistik ? "Yenile" : "Raporu getir"}
+          </Btn>
+        </div>
+
+        {istatistik && (
+          <div style={{ marginTop: 16 }}>
+            {/* Yorumlar EN ÜSTTE: ham sayı kimseyi harekete geçirmiyor. */}
+            {(istatistik.yorumlar || []).map((y, i) => (
+              <div key={i} style={{ fontSize: 12.5, color: THEME.textLight, background: THEME.bg,
+                border: `1px solid ${THEME.border}`, borderRadius: 8, padding: "10px 13px",
+                marginBottom: 8, lineHeight: 1.55 }}>{y}</div>
+            ))}
+
+            <div style={{ display: "flex", gap: 12, flexWrap: "wrap", margin: "14px 0" }}>
+              {kutu("Kitap", istatistik.ozet?.proje ?? 0)}
+              {kutu("Karakter", istatistik.ozet?.karakterSayisi ?? 0)}
+              {kutu("Karakter başına revize", istatistik.ozet?.karakterBasinaRevize ?? 0)}
+              {kutu("Kapak yenileyen", istatistik.ozet?.kapakYenileyen ?? 0)}
+              {kutu("Devir talebi", istatistik.ozet?.devralmaTalebi ?? 0,
+                istatistik.ozet?.devralmaTalebi ? THEME.warn : THEME.textMuted)}
+            </div>
+
+            <div style={{ fontSize: 12, color: THEME.textMuted, margin: "0 0 6px" }}>
+              Stil seçimi ({istatistik.ozet?.stilSecen ?? 0} kitap)
+            </div>
+            {(istatistik.stiller || []).map((s) => (
+              <div key={s.kod} style={{ display: "flex", alignItems: "center", gap: 10, padding: "3px 0" }}>
+                <span style={{ fontSize: 12.5, width: 160, color: s.adet ? THEME.textLight : THEME.textFaint }}>
+                  {s.ad}
+                </span>
+                <span style={{ flex: 1, height: 8, background: THEME.bg, borderRadius: 4, overflow: "hidden" }}>
+                  <span style={{ display: "block", height: "100%", width: `${s.yuzde}%`,
+                    background: s.adet ? THEME.cyan : "transparent" }} />
+                </span>
+                <span style={{ fontFamily: FONT_MONO, fontSize: 12, width: 70, textAlign: "right",
+                  color: s.adet ? THEME.textMuted : THEME.textFaint }}>
+                  {s.adet} · %{s.yuzde}
+                </span>
+              </div>
+            ))}
+
+            <div style={{ fontSize: 12, color: THEME.textMuted, margin: "18px 0 6px" }}>
+              Revize istekleri ({istatistik.revize?.toplamIstek ?? 0} istek)
+            </div>
+            {(istatistik.revize?.etiketler || []).map((e) => (
+              <div key={e.kod} style={{ display: "flex", alignItems: "center", gap: 10, padding: "3px 0" }}>
+                <span style={{ fontSize: 12.5, width: 160, color: e.adet ? THEME.textLight : THEME.textFaint }}>
+                  {e.ad}
+                </span>
+                <span style={{ flex: 1, height: 8, background: THEME.bg, borderRadius: 4, overflow: "hidden" }}>
+                  <span style={{ display: "block", height: "100%", width: `${e.yuzde}%`,
+                    background: e.adet ? THEME.secondary : "transparent" }} />
+                </span>
+                <span style={{ fontFamily: FONT_MONO, fontSize: 12, width: 70, textAlign: "right",
+                  color: e.adet ? THEME.textMuted : THEME.textFaint }}>
+                  {e.adet} · %{e.yuzde}
+                </span>
+              </div>
+            ))}
+            {/* Yöntemi gizlemek, yaklaşık bir sayıyı kesinmiş gibi göstermek olurdu. */}
+            <div style={{ fontSize: 11.5, color: THEME.textFaint, marginTop: 8, lineHeight: 1.5 }}>
+              {istatistik.revize?.yontem}
+              {istatistik.revize?.siniflanamayan > 0
+                && ` ${istatistik.revize.siniflanamayan} istek hiçbir başlığa girmedi.`}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* ── MALİYET ─────────────────────────────────────────────────────
+          "Bu kitap bize kaça mal oldu?" Ücretli ek revizeye fiyat
+          konacaksa cevabı buradan gelmeli — tahminden değil. */}
+      <div style={{ marginTop: 26, background: THEME.panelBg, border: `1px solid ${THEME.border}`,
+        borderRadius: 8, padding: "16px 18px" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+          <div>
+            <b style={{ color: THEME.textLight, fontSize: 14 }}>Üretim maliyeti</b>
+            <div style={{ color: THEME.textMuted, fontSize: 12.5, marginTop: 3 }}>
+              Yazar ve kitap başına ölçülen görsel üretim gideri. Fiyat, Kitap Stüdyosu &gt; Fiyat ayarından okunuyor.
+            </div>
+          </div>
+          <Btn small variant="ghost" disabled={maliyetYukleniyor} onClick={maliyetYukle}>
+            {maliyetYukleniyor ? "…" : maliyet ? "Yenile" : "Raporu getir"}
+          </Btn>
+        </div>
+
+        {maliyet && (
+          <div style={{ marginTop: 16 }}>
+            <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 14 }}>
+              {kutu("Üretim", maliyet.genel?.adet ?? 0)}
+              {kutu("Toplam", usdYaz(maliyet.genel?.usd), THEME.textLight)}
+              {kutu("Başarısız", maliyet.genel?.basarisiz ?? 0,
+                maliyet.genel?.basarisiz ? THEME.warn : THEME.textMuted)}
+              {kutu("Ölçülemeyen", maliyet.genel?.olculemeyen ?? 0,
+                maliyet.genel?.olculemeyen ? THEME.warn : THEME.textMuted)}
+            </div>
+
+            {/* Eksikliği SÖYLEMEK zorunlu: ölçülemeyen üretim 0 sayılırsa
+                toplam olduğundan ucuz görünür ve fiyat yanlış konur. */}
+            {maliyet.not && (
+              <div style={{ color: THEME.warn, fontSize: 12.5, marginBottom: 14 }}>⚠ {maliyet.not}</div>
+            )}
+            {maliyet.sinir && (
+              <div style={{ color: THEME.warn, fontSize: 12.5, marginBottom: 14 }}>⚠ {maliyet.sinir}</div>
+            )}
+
+            <div style={{ fontSize: 12, color: THEME.textMuted, margin: "0 0 6px" }}>Kitap başına</div>
+            {(maliyet.projeler || []).length === 0 && (
+              <div style={{ color: THEME.textMuted, fontSize: 12.5 }}>Henüz kayıt yok.</div>
+            )}
+            {(maliyet.projeler || []).map((p) => (
+              <div key={p.projeId} style={{ display: "flex", justifyContent: "space-between", gap: 12,
+                flexWrap: "wrap", padding: "8px 0", borderBottom: `1px solid ${THEME.border}` }}>
+                <div style={{ fontSize: 13, color: THEME.textLight }}>
+                  {p.kitapAdi || `Proje #${p.projeId}`}
+                  <span style={{ color: THEME.textMuted }}> · {p.yazarAdi || `Yazar #${p.authorId}`}</span>
+                  <div style={{ color: THEME.textMuted, fontSize: 11.5, marginTop: 2 }}>
+                    {p.adet} üretim
+                    {Object.entries(p.amaclar || {}).map(([k, v]) => ` · ${k}: ${v}`).join("")}
+                    {p.olculemeyen > 0 && ` · ${p.olculemeyen} ölçülemedi`}
+                  </div>
+                </div>
+                <div style={{ fontFamily: FONT_MONO, fontSize: 14, color: THEME.textLight }}>{usdYaz(p.usd)}</div>
+              </div>
+            ))}
+
+            <div style={{ fontSize: 12, color: THEME.textMuted, margin: "18px 0 6px" }}>Yazar başına</div>
+            {(maliyet.yazarlar || []).map((yz) => (
+              <div key={String(yz.authorId)} style={{ display: "flex", justifyContent: "space-between",
+                gap: 12, padding: "6px 0", fontSize: 13 }}>
+                <span style={{ color: THEME.textLight }}>
+                  {yz.yazarAdi || (yz.authorId == null ? "Yazara bağlı değil" : `Yazar #${yz.authorId}`)}
+                  <span style={{ color: THEME.textMuted }}> · {yz.adet} üretim</span>
+                </span>
+                <span style={{ fontFamily: FONT_MONO, color: THEME.textLight }}>{usdYaz(yz.usd)}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function KullaniciYonetimi({ authFetch }) {
   const [admins, setAdmins] = React.useState([]);
   const [benimId, setBenimId] = React.useState(null);
@@ -1148,6 +1639,15 @@ function KullaniciYonetimi({ authFetch }) {
   // Kendi şifre değiştirme
   const [eski, setEski] = React.useState("");
   const [yeni, setYeni] = React.useState("");
+  // EKLENDİ (19 Ağu 2026): backend'de /admin/tasarimcilar uçları (listele,
+  // ekle, sil) baştan beri vardı ama panelde KARŞILIĞI YOKTU — yani
+  // tasarim.mstyayincilik.com yayına alınsa bile oraya girecek hesabı
+  // açmanın hiçbir yolu yoktu. Tasarımcı yönetimi bilerek yöneticinin
+  // ekranında duruyor: hesabı yalnız yönetici açar ve yalnız yönetici siler.
+  const [tasarimcilar, setTasarimcilar] = React.useState([]);
+  const [tAd, setTAd] = React.useState("");
+  const [tEmail, setTEmail] = React.useState("");
+  const [tSifre, setTSifre] = React.useState("");
 
   const yukle = async () => {
     try {
@@ -1156,7 +1656,35 @@ function KullaniciYonetimi({ authFetch }) {
       setAdmins(d.admins || []); setBenimId(d.benimId);
     } catch { setAdmins([]); }
   };
-  React.useEffect(() => { yukle(); }, []);
+  const tasarimcilariYukle = async () => {
+    try {
+      const r = await authFetch("/api/admin/tasarimcilar");
+      const d = await r.json();
+      setTasarimcilar(d.tasarimcilar || []);
+    } catch { setTasarimcilar([]); }
+  };
+  React.useEffect(() => { yukle(); tasarimcilariYukle(); }, []);
+
+  const tasarimciEkle = async () => {
+    setMsg(null);
+    const r = await authFetch("/api/admin/tasarimcilar", {
+      // Alan adları backend'in beklediği gibi: ad / eposta / sifre.
+      // (name/email gönderilirse uç 400 "Ad ve e-posta gerekli" döner —
+      //  test-tasarimci-hesap.js bu uyumu koruyor.)
+      method: "POST", body: JSON.stringify({ ad: tAd, eposta: tEmail, sifre: tSifre }) });
+    const d = await r.json();
+    if (d.ok) {
+      setMsg({ ok: true, text: `Tasarımcı hesabı açıldı: ${d.tasarimci?.email || tEmail}. Bu hesap tasarim.mstyayincilik.com'a girer; yönetim paneline GİREMEZ.` });
+      setTAd(""); setTEmail(""); setTSifre(""); tasarimcilariYukle();
+    } else setMsg({ ok: false, text: d.error });
+  };
+  const tasarimciSil = async (id, ad) => {
+    if (!window.confirm(`${ad} adlı tasarımcının erişimini kapatmak istediğine emin misin?\n\nHesap silinir; ürettiği kitap projeleri SİLİNMEZ.`)) return;
+    const r = await authFetch(`/api/admin/tasarimcilar/${id}`, { method: "DELETE" });
+    const d = await r.json();
+    if (d.ok) { setMsg({ ok: true, text: `${ad} erişimi kapatıldı.` }); tasarimcilariYukle(); }
+    else setMsg({ ok: false, text: d.error });
+  };
 
   const adminEkle = async () => {
     setMsg(null);
@@ -1206,6 +1734,41 @@ function KullaniciYonetimi({ authFetch }) {
         <input style={inp} placeholder="E-posta" value={yEmail} onChange={(e) => setYEmail(e.target.value)} />
         <input style={inp} type="password" placeholder="Şifre (en az 8 hane)" value={ySifre} onChange={(e) => setYSifre(e.target.value)} />
         <Btn small variant="success" onClick={adminEkle}>Yönetici Ekle</Btn>
+      </div>
+
+      {/* Tasarımcı hesapları */}
+      <div style={{ background: THEME.panelBg, border: `1px solid ${THEME.border}`, borderRadius: 10, padding: 18, marginTop: 22 }}>
+        <div style={{ color: THEME.textLight, fontWeight: 700, fontSize: 14, marginBottom: 4 }}>Tasarımcı Hesapları</div>
+        <div style={{ color: THEME.textMuted, fontSize: 12, lineHeight: 1.6, marginBottom: 12 }}>
+          Bu hesaplar yalnız <b>tasarim.mstyayincilik.com</b>'a girer ve yalnız kitap stüdyosunu görür.
+          Satış, stok, sözleşme, telif, yazar verisi ve reklam bütçesine erişemezler — sınır sunucuda,
+          arayüzde değil.
+        </div>
+
+        {tasarimcilar.length === 0 && (
+          <div style={{ color: THEME.textMuted, fontSize: 12.5, marginBottom: 12 }}>
+            Henüz tasarımcı hesabı yok.
+          </div>
+        )}
+        {tasarimcilar.map((t) => (
+          <div key={t.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center",
+            background: THEME.panelBgAlt, border: `1px solid ${THEME.border}`, borderRadius: 8,
+            padding: "10px 14px", marginBottom: 8 }}>
+            <div>
+              <div style={{ color: THEME.textLight, fontWeight: 700, fontSize: 13.5 }}>{t.name}</div>
+              <div style={{ color: THEME.textMuted, fontSize: 12 }}>{t.email}</div>
+            </div>
+            <Btn small variant="danger" onClick={() => tasarimciSil(t.id, t.name)}>Erişimi Kapat</Btn>
+          </div>
+        ))}
+
+        <div style={{ borderTop: `1px solid ${THEME.border}`, marginTop: 12, paddingTop: 14 }}>
+          <div style={{ color: THEME.textLight, fontWeight: 600, fontSize: 13, marginBottom: 10 }}>+ Yeni Tasarımcı</div>
+          <input style={inp} placeholder="İsim" value={tAd} onChange={(e) => setTAd(e.target.value)} />
+          <input style={inp} placeholder="E-posta" value={tEmail} onChange={(e) => setTEmail(e.target.value)} />
+          <input style={inp} type="password" placeholder="Şifre (en az 8 hane)" value={tSifre} onChange={(e) => setTSifre(e.target.value)} />
+          <Btn small variant="success" onClick={tasarimciEkle}>Tasarımcı Hesabı Aç</Btn>
+        </div>
       </div>
 
       {/* Kendi şifreni değiştir */}
@@ -1461,6 +2024,32 @@ function bashHarfleri(adSoyad) {
 // Üretim tek istekte bitmez (Vercel süre sınırı) — `tamam:false` geldiği
 // sürece istek tekrarlanır; ilerleme ekranda görünür.
 // ═══════════════════════════════════════════════════════════════════════
+// ───────────────────────────────────────────────────────────────────────
+// İNDİRME DOSYA ADI
+//
+// Tarayıcı `a.download` niteliğinde ASCII dışı karakter gördüğünde bazı
+// ortamlarda niteliği tümden yok sayıyor ve dosya "download" adıyla
+// iniyor (Chromium'da doğrulandı). Ayrıca Türkçe adlı dosyalar e-kitap
+// okuyuculara ve matbaa FTP'lerine aktarılırken bozuluyor. Bu yüzden
+// indirilen her dosyanın adını ASCII'ye çeviriyoruz — ekranda görünen
+// kitap adı elbette Türkçe kalıyor, değişen yalnızca dosya adı.
+// ───────────────────────────────────────────────────────────────────────
+const ASCII_HARF = { ç: "c", Ç: "C", ğ: "g", Ğ: "G", ı: "i", I: "I", İ: "I", i: "i",
+  ö: "o", Ö: "O", ş: "s", Ş: "S", ü: "u", Ü: "U", â: "a", Â: "A", î: "i", Î: "I", û: "u", Û: "U" };
+function dosyaAdiSadelestir(ad, yedek) {
+  const temiz = String(ad || "")
+    .replace(/[çÇğĞıIİiöÖşŞüÜâÂîÎûÛ]/g, (h) => ASCII_HARF[h] || h)
+    .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^A-Za-z0-9 _-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/ /g, "-")
+    .replace(/-+/g, "-")
+    .slice(0, 90)
+    .replace(/^-|-$/g, "");
+  return temiz || yedek || "dosya";
+}
+
 const EDITOR_RAPOR_BASLIKLARI = [
   ["ilk_izlenim", "ESER HAKKINDA İLK İZLENİM"],
   ["genel_degerlendirme", "GENEL DEĞERLENDİRME"],
@@ -1633,8 +2222,8 @@ function EditorRaporu({ authFetch, eserId, eserAdi, karakterSayisi, acikBaslangi
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `${(eserAdi || "eser").replace(/[^\wçğıöşüÇĞİÖŞÜ ]/g, "").trim()}_MST_Editor_Raporu.docx`;
-      document.body.appendChild(a); a.click(); a.remove();
+      a.download = `${dosyaAdiSadelestir(eserAdi, "eser")}_MST_Editor_Raporu.docx`;
+      document.body.appendChild(a); a.click(); setTimeout(() => a.remove(), 0);
       setTimeout(() => URL.revokeObjectURL(url), 4000);
       setMesaj("Word indirildi.");
     } catch { setMesaj("Word indirilemedi."); }
@@ -2301,6 +2890,15 @@ function AdayKokpiti({ authFetch }) {
                                 return (
                                   <div style={{ background: THEME.cyanBg, border: `1px solid ${THEME.border}`, borderRadius: 8, padding: "12px 14px", marginBottom: 4 }}>
                                     <div style={{ fontSize: 10.5, fontWeight: 700, color: THEME.cyan, marginBottom: 8, letterSpacing: .3 }}>AI ÖN ANALİZİ — öneri niteliğindedir, karar editöre aittir</div>
+                                    {/* NE KADARI OKUNDU. Bunu yazmazsak editör, eserin
+                                        ~%8'ini okumuş bir modelin "yapı gözlemi"ni tam
+                                        metin okumasıyla karıştırır. */}
+                                    {ai._kapsam && (
+                                      <div style={{ fontSize: 10.5, color: ai._kapsam.tamMi ? THEME.textFaint : THEME.warn,
+                                        marginBottom: 8, lineHeight: 1.5 }}>
+                                        {ai._kapsam.aciklama}
+                                      </div>
+                                    )}
                                     {ai.ozet && <div style={{ fontSize: 12, color: THEME.textLight, marginBottom: 8 }}>{ai.ozet}</div>}
                                     {ai.guclu_yonler?.length > 0 && <div style={{ fontSize: 11.5, color: THEME.textMuted, marginBottom: 6 }}><b style={{ color: THEME.success }}>Güçlü yönler:</b> {ai.guclu_yonler.join(" · ")}</div>}
                                     {ai.gelistirilecek?.length > 0 && <div style={{ fontSize: 11.5, color: THEME.textMuted, marginBottom: 6 }}><b style={{ color: THEME.warn }}>Geliştirilecek:</b> {ai.gelistirilecek.join(" · ")}</div>}
@@ -4267,6 +4865,1945 @@ function KisayolYardimi({ acik, kapat }) {
   );
 }
 
+// ═══════════════════════════════════════════════════════════════════════
+// EPUB ÜRETİMİ (19 Ağustos 2026)
+//
+// Aynı kitabı e-kitap olarak da satabilmek için. Trendyol, D&R, İdefix ve
+// Kitapyurdu e-kitap rafları EPUB istiyor; PDF kabul etmiyorlar ya da
+// okuyucu deneyimi kötü oluyor.
+//
+// TARAYICIDA üretiliyor, sunucuda değil: sayfa görselleri zaten panelde
+// yükleniyor (PDF için de öyle), sunucuya taşımak hem Vercel süre sınırını
+// zorlar hem de aynı dosyaları iki kez indirmek olurdu.
+//
+// EPUB bir ZIP'tir ama İKİ KATI KURALI vardır:
+//   1) `mimetype` dosyası arşivin İLK girdisi olmalı,
+//   2) ve SIKIŞTIRILMAMIŞ (stored) saklanmalı.
+// Bu iki kural tutmazsa dosya "geçersiz EPUB" sayılır ve raflar reddeder.
+// Aşağıdaki yazıcı ikisini de garanti ediyor (bkz. sikistir:false).
+// ═══════════════════════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════════════════════
+// YAZAR STÜDYOSU — 19 Ağustos 2026
+//
+// Yazarın gördüğü yüz. Tasarımcı arayüzünden bilerek AYRI: tasarımcı
+// onlarca düğmeli bir tezgâh görüyor, yazar ise üç adımlık, tek seferde
+// tek karar isteyen sade bir yol görüyor.
+//
+// Sinematik giriş yalnız süs değil: yazar buraya "kitabım gerçekten
+// yapılıyor" duygusuyla giriyor ve ilk kararını (stil) o duyguyla veriyor.
+// Ama gösteriş işi yavaşlatmamalı — perde atlanabiliyor, bir kez görülen
+// açılış aynı oturumda tekrar oynamıyor ve hareketi azaltılmış cihazlarda
+// hiç oynamıyor (prefers-reduced-motion).
+// ═══════════════════════════════════════════════════════════════════════
+
+const YAZAR_ACILIS_CSS_ID = "mst-yazar-acilis";
+const YAZAR_ACILIS_CSS = `
+@keyframes mstPerdeAc { from { opacity: 1 } to { opacity: 0; visibility: hidden } }
+@keyframes mstYaziGir { from { opacity: 0; transform: translateY(14px) } to { opacity: 1; transform: none } }
+@keyframes mstIsikKay { from { transform: translateX(-60%) rotate(8deg) } to { transform: translateX(160%) rotate(8deg) } }
+@keyframes mstNefes { 0%,100% { transform: scale(1) } 50% { transform: scale(1.04) } }
+/* Perde rengi de TEMADAN geliyor: ham hex yazılırsa tema değiştiğinde
+   açılış eski renklerde kalır ve uygulamayla uyumsuz görünür. */
+.mst-acilis { position: fixed; inset: 0; z-index: 90; display: grid; place-items: center;
+  background: radial-gradient(120% 90% at 50% 40%, var(--yuzey2) 0%, var(--zemin) 62%, rgba(0,0,0,.72) 100%);
+  overflow: hidden; }
+.mst-acilis-isik { position: absolute; top: -20%; left: 0; width: 40%; height: 140%;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,.055), transparent);
+  animation: mstIsikKay 2.6s ease-in-out forwards; }
+.mst-acilis-govde { position: relative; text-align: center; padding: 0 24px; max-width: 720px; }
+.mst-acilis-govde > * { animation: mstYaziGir .9s cubic-bezier(.2,.7,.3,1) both; }
+.mst-acilis-govde > *:nth-child(1) { animation-delay: .15s }
+.mst-acilis-govde > *:nth-child(2) { animation-delay: .75s }
+.mst-acilis-govde > *:nth-child(3) { animation-delay: 1.45s }
+.mst-acilis-govde > *:nth-child(4) { animation-delay: 2.15s }
+.mst-acilis-marka { animation: mstNefes 3.4s ease-in-out infinite; }
+.mst-kapaniyor { animation: mstPerdeAc .7s ease forwards; }
+@media (prefers-reduced-motion: reduce) {
+  .mst-acilis-isik { display: none }
+  .mst-acilis-govde > * { animation: none !important }
+  .mst-acilis-marka { animation: none !important }
+}
+`;
+function yazarAcilisStiliYukle() {
+  if (typeof document === "undefined" || document.getElementById(YAZAR_ACILIS_CSS_ID)) return;
+  const s = document.createElement("style");
+  s.id = YAZAR_ACILIS_CSS_ID; s.textContent = YAZAR_ACILIS_CSS;
+  document.head.appendChild(s);
+}
+
+function YazarAcilis({ ad, kitapAdi, kapat }) {
+  const [kapaniyor, setKapaniyor] = React.useState(false);
+  React.useEffect(() => { yazarAcilisStiliYukle(); }, []);
+
+  // Perde kendiliğinden kapanıyor; yazar beklemek zorunda değil.
+  React.useEffect(() => {
+    const azHareket = typeof window !== "undefined" && window.matchMedia
+      && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const sure = azHareket ? 900 : 4200;
+    const t = setTimeout(() => setKapaniyor(true), sure);
+    return () => clearTimeout(t);
+  }, []);
+  React.useEffect(() => {
+    if (!kapaniyor) return;
+    const t = setTimeout(kapat, 700);
+    return () => clearTimeout(t);
+  }, [kapaniyor, kapat]);
+
+  // Boşluk / Esc / tıklama ile atlanabiliyor.
+  React.useEffect(() => {
+    const tus = (e) => { if (e.key === "Escape" || e.key === " " || e.key === "Enter") setKapaniyor(true); };
+    window.addEventListener("keydown", tus);
+    return () => window.removeEventListener("keydown", tus);
+  }, []);
+
+  return (
+    <div className={`mst-acilis${kapaniyor ? " mst-kapaniyor" : ""}`} onClick={() => setKapaniyor(true)}
+      role="dialog" aria-label="MST Tasarım Stüdyo açılışı">
+      <div className="mst-acilis-isik" />
+      <div className="mst-acilis-govde">
+        <div className="mst-acilis-marka" style={{ marginBottom: 26 }}>
+          <svg viewBox="0 0 24 24" fill="none" stroke="var(--ana)" strokeWidth="1.4"
+            strokeLinecap="round" strokeLinejoin="round" width="64" height="64" aria-hidden="true">
+            <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" /><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+          </svg>
+        </div>
+        <div style={{ fontSize: 13, letterSpacing: ".28em", textTransform: "uppercase", color: "var(--metin3)" }}>
+          MST Yayıncılık
+        </div>
+        <h1 style={{ fontFamily: "var(--f-baslik)", fontSize: "clamp(30px, 6vw, 56px)", lineHeight: 1.1,
+          margin: "18px 0 0", letterSpacing: "-.03em", color: "var(--metin)" }}>
+          {kitapAdi ? <>“{kitapAdi}”<br />resimleniyor.</> : <>Kitabınız<br />resimleniyor.</>}
+        </h1>
+        <p style={{ fontSize: "clamp(14px, 2.2vw, 18px)", color: "var(--metin2)", lineHeight: 1.7,
+          margin: "22px auto 0", maxWidth: 520 }}>
+          {ad ? `${ad}, ` : ""}bu noktadan sonra kitabın görünüşüne siz karar veriyorsunuz.
+          Önce çizim stilini seçeceksiniz, sonra karakterlerinizi tek tek onaylayacaksınız.
+        </p>
+      </div>
+      <div style={{ position: "absolute", bottom: 28, fontSize: 12, color: "var(--metin3)" }}>
+        geçmek için tıklayın
+      </div>
+    </div>
+  );
+}
+
+// ── Adım göstergesi ────────────────────────────────────────────────────
+function YazarAdimlar({ asama }) {
+  const adimlar = [
+    ["stil", "Çizim stili"],
+    ["karakter", "Karakterler"],
+    ["kapak", "Kapak"],
+    ["tamamlandi", "Sayfa üretimi"],
+  ];
+  const suan = adimlar.findIndex(([k]) => k === asama);
+  return (
+    <ol style={{ display: "flex", gap: 0, listStyle: "none", padding: 0, margin: "0 0 28px",
+      flexWrap: "wrap" }}>
+      {adimlar.map(([kod, ad], i) => {
+        const gecti = i < suan, aktif = i === suan;
+        return (
+          <li key={kod} style={{ display: "flex", alignItems: "center", gap: 10, paddingRight: 18 }}>
+            <span style={{ width: 26, height: 26, borderRadius: "var(--r-tam)", display: "grid",
+              placeItems: "center", fontSize: 12.5, fontWeight: 700,
+              background: gecti ? "var(--iyi-zemin)" : aktif ? "var(--ana)" : "var(--yuzey2)",
+              border: `1px solid ${gecti ? "var(--iyi-kenar)" : aktif ? "var(--ana)" : "var(--kenar)"}`,
+              color: gecti ? "var(--iyi)" : aktif ? "var(--ana-uzeri)" : "var(--metin3)" }}>
+              {gecti ? "✓" : i + 1}
+            </span>
+            <span style={{ fontSize: 13.5, fontWeight: aktif ? 700 : 500,
+              color: aktif ? "var(--metin)" : gecti ? "var(--iyi)" : "var(--metin3)" }}>{ad}</span>
+            {i < adimlar.length - 1 && (
+              <span style={{ width: 30, height: 1, background: "var(--kenar)", marginLeft: 8 }} />
+            )}
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
+// ── Kapak seçimi ───────────────────────────────────────────────────────
+// Üç alternatif, AYNI stilde, farklı kurguda. Yazarın burada vereceği
+// karar "hangi çizgi" değil (o kilitli), "hangi kurgu".
+//
+// Çizimlerde YAZI YOK ve bu her ekranda söyleniyor: yazar kapağı görüp
+// "adı nerede?" diye sormasın, sonradan açıklanan bir eksiklik gibi
+// durmasın.
+function YazarKapakSecimi({ kapak, kitapAdi, calisiyor, onUret, onSec }) {
+  const secenekler = kapak?.secenekler || [];
+  const secili = kapak?.secim;
+  const onayli = !!kapak?.onayliMi;
+
+  return (
+    <div>
+      <h2 style={{ fontFamily: "var(--f-baslik)", fontSize: 22, margin: "0 0 6px", letterSpacing: "-.02em" }}>
+        {onayli ? "Kitabınızın kapağı" : "Kitabınızın kapağı hangi kurguda olsun?"}
+      </h2>
+      <p style={{ fontSize: 14, color: "var(--metin2)", lineHeight: 1.7, margin: "0 0 6px", maxWidth: 700 }}>
+        {onayli
+          ? <>Seçtiğiniz kapak kaydedildi. Kitabınızın adı ve adınız dizgi aşamasında kapağa basılacak.</>
+          : <>Üç seçeneğin üçü de <b>sizin seçtiğiniz çizgide</b>. Değişen tek şey <b>kurgu</b>:
+              karaktere ne kadar yakından baktığımız. Onayladığınız karakterler kapakta aynen kullanılıyor.</>}
+      </p>
+      <p style={{ fontSize: 13, color: "var(--uyari)", lineHeight: 1.7, margin: "0 0 18px", maxWidth: 700 }}>
+        {kapak?.yaziNotu}
+      </p>
+
+      {secenekler.length === 0 && !onayli && (
+        <div style={{ padding: "18px 20px", borderRadius: "var(--r-b)", background: "var(--yuzey)",
+          border: "1px solid var(--kenar)" }}>
+          <p style={{ fontSize: 13.5, color: "var(--metin2)", lineHeight: 1.7, margin: "0 0 14px" }}>
+            Hazır olduğunuzda {(kapak?.kurgular || []).length} kapak kurgusunu birlikte hazırlıyoruz.
+            Bu biraz sürebilir — üç ayrı çizim yapılıyor.
+          </p>
+          <button type="button" onClick={onUret} disabled={calisiyor}
+            style={{ padding: "11px 20px", borderRadius: "var(--r-o)", border: "1px solid var(--ana)",
+              background: "var(--ana)", color: "var(--ana-uzeri)", fontWeight: 600, fontSize: 13.5,
+              opacity: calisiyor ? .6 : 1 }}>
+            {calisiyor ? "Kapaklar hazırlanıyor…" : "Kapak seçeneklerimi hazırla"}
+          </button>
+        </div>
+      )}
+
+      {secenekler.length > 0 && (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(230px, 1fr))", gap: 16 }}>
+          {secenekler.map((s) => {
+            const buSecili = onayli && secili === s.sira;
+            const kurgu = (kapak?.kurgular || []).find((x) => x.kod === s.kurguKod);
+            return (
+              <div key={s.sira} style={{ background: "var(--yuzey)", borderRadius: "var(--r-b)",
+                border: `2px solid ${buSecili ? "var(--iyi-kenar)" : "var(--kenar)"}`, overflow: "hidden",
+                opacity: onayli && !buSecili ? .45 : 1 }}>
+                <div style={{ aspectRatio: "2 / 3", background: "var(--yuzey2)", display: "grid", placeItems: "center" }}>
+                  {s.gorselUrl
+                    ? <img src={s.gorselUrl} alt={`${s.kurguAd} kurgusunda kapak önerisi`}
+                        style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                    : <span style={{ fontSize: 12.5, color: "var(--metin3)", padding: 16, textAlign: "center" }}>
+                        {s.hata || "Çizilemedi"}
+                      </span>}
+                </div>
+                <div style={{ padding: "13px 15px" }}>
+                  <b style={{ fontSize: 14.5 }}>{s.kurguAd}</b>
+                  {kurgu?.aciklama && (
+                    <p style={{ fontSize: 12.5, color: "var(--metin2)", lineHeight: 1.55, margin: "5px 0 0" }}>
+                      {kurgu.aciklama}
+                    </p>
+                  )}
+                  {buSecili && (
+                    <div style={{ marginTop: 10, fontSize: 12.5, fontWeight: 700, color: "var(--iyi)" }}>
+                      ✓ Kapağınız bu
+                    </div>
+                  )}
+                  {!onayli && s.gorselUrl && (
+                    <button type="button" onClick={() => onSec(s)} disabled={calisiyor}
+                      style={{ marginTop: 11, width: "100%", padding: "9px 14px", borderRadius: "var(--r-o)",
+                        border: "1px solid var(--ana)", background: "var(--ana)", color: "var(--ana-uzeri)",
+                        fontWeight: 600, fontSize: 13 }}>
+                      Bu kapağı seçiyorum
+                    </button>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Yenileme hakkı SAYIYLA söyleniyor — stil ve revizede olduğu gibi.
+          Sınırın var olduğunu tıklamadan önce bilmek gerekir. */}
+      {secenekler.length > 0 && !onayli && (
+        <div style={{ marginTop: 18 }}>
+          {kapak.kalanSetHakki > 0 ? (
+            <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+              <button type="button" onClick={onUret} disabled={calisiyor}
+                style={{ padding: "9px 16px", borderRadius: "var(--r-o)", border: "1px solid var(--kenar)",
+                  background: "var(--yuzey2)", color: "var(--metin)", fontWeight: 600, fontSize: 13 }}>
+                {calisiyor ? "Hazırlanıyor…" : "Hiçbiri olmadı, yeni seçenekler hazırla"}
+              </button>
+              <span style={{ fontSize: 12.5, color: "var(--uyari)" }}>
+                Bu hakkı <b>{kapak.kalanSetHakki} kez</b> daha kullanabilirsiniz; yeni set gelince
+                bunlar kaybolur.
+              </span>
+            </div>
+          ) : (
+            <div style={{ fontSize: 12.5, color: "var(--uyari)", lineHeight: 1.6 }}>
+              Yeni set hakkınız kalmadı. Yukarıdaki seçeneklerden birini seçin — kapak, dizgide
+              kitabın adıyla birlikte son hâlini alacak.
+            </div>
+          )}
+        </div>
+      )}
+
+      {kitapAdi && !onayli && (
+        <p style={{ fontSize: 12.5, color: "var(--metin3)", marginTop: 16 }}>
+          Dizgide kapağa basılacak ad: <b style={{ color: "var(--metin2)" }}>{kitapAdi}</b>
+        </p>
+      )}
+    </div>
+  );
+}
+
+// ── Paylaşım kartı ─────────────────────────────────────────────────────
+// Kitabı biten yazarın paylaşabileceği kart. Paylaşılan her kart ücretsiz
+// reklam — ama kart HİÇBİR ÜRETİM YAPMIYOR: tarayıcıda, elde olan kapak
+// görselinden çiziliyor. Tek kuruş harcamıyor.
+//
+// Kartın üzerindeki cümle DOĞRU olmak zorunda. Kapak onaylandığında kitap
+// henüz satışta değil; "kitabım çıktı" yazan bir kart yazara yalan
+// söyletir. Bu yüzden seçenekler o an gerçekten doğru olan cümleler.
+const PAYLASIM_CUMLELERI = [
+  { kod: "kapak", metin: "Kitabımın kapağı hazır" },
+  { kod: "yolda", metin: "Kitabım yolda" },
+  { kod: "hazirlaniyor", metin: "Kitabım hazırlanıyor" },
+];
+const KART_GENISLIK = 1080, KART_YUKSEKLIK = 1350;
+
+function YazarPaylasimKarti({ kapakUrl, kitapAdi, yazarAdi }) {
+  const [cumle, setCumle] = React.useState(PAYLASIM_CUMLELERI[0].kod);
+  const [calisiyor, setCalisiyor] = React.useState(false);
+  const [hata, setHata] = React.useState("");
+  const [onizleme, setOnizleme] = React.useState(null);
+  if (!kapakUrl) return null;
+
+  const kartCiz = async () => {
+    setCalisiyor(true); setHata(""); setOnizleme(null);
+    try {
+      // Font gerçekten ÇİZİLİYOR mu? document.fonts.check() güvenilmez:
+      // font yüklenememişken bile true dönebiliyor (bunu bu kartı
+      // görüntüleyerek yakaladım — check true diyordu, canvas serif
+      // çiziyordu). Bu yüzden ÖLÇÜYORUZ: aynı metin, bir kez istenen
+      // fontla bir kez yalnız yedekle. Genişlikler aynıysa font yoktur.
+      let fontVar = false;
+      try {
+        if (document.fonts) { await document.fonts.load('64px "Capriola"'); }
+        const o = document.createElement("canvas").getContext("2d");
+        const ornek = "ĞÜŞİÖÇ kitabımın kapağı WWWiii";
+        o.font = '64px monospace';
+        const yedek = o.measureText(ornek).width;
+        o.font = '64px "Capriola", monospace';
+        fontVar = Math.abs(o.measureText(ornek).width - yedek) > 0.5;
+      } catch { fontVar = false; }
+
+      const gorsel = await new Promise((coz, red) => {
+        const im = new Image();
+        im.crossOrigin = "anonymous";
+        im.onload = () => coz(im);
+        im.onerror = () => red(new Error("Kapak görseli yüklenemedi."));
+        im.src = kapakUrl;
+      });
+
+      const c = document.createElement("canvas");
+      c.width = KART_GENISLIK; c.height = KART_YUKSEKLIK;
+      const ctx = c.getContext("2d");
+
+      ctx.fillStyle = "#F7F6F3";
+      ctx.fillRect(0, 0, KART_GENISLIK, KART_YUKSEKLIK);
+
+      const yaziAilesi = fontVar ? '"Capriola", Georgia, serif' : "Georgia, serif";
+      ctx.textAlign = "center";
+
+      // ÖNCE YAZI ÖLÇÜLÜYOR, SONRA KAPAK YERLEŞTİRİLİYOR.
+      // Tersi yapıldığında (kapak sabit yükseklikte, yazı altına) üç
+      // satırlık bir kitap adı yazar adını künyenin üstüne bindiriyordu.
+      // Bunu kartı gerçekten çizip bakarak gördüm; hesapla değil.
+      const USTBOSLUK = 150, ARA = 78, KUNYE_ALANI = 110;
+      let punto = 62, satirlar = [];
+      const sar = (p) => {
+        ctx.font = `${p}px ${yaziAilesi}`;
+        const kelimeler = String(kitapAdi || "Kitabım").split(/\s+/);
+        const cikti = []; let satir = "";
+        for (const k of kelimeler) {
+          const deneme = satir ? `${satir} ${k}` : k;
+          if (ctx.measureText(deneme).width > 860 && satir) { cikti.push(satir); satir = k; }
+          else satir = deneme;
+        }
+        if (satir) cikti.push(satir);
+        return cikti;
+      };
+      while (punto > 34) { satirlar = sar(punto); if (satirlar.length <= 3) break; punto -= 6; }
+      satirlar = satirlar.slice(0, 3);
+      const yaziBloku = satirlar.length * (punto + 12) + 26 + 34;
+
+      // Kapak, oranı BOZULMADAN ve KALAN yere yerleştiriliyor: kitabın
+      // kapağını ezip uzatmak, gösterilmek istenen şeyin ta kendisini bozar.
+      const alanG = 620;
+      const alanY = KART_YUKSEKLIK - USTBOSLUK - ARA - yaziBloku - KUNYE_ALANI;
+      const olcek = Math.min(alanG / gorsel.width, alanY / gorsel.height);
+      const g = Math.round(gorsel.width * olcek), yk = Math.round(gorsel.height * olcek);
+      const x = Math.round((KART_GENISLIK - g) / 2);
+      ctx.save();
+      ctx.shadowColor = "rgba(24,21,16,0.22)";
+      ctx.shadowBlur = 38; ctx.shadowOffsetY = 16;
+      ctx.fillStyle = "#FFFFFF";
+      ctx.fillRect(x, USTBOSLUK, g, yk);
+      ctx.restore();
+      ctx.drawImage(gorsel, x, USTBOSLUK, g, yk);
+
+      ctx.fillStyle = "#A9762F";
+      ctx.font = `30px ${yaziAilesi}`;
+      const secili = PAYLASIM_CUMLELERI.find((x2) => x2.kod === cumle) || PAYLASIM_CUMLELERI[0];
+      ctx.fillText(secili.metin.toLocaleUpperCase("tr"), KART_GENISLIK / 2, 92);
+
+      const altY = USTBOSLUK + yk + ARA;
+      ctx.fillStyle = "#181510";
+      ctx.font = `${punto}px ${yaziAilesi}`;
+      satirlar.forEach((s, i) => ctx.fillText(s, KART_GENISLIK / 2, altY + i * (punto + 12)));
+
+      const yazarY = altY + satirlar.length * (punto + 12) + 26;
+      ctx.fillStyle = "#6B6558";
+      ctx.font = `34px ${yaziAilesi}`;
+      ctx.fillText(yazarAdi || "", KART_GENISLIK / 2, yazarY);
+
+      ctx.fillStyle = "#A39C8C";
+      ctx.font = `26px ${yaziAilesi}`;
+      ctx.fillText("MST YAYINCILIK", KART_GENISLIK / 2, KART_YUKSEKLIK - 62);
+
+      // toDataURL, başka bir alandan gelen görsel CORS başlığı olmadan
+      // yüklendiyse SecurityError atar. Yutulursa yazar "indir"e basıp
+      // hiçbir şey olmadığını görür — bu yüzden yakalanıp söyleniyor.
+      const veri = c.toDataURL("image/png");
+      setOnizleme(veri);
+      if (!fontVar) {
+        setHata("Kart hazır ama yazı tipimiz yüklenemediği için yedek fontla çizildi.");
+      }
+    } catch (e) {
+      setHata(/tainted|SecurityError|insecure/i.test(String(e && e.message))
+        ? "Kart oluşturulamadı: kapak görseli tarayıcı güvenlik kuralları yüzünden okunamıyor. "
+          + "Kapağı doğrudan indirip paylaşabilirsiniz."
+        : (e?.message || "Kart oluşturulamadı."));
+    } finally { setCalisiyor(false); }
+  };
+
+  const indir = () => {
+    if (!onizleme) return;
+    const a = document.createElement("a");
+    a.href = onizleme;
+    a.download = `${dosyaAdiSadelestir(kitapAdi, "kitabim")}-paylasim.png`;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => a.remove(), 0);
+  };
+
+  return (
+    <div style={{ marginTop: 26, padding: "20px 22px", borderRadius: "var(--r-b)",
+      background: "var(--yuzey)", border: "1px solid var(--kenar)" }}>
+      <h3 style={{ fontFamily: "var(--f-baslik)", fontSize: 19, margin: "0 0 6px" }}>
+        Paylaşmak ister misiniz?
+      </h3>
+      <p style={{ fontSize: 13.5, color: "var(--metin2)", lineHeight: 1.7, margin: "0 0 14px", maxWidth: 700 }}>
+        Kapağınızdan paylaşıma hazır bir kart hazırlayalım. Kitabınız henüz satışa çıkmadığı için
+        kartta satış iddiası yok — aşağıdaki cümlelerden birini seçin.
+      </p>
+
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
+        {PAYLASIM_CUMLELERI.map((c) => (
+          <button key={c.kod} type="button" onClick={() => { setCumle(c.kod); setOnizleme(null); }}
+            style={{ padding: "7px 14px", borderRadius: "var(--r-tam)", fontSize: 12.5,
+              border: `1px solid ${cumle === c.kod ? "var(--ana)" : "var(--kenar)"}`,
+              background: cumle === c.kod ? "var(--ana)" : "var(--yuzey2)",
+              color: cumle === c.kod ? "var(--ana-uzeri)" : "var(--metin2)", cursor: "pointer" }}>
+            {c.metin}
+          </button>
+        ))}
+      </div>
+
+      {hata && (
+        <div role="alert" style={{ fontSize: 12.5, color: "var(--uyari)", lineHeight: 1.6, marginBottom: 12 }}>
+          {hata}
+        </div>
+      )}
+
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+        <button type="button" onClick={kartCiz} disabled={calisiyor}
+          style={{ padding: "10px 18px", borderRadius: "var(--r-o)", border: "1px solid var(--ana)",
+            background: "var(--ana)", color: "var(--ana-uzeri)", fontWeight: 600, fontSize: 13.5,
+            opacity: calisiyor ? .6 : 1 }}>
+          {calisiyor ? "Hazırlanıyor…" : onizleme ? "Yeniden hazırla" : "Kartımı hazırla"}
+        </button>
+        {onizleme && (
+          <button type="button" onClick={indir}
+            style={{ padding: "10px 18px", borderRadius: "var(--r-o)", border: "1px solid var(--kenar)",
+              background: "var(--yuzey2)", color: "var(--metin)", fontWeight: 600, fontSize: 13.5 }}>
+            Kartı indir
+          </button>
+        )}
+      </div>
+
+      {onizleme && (
+        <img src={onizleme} alt="Paylaşıma hazır kartınızın önizlemesi"
+          style={{ marginTop: 16, width: "100%", maxWidth: 340, borderRadius: "var(--r-o)",
+            border: "1px solid var(--kenar)", display: "block" }} />
+      )}
+    </div>
+  );
+}
+
+// ── Sayfalar ve yorumlar ───────────────────────────────────────────────
+// Yazar sayfaları GÖRÜR ve YORUM BIRAKIR — onaylamaz. Sayfa sayfa onay,
+// 20 sayfalık bir kitabı aylara yayar. Karşılığında verilen söz şu: her
+// yorum cevaplanır, uygulanmayan gerekçesiyle kapanır.
+const YORUM_DURUM = {
+  yeni: { ad: "Ekipte", renk: "var(--metin3)" },
+  uygulandi: { ad: "Uygulandı", renk: "var(--iyi)" },
+  uygulanmadi: { ad: "Uygulanmadı", renk: "var(--uyari)" },
+};
+
+function YazarSayfaKarti({ sayfa, calisiyor, onYorum, onSil }) {
+  const [yazi, setYazi] = React.useState("");
+  const [acik, setAcik] = React.useState(false);
+  return (
+    <div style={{ background: "var(--yuzey)", borderRadius: "var(--r-b)",
+      border: "1px solid var(--kenar)", overflow: "hidden" }}>
+      <div style={{ display: "flex", background: "var(--yuzey2)" }}>
+        {[sayfa.solGorselUrl, sayfa.sagGorselUrl].map((u, i) => (
+          <div key={i} style={{ flex: 1, aspectRatio: "1 / 1", display: "grid", placeItems: "center" }}>
+            {u ? <img src={u} alt={`${sayfa.sira + 1}. sayfa çiftinin ${i === 0 ? "sol" : "sağ"} sayfası`}
+                  style={{ width: "100%", height: "100%", objectFit: "contain" }} />
+               : <span style={{ fontSize: 12, color: "var(--metin3)" }}>—</span>}
+          </div>
+        ))}
+      </div>
+      <div style={{ padding: "13px 16px" }}>
+        <b style={{ fontSize: 13.5 }}>{sayfa.sira + 1}. sayfa çifti</b>
+
+        {(sayfa.yorumlar || []).map((y) => (
+          <div key={y.id} style={{ marginTop: 10, padding: "9px 12px", borderRadius: "var(--r-o)",
+            background: "var(--yuzey2)", border: "1px solid var(--kenar)" }}>
+            <div style={{ fontSize: 12.5, color: "var(--metin2)", lineHeight: 1.55 }}>{y.yorum}</div>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 6, flexWrap: "wrap" }}>
+              <span style={{ fontSize: 11.5, fontWeight: 700, color: (YORUM_DURUM[y.durum] || {}).renk }}>
+                {(YORUM_DURUM[y.durum] || {}).ad || y.durum}
+              </span>
+              {/* Silme yalnız cevaplanmadan önce: cevaplanmış bir yorumu
+                  silmek ekibin verdiği cevabı da yok eder. */}
+              {y.durum === "yeni" && (
+                <button type="button" onClick={() => onSil(y.id)} disabled={calisiyor}
+                  style={{ fontSize: 11.5, color: "var(--metin3)", background: "none",
+                    border: "none", padding: 0, cursor: "pointer", textDecoration: "underline" }}>
+                  Sil
+                </button>
+              )}
+            </div>
+            {y.yanit && (
+              <div style={{ fontSize: 12, color: "var(--metin2)", marginTop: 7, paddingTop: 7,
+                borderTop: "1px solid var(--kenar)", lineHeight: 1.55 }}>
+                <b style={{ color: "var(--metin)" }}>Tasarım ekibimiz:</b> {y.yanit}
+              </div>
+            )}
+          </div>
+        ))}
+
+        {!acik ? (
+          <button type="button" onClick={() => setAcik(true)}
+            style={{ marginTop: 11, padding: "7px 14px", borderRadius: "var(--r-o)",
+              border: "1px solid var(--kenar)", background: "var(--yuzey2)",
+              color: "var(--metin)", fontSize: 12.5, fontWeight: 600 }}>
+            Bu sayfaya yorum bırak
+          </button>
+        ) : (
+          <div style={{ marginTop: 11 }}>
+            <textarea value={yazi} onChange={(e) => setYazi(e.target.value)} rows={3}
+              placeholder="Bu sayfada dikkatinizi çeken şeyi yazın. Örnek: Nazlı'nın saç tokası bu sayfada yok."
+              style={{ width: "100%", boxSizing: "border-box", padding: "9px 11px",
+                borderRadius: "var(--r-o)", border: "1px solid var(--kenar)",
+                background: "var(--yuzey2)", color: "var(--metin)", fontSize: 13,
+                fontFamily: "inherit", resize: "vertical" }} />
+            <div style={{ display: "flex", gap: 8, marginTop: 7 }}>
+              <button type="button" disabled={calisiyor || yazi.trim().length < 5}
+                onClick={() => { onYorum(yazi.trim()); setYazi(""); setAcik(false); }}
+                style={{ padding: "7px 14px", borderRadius: "var(--r-o)", border: "1px solid var(--ana)",
+                  background: "var(--ana)", color: "var(--ana-uzeri)", fontSize: 12.5, fontWeight: 600,
+                  opacity: (calisiyor || yazi.trim().length < 5) ? .5 : 1 }}>
+                Gönder
+              </button>
+              <button type="button" onClick={() => setAcik(false)}
+                style={{ padding: "7px 14px", borderRadius: "var(--r-o)", border: "1px solid var(--kenar)",
+                  background: "var(--yuzey2)", color: "var(--metin2)", fontSize: 12.5 }}>
+                Vazgeç
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function YazarSayfalar({ veri, calisiyor, onYorum, onSil }) {
+  if (!veri) return null;
+  if (!veri.paylasildiMi) {
+    return (
+      <div style={{ marginTop: 26, padding: "18px 20px", borderRadius: "var(--r-b)",
+        background: "var(--yuzey)", border: "1px solid var(--kenar)",
+        fontSize: 13.5, color: "var(--metin2)", lineHeight: 1.7 }}>
+        {veri.not}
+      </div>
+    );
+  }
+  return (
+    <div style={{ marginTop: 26 }}>
+      <h3 style={{ fontFamily: "var(--f-baslik)", fontSize: 19, margin: "0 0 6px" }}>
+        Kitabınızın sayfaları
+      </h3>
+      {/* Verilmeyen söz de açıkça yazıyor: yorum onay değildir. */}
+      <p style={{ fontSize: 13, color: "var(--metin2)", lineHeight: 1.7, margin: "0 0 16px", maxWidth: 720 }}>
+        {veri.not}
+      </p>
+      <div style={{ display: "grid", gap: 16 }}>
+        {(veri.sayfalar || []).map((s) => (
+          <YazarSayfaKarti key={s.sira} sayfa={s} calisiyor={calisiyor}
+            onYorum={(y) => onYorum(s.sira, y)} onSil={onSil} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── Arka kapak yazısı ──────────────────────────────────────────────────
+// Öneri editör raporundan geliyor; yeni bir üretim yok, yani ücretsiz.
+// Yazarın kendi cümlesini kurabilmesi, kitabı sahiplenmesinin en ucuz yolu.
+function YazarArkaKapak({ arkaKapak, calisiyor, onKaydet, onOnayla }) {
+  const ak = arkaKapak || {};
+  const [yazi, setYazi] = React.useState(ak.yazarYazisi || ak.oneri || "");
+  const [dokunuldu, setDokunuldu] = React.useState(false);
+  // Sunucudan yeni bir taslak gelirse ve kullanıcı henüz yazmaya
+  // başlamadıysa kutuyu tazele. Yazmaya başladıysa DOKUNMA — yazdığını
+  // silmek en sinir bozucu hatadır.
+  React.useEffect(() => {
+    if (!dokunuldu) setYazi(ak.yazarYazisi || ak.oneri || "");
+  }, [ak.yazarYazisi, ak.oneri, dokunuldu]);
+
+  const enCok = ak.enCokHarf || 900;
+  const uzunluk = yazi.trim().length;
+  const gecerli = uzunluk >= 40 && uzunluk <= enCok;
+
+  if (ak.onayliMi) {
+    return (
+      <div style={{ marginTop: 26, padding: "20px 22px", borderRadius: "var(--r-b)",
+        background: "var(--yuzey)", border: "1px solid var(--iyi-kenar)" }}>
+        <h3 style={{ fontFamily: "var(--f-baslik)", fontSize: 19, margin: "0 0 8px" }}>
+          Arka kapak yazınız
+        </h3>
+        <p style={{ fontSize: 13.5, color: "var(--metin2)", lineHeight: 1.75, whiteSpace: "pre-wrap", margin: 0 }}>
+          {ak.yazarYazisi}
+        </p>
+        <div style={{ marginTop: 10, fontSize: 12.5, fontWeight: 700, color: "var(--iyi)" }}>
+          ✓ Onaylandı — dizgiye bu metin gidecek
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ marginTop: 26, padding: "20px 22px", borderRadius: "var(--r-b)",
+      background: "var(--yuzey)", border: "1px solid var(--kenar)" }}>
+      <h3 style={{ fontFamily: "var(--f-baslik)", fontSize: 19, margin: "0 0 6px" }}>
+        Arka kapak yazınız
+      </h3>
+      <p style={{ fontSize: 13.5, color: "var(--metin2)", lineHeight: 1.7, margin: "0 0 14px", maxWidth: 700 }}>
+        {ak.not}
+      </p>
+      {ak.oneri && !ak.yazarYazisi && (
+        <p style={{ fontSize: 12.5, color: "var(--metin3)", margin: "0 0 10px" }}>
+          Aşağıdaki metin editör raporunuzdan geldi — başlangıç noktası olarak duruyor.
+        </p>
+      )}
+      <textarea value={yazi} rows={7}
+        onChange={(e) => { setDokunuldu(true); setYazi(e.target.value); }}
+        placeholder="Kitabınızı arka kapakta okuyan birine anlatın. Kim, nerede, ne oluyor — ve neden merak edilsin?"
+        style={{ width: "100%", boxSizing: "border-box", padding: "12px 14px",
+          borderRadius: "var(--r-o)", border: "1px solid var(--kenar)",
+          background: "var(--yuzey2)", color: "var(--metin)", fontSize: 14,
+          lineHeight: 1.7, fontFamily: "inherit", resize: "vertical" }} />
+      <div style={{ display: "flex", gap: 10, alignItems: "center", marginTop: 10, flexWrap: "wrap" }}>
+        <button type="button" disabled={calisiyor || !gecerli}
+          onClick={() => onKaydet(yazi.trim())}
+          style={{ padding: "9px 16px", borderRadius: "var(--r-o)", border: "1px solid var(--kenar)",
+            background: "var(--yuzey2)", color: "var(--metin)", fontWeight: 600, fontSize: 13,
+            opacity: (calisiyor || !gecerli) ? .5 : 1 }}>
+          Taslağı kaydet
+        </button>
+        {ak.yazarYazisi && (
+          <button type="button" disabled={calisiyor} onClick={onOnayla}
+            style={{ padding: "9px 16px", borderRadius: "var(--r-o)", border: "1px solid var(--iyi)",
+              background: "var(--iyi-zemin)", color: "var(--iyi)", fontWeight: 700, fontSize: 13 }}>
+            ✓ Onaylıyorum
+          </button>
+        )}
+        <span style={{ fontSize: 12, color: uzunluk > enCok ? "var(--kotu)" : "var(--metin3)" }}>
+          {uzunluk}/{enCok} karakter
+          {uzunluk < 40 && " · en az 40"}
+          {uzunluk > enCok && " · arka kapağa sığmaz"}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+// ── Örnek sayfa ────────────────────────────────────────────────────────
+// Kapak seçildikten sonra tek bir iç sayfa. Amaç satış değil güven:
+// yazar, kitabın tamamı üretilmeden önce iç sayfaların nasıl görüneceğini
+// bir kez görüyor. Revize düğmesi YOK ve bu açıkça söyleniyor — 24 sayfa
+// için 24 revize beklentisi doğurmamak gerekiyor.
+function YazarOrnekSayfa({ ornek, calisiyor, onUret }) {
+  if (!ornek) return null;
+  if (!ornek.url && !ornek.uretilebilir) return null;
+  return (
+    <div style={{ marginTop: 26, padding: "20px 22px", borderRadius: "var(--r-b)",
+      background: "var(--yuzey)", border: "1px solid var(--kenar)" }}>
+      <h3 style={{ fontFamily: "var(--f-baslik)", fontSize: 19, margin: "0 0 6px" }}>
+        {ornek.url ? "İç sayfalarınızdan bir örnek" : "İç sayfalarınızı görmek ister misiniz?"}
+      </h3>
+      <p style={{ fontSize: 13.5, color: "var(--metin2)", lineHeight: 1.7, margin: "0 0 12px", maxWidth: 700 }}>
+        {ornek.not}
+      </p>
+      {ornek.sahne && (
+        <p style={{ fontSize: 12.5, color: "var(--metin3)", lineHeight: 1.6, margin: "0 0 14px" }}>
+          Çizilen sahne: <span style={{ color: "var(--metin2)" }}>{ornek.sahne}</span>
+        </p>
+      )}
+      {ornek.url ? (
+        <img src={ornek.url} alt="Kitabınızın iç sayfalarından bir örnek çizim"
+          style={{ width: "100%", borderRadius: "var(--r-o)", border: "1px solid var(--kenar)", display: "block" }} />
+      ) : (
+        <button type="button" onClick={onUret} disabled={calisiyor}
+          style={{ padding: "11px 20px", borderRadius: "var(--r-o)", border: "1px solid var(--ana)",
+            background: "var(--ana)", color: "var(--ana-uzeri)", fontWeight: 600, fontSize: 13.5,
+            opacity: calisiyor ? .6 : 1 }}>
+          {calisiyor ? "Örnek sayfa çiziliyor…" : "Bir örnek sayfa çizin"}
+        </button>
+      )}
+    </div>
+  );
+}
+
+// ── Stil seçimi ────────────────────────────────────────────────────────
+function YazarStilSecimi({ stiller, secilen, kilitli, onSec, calisiyor }) {
+  const [odak, setOdak] = React.useState(null);
+  return (
+    <div>
+      <h2 style={{ fontFamily: "var(--f-baslik)", fontSize: 22, margin: "0 0 6px", letterSpacing: "-.02em" }}>
+        Kitabınız hangi çizgide olsun?
+      </h2>
+      <p style={{ fontSize: 14, color: "var(--metin2)", lineHeight: 1.7, margin: "0 0 6px", maxWidth: 680 }}>
+        Aşağıdaki {stiller.length} örneğin hepsi <b>aynı sahneden</b> çizildi — böylece sahneyi değil,
+        yalnız <b>çizgiyi</b> kıyaslıyorsunuz. Seçtiğiniz stil kitabın tamamında kullanılacak.
+      </p>
+      <p style={{ fontSize: 13, color: "var(--uyari)", lineHeight: 1.7, margin: "0 0 20px", maxWidth: 680 }}>
+        Seçiminiz <b>kesindir</b>: kitabın bütün sayfaları bu stille üretileceği için sonradan
+        değiştirmek kitabın yeniden çizilmesi anlamına gelir.
+      </p>
+
+      <div style={{ display: "grid", gap: 16,
+        gridTemplateColumns: "repeat(auto-fill, minmax(210px, 1fr))" }}>
+        {stiller.map((s) => {
+          const bu = secilen === s.kod;
+          return (
+            <button key={s.kod} type="button"
+              onMouseEnter={() => setOdak(s.kod)} onMouseLeave={() => setOdak(null)}
+              onClick={() => !kilitli && !calisiyor && onSec(s)}
+              disabled={kilitli && !bu}
+              aria-pressed={bu}
+              style={{
+                textAlign: "left", padding: 0, overflow: "hidden", cursor: kilitli ? "default" : "pointer",
+                background: "var(--yuzey)", borderRadius: "var(--r-b)",
+                border: `2px solid ${bu ? "var(--ana)" : odak === s.kod ? "var(--bag)" : "var(--kenar)"}`,
+                boxShadow: bu ? "0 0 0 4px rgba(124,58,237,.18)" : "var(--golge-1)",
+                opacity: kilitli && !bu ? .35 : 1,
+                transform: odak === s.kod && !kilitli ? "translateY(-3px)" : "none",
+                transition: "transform .18s ease, border-color .18s ease, opacity .18s ease",
+              }}>
+              <div style={{ position: "relative", aspectRatio: "1 / 1", background: "var(--yuzey2)" }}>
+                <img src={s.gorselUrl} alt={`${s.ad} stilinde örnek çizim`} loading="lazy"
+                  style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+                {bu && (
+                  <span style={{ position: "absolute", top: 10, right: 10, padding: "4px 11px",
+                    borderRadius: "var(--r-tam)", background: "var(--ana)", color: "var(--ana-uzeri)",
+                    fontSize: 11.5, fontWeight: 700 }}>Seçildi</span>
+                )}
+              </div>
+              <div style={{ padding: "12px 14px 14px" }}>
+                <div style={{ fontWeight: 700, fontSize: 14.5, marginBottom: 4 }}>{s.ad}</div>
+                <div style={{ fontSize: 12.5, color: "var(--metin2)", lineHeight: 1.55 }}>{s.aciklama}</div>
+              </div>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ── Tek karakter kartı ─────────────────────────────────────────────────
+function YazarKarakterKarti({ k, revizeHakki, calisiyorMu, surecAdimlari, takipEden,
+  revizeEtiketleri = [], onUret, onRevize, onOnayla, onDevret }) {
+  const [istek, setIstek] = React.useState("");
+  const [acik, setAcik] = React.useState(false);
+  const [devirIstek, setDevirIstek] = React.useState("");
+  const [devirAcik, setDevirAcik] = React.useState(false);
+  const onayli = k.durum === "onaylandi";
+  const hakBitti = k.kalanRevize <= 0;
+  const toplamHak = k.toplamHak || revizeHakki;
+  const devirBekliyor = k.devralma?.durum === "bekliyor";
+
+  return (
+    <div style={{ background: "var(--yuzey)", borderRadius: "var(--r-b)",
+      border: `2px solid ${onayli ? "var(--iyi-kenar)" : "var(--kenar)"}`, overflow: "hidden" }}>
+      <div style={{ display: "flex", gap: 0, flexWrap: "wrap" }}>
+        {/* Karakteri TEK görselle onaylatmıyoruz. Yazar bir resmi değil bir
+            KARAKTERİ onaylamalı: yandan görünüş ve hareket hâli, "sahnede
+            farklı çıktı" itirazının büyük kısmını baştan kapatıyor. */}
+        <div style={{ width: 200, minWidth: 200, background: "var(--yuzey2)" }}>
+          <div style={{ aspectRatio: "1 / 1", display: "grid", placeItems: "center" }}>
+            {k.gorselUrl
+              ? <img src={k.gorselUrl} alt={`${k.ad} karakterinin önden çizimi`}
+                  style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+              : <span style={{ fontSize: 12.5, color: "var(--metin3)", padding: 16, textAlign: "center" }}>
+                  Henüz çizilmedi
+                </span>}
+          </div>
+          {k.ekGorunumUrl && (
+            <div>
+              <img src={k.ekGorunumUrl} alt={`${k.ad} karakterinin yandan görünüşü ve hareket hâli`}
+                style={{ width: "100%", display: "block", borderTop: "1px solid var(--kenar)" }} />
+              <div style={{ fontSize: 10.5, color: "var(--metin3)", padding: "5px 8px", textAlign: "center",
+                lineHeight: 1.4 }}>
+                Yandan görünüş ve hareket hâli
+              </div>
+            </div>
+          )}
+          {k.gorselUrl && !k.ekGorunumUrl && k.ekGorunumHatasi && (
+            <div style={{ fontSize: 10.5, color: "var(--uyari)", padding: "8px 9px", lineHeight: 1.45,
+              borderTop: "1px solid var(--kenar)" }}>
+              {k.ekGorunumHatasi}
+            </div>
+          )}
+        </div>
+
+        <div style={{ flex: 1, minWidth: 260, padding: "16px 18px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            <b style={{ fontFamily: "var(--f-baslik)", fontSize: 17 }}>{k.ad}</b>
+            <span style={{ fontSize: 11, padding: "2px 9px", borderRadius: "var(--r-tam)",
+              background: "var(--yuzey2)", border: "1px solid var(--kenar)", color: "var(--metin2)" }}>
+              {k.rol === "ana" ? "Ana karakter" : k.rol === "figuran" ? "Figüran" : "Yardımcı"}
+            </span>
+            {onayli && (
+              <span style={{ fontSize: 11.5, padding: "2px 10px", borderRadius: "var(--r-tam)",
+                background: "var(--iyi-zemin)", border: "1px solid var(--iyi-kenar)",
+                color: "var(--iyi)", fontWeight: 700 }}>✓ Onayladınız</span>
+            )}
+          </div>
+
+          {k.tanim && <p style={{ fontSize: 13.5, color: "var(--metin2)", lineHeight: 1.6, margin: "8px 0 0" }}>{k.tanim}</p>}
+          {k.ayirtEdiciIsaret && (
+            <p style={{ fontSize: 12.5, color: "var(--metin3)", margin: "4px 0 0" }}>
+              Ayırt edici: {k.ayirtEdiciIsaret}
+            </p>
+          )}
+
+          {/* Sunucu "bu karakterin çizimi uçuyor" diyorsa düğme YOK:
+              yazar sayfayı yenilediğinde düğmeyi görüp basıyor ve hata
+              alıyordu. */}
+          {!k.gorselUrl && !calisiyorMu && k.uretiliyorMu && (
+            <div style={{ marginTop: 14, padding: "10px 13px", borderRadius: "var(--r-o)",
+              background: "var(--yuzey2)", border: "1px solid var(--kenar)",
+              fontSize: 12.5, color: "var(--metin2)", lineHeight: 1.55 }}>
+              Bu karakterin çizimi şu anda sürüyor. Sekmeyi kapatsanız bile devam eder;
+              birazdan sayfayı yenileyin.
+            </div>
+          )}
+
+          {!k.gorselUrl && !calisiyorMu && !k.uretiliyorMu && (
+            <button type="button" onClick={onUret}
+              style={{ marginTop: 14, padding: "10px 18px", borderRadius: "var(--r-o)",
+                border: "1px solid var(--ana)", background: "var(--ana)", color: "var(--ana-uzeri)",
+                fontWeight: 600, fontSize: 13.5 }}>
+              Bu karakteri çiz
+            </button>
+          )}
+
+          {/* Çalışırken düğme değil SÜREÇ gösteriliyor: yazar boş ekrana
+              bakmıyor, arkada ne olduğunu adım adım okuyor. */}
+          {calisiyorMu && surecAdimlari?.length > 0 && (
+            <UretimAnlatimi adimlar={surecAdimlari} takipEden={takipEden} />
+          )}
+
+          {k.gorselUrl && !onayli && !calisiyorMu && (
+            <div style={{ marginTop: 14 }}>
+              {/* REVİZE HAKKI — açıkça, sayıyla. Yazar "ne istiyorsam tek
+                  seferde yazayım" desin diye burada duruyor. */}
+              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap",
+                padding: "8px 12px", borderRadius: "var(--r-o)", marginBottom: 12,
+                background: hakBitti ? "var(--kotu-zemin)" : "var(--uyari-zemin)",
+                border: `1px solid ${hakBitti ? "var(--kotu-kenar)" : "var(--uyari-kenar)"}`,
+                color: hakBitti ? "var(--kotu)" : "var(--uyari)", fontSize: 12.5, lineHeight: 1.55 }}>
+                {hakBitti
+                  ? <span><b>Revize hakkınız doldu.</b> Bu karakter için {toplamHak} değişiklik hakkının tamamını kullandınız.</span>
+                  : <span><b>{k.kalanRevize} revize hakkınız kaldı</b> (toplam {toplamHak}).
+                      Değiştirmek istediğiniz her şeyi <b>tek seferde</b> yazın — her istek bir hak harcar.</span>}
+              </div>
+
+              {/* ── ÇIKIŞ KAPISI ────────────────────────────────────────
+                  Hakkı biten yazar, beğenmediği bir çizimle baş başa
+                  bırakılmıyor. Ücretsiz, çünkü buraya gelinmesi çoğu zaman
+                  yazarın değil bizim çıkarımımızın başarısızlığı. */}
+              {devirBekliyor && (
+                <div style={{ padding: "10px 13px", borderRadius: "var(--r-o)", marginBottom: 12,
+                  background: "var(--yuzey2)", border: "1px solid var(--kenar)",
+                  fontSize: 12.5, color: "var(--metin2)", lineHeight: 1.55 }}>
+                  <b style={{ color: "var(--metin)" }}>{takipEden || "Tasarım ekibimiz"} bu karakteri devraldı.</b>{" "}
+                  Talebiniz sırada; hazır olduğunda burada görecek ve bildirim alacaksınız.
+                </div>
+              )}
+              {k.devralma?.durum === "tamam" && k.devralma?.yanit && (
+                <div style={{ padding: "10px 13px", borderRadius: "var(--r-o)", marginBottom: 12,
+                  background: "var(--iyi-zemin)", border: "1px solid var(--iyi-kenar)",
+                  fontSize: 12.5, color: "var(--iyi)", lineHeight: 1.55 }}>
+                  {takipEden || "Tasarım ekibimiz"}: {k.devralma.yanit}
+                </div>
+              )}
+              {hakBitti && !devirBekliyor && k.devralma?.durum !== "tamam" && (
+                <div style={{ marginBottom: 12 }}>
+                  {!devirAcik ? (
+                    <button type="button" onClick={() => setDevirAcik(true)}
+                      style={{ padding: "10px 18px", borderRadius: "var(--r-o)",
+                        border: "1px solid var(--ana)", background: "var(--yuzey2)",
+                        color: "var(--ana)", fontWeight: 600, fontSize: 13 }}>
+                      {takipEden || "Tasarım ekibimiz"} devralsın — ücretsiz
+                    </button>
+                  ) : (
+                    <div>
+                      <div style={{ fontSize: 12.5, color: "var(--metin2)", marginBottom: 8, lineHeight: 1.55 }}>
+                        Neyin olmadığını kendi cümlelerinizle yazın. Ekip karaktere <b>elden</b> bakacak.
+                        Bunun için <b>ek ücret alınmaz</b> ve süre sözü vermiyoruz — hazır olduğunda haber vereceğiz.
+                      </div>
+                      <textarea value={devirIstek} onChange={(e) => setDevirIstek(e.target.value)} rows={3}
+                        placeholder="Örnek: Üç denemede de yüz ifadesi çok yetişkin çıktı; ben sekiz yaşında, utangaç bir çocuk yüzü bekliyordum."
+                        style={{ width: "100%", boxSizing: "border-box", padding: "10px 12px",
+                          borderRadius: "var(--r-o)", border: "1px solid var(--kenar)",
+                          background: "var(--yuzey2)", color: "var(--metin)", fontSize: 13.5,
+                          fontFamily: "inherit", resize: "vertical" }} />
+                      <div style={{ display: "flex", gap: 10, alignItems: "center", marginTop: 8, flexWrap: "wrap" }}>
+                        <button type="button" disabled={devirIstek.trim().length < 10}
+                          onClick={() => { onDevret?.(devirIstek.trim()); setDevirIstek(""); setDevirAcik(false); }}
+                          style={{ padding: "9px 16px", borderRadius: "var(--r-o)",
+                            border: "1px solid var(--ana)", background: "var(--ana)",
+                            color: "var(--ana-uzeri)", fontWeight: 600, fontSize: 13,
+                            opacity: devirIstek.trim().length < 10 ? .5 : 1 }}>
+                          Tasarım ekibine ilet
+                        </button>
+                        <button type="button" onClick={() => setDevirAcik(false)}
+                          style={{ padding: "9px 16px", borderRadius: "var(--r-o)",
+                            border: "1px solid var(--kenar)", background: "var(--yuzey2)",
+                            color: "var(--metin2)", fontSize: 13 }}>Vazgeç</button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                <button type="button" onClick={onOnayla} disabled={calisiyorMu}
+                  style={{ padding: "10px 18px", borderRadius: "var(--r-o)",
+                    border: "1px solid var(--iyi)", background: "var(--iyi-zemin)",
+                    color: "var(--iyi)", fontWeight: 700, fontSize: 13.5 }}>
+                  ✓ Onaylıyorum
+                </button>
+                {!hakBitti && (
+                  <button type="button" onClick={() => setAcik(!acik)} disabled={calisiyorMu}
+                    style={{ padding: "10px 18px", borderRadius: "var(--r-o)",
+                      border: "1px solid var(--kenar)", background: "var(--yuzey2)",
+                      color: "var(--metin)", fontWeight: 600, fontSize: 13.5 }}>
+                    {acik ? "Vazgeç" : "Değişiklik istiyorum"}
+                  </button>
+                )}
+              </div>
+
+              {acik && !hakBitti && (
+                <div style={{ marginTop: 12 }}>
+                  {/* "Beğenmedim" yazan bir revize hakkı boşa gider: model neyi
+                      değiştireceğini bilmez. Etiketler yazara NE SÖYLEYEBİLECEĞİNİ
+                      gösteriyor — cümlenin başını verip gerisini ona bırakıyor. */}
+                  {revizeEtiketleri.length > 0 && (
+                    <div style={{ marginBottom: 10 }}>
+                      <div style={{ fontSize: 11.5, color: "var(--metin3)", marginBottom: 7 }}>
+                        Neyi değiştirmek istiyorsunuz? Tıklayın, cümleyi tamamlayın:
+                      </div>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                        {revizeEtiketleri.map((e) => (
+                          <button key={e.kod} type="button"
+                            onClick={() => setIstek((o) => (o.trim() ? `${o.trim()} ` : "") + e.ornek + ". ")}
+                            style={{ padding: "5px 11px", borderRadius: "var(--r-tam)", fontSize: 12,
+                              border: "1px solid var(--kenar)", background: "var(--yuzey)",
+                              color: "var(--metin2)", cursor: "pointer" }}>
+                            {e.ad}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  <textarea value={istek} onChange={(e) => setIstek(e.target.value)} rows={4}
+                    placeholder="Değiştirmek istediğiniz HER ŞEYİ tek seferde yazın. Örnek: Saçı daha kısa ve kıvırcık olsun, elbisesi mavi değil hardal sarısı olsun, yüzü biraz daha yuvarlak."
+                    style={{ width: "100%", boxSizing: "border-box", padding: "10px 12px",
+                      borderRadius: "var(--r-o)", border: "1px solid var(--kenar)",
+                      background: "var(--yuzey2)", color: "var(--metin)", fontSize: 13.5,
+                      fontFamily: "inherit", resize: "vertical" }} />
+                  <div style={{ display: "flex", gap: 10, alignItems: "center", marginTop: 8, flexWrap: "wrap" }}>
+                    <button type="button" disabled={calisiyorMu || istek.trim().length < 10}
+                      onClick={() => { onRevize(istek.trim()); setIstek(""); setAcik(false); }}
+                      style={{ padding: "9px 16px", borderRadius: "var(--r-o)",
+                        border: "1px solid var(--ana)", background: "var(--ana)",
+                        color: "var(--ana-uzeri)", fontWeight: 600, fontSize: 13,
+                        opacity: (calisiyorMu || istek.trim().length < 10) ? .5 : 1 }}>
+                      {calisiyorMu ? "Yeniden çiziliyor…" : `Gönder (1 hak harcanır)`}
+                    </button>
+                    <span style={{ fontSize: 11.5, color: "var(--metin3)" }}>
+                      {istek.trim().length < 10
+                        ? "En az 10 karakter yazın"
+                        : `${istek.trim().length} karakterlik istek · ${k.kalanRevize - 1} hak kalacak`}
+                    </span>
+                    {istek.trim().length >= 10 && istek.trim().length < 25 && (
+                      <span style={{ fontSize: 11.5, color: "var(--uyari)" }}>
+                        Kısa bir istek çoğu zaman beklediğiniz değişikliği getirmez — ne istediğinizi
+                        biraz daha açın.
+                      </span>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {k.revizeGecmisi?.length > 0 && (
+            <details style={{ marginTop: 12 }}>
+              <summary style={{ fontSize: 12, color: "var(--metin3)", cursor: "pointer" }}>
+                Geçmiş istekleriniz ({k.revizeGecmisi.length})
+              </summary>
+              <ul style={{ margin: "8px 0 0 16px", padding: 0, fontSize: 12.5, color: "var(--metin2)", lineHeight: 1.6 }}>
+                {k.revizeGecmisi.map((r, i) => <li key={i}>{r.istek}</li>)}
+              </ul>
+            </details>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Üretim süreci anlatımı ─────────────────────────────────────────────
+//
+// Yazar düğmeye bastıktan sonra 30-60 saniye boş ekrana bakmasın diye,
+// arkada olan işi adım adım gösteriyoruz.
+//
+// İKİ DÜRÜSTLÜK KURALI var ve ikisi de koda gömülü:
+//
+//  1) Adım metinleri SUNUCUDAN geliyor, burada yazılmıyor. Motor değişince
+//     anlatım da değişir; "ölçek çıpası korunuyor" yazıp aslında korumamak
+//     mümkün olmasın.
+//
+//  2) Son adımda BEKLENİR. Zamanlayıcı adımları ilerletir ama sonuncuya
+//     gelince durur ve gerçek yanıtı bekler. Yani "bitti" yazısı asla
+//     gerçekten bitmeden çıkmaz. Sahte ilerleme çubuğu yok.
+function UretimAnlatimi({ adimlar, takipEden }) {
+  const [suan, setSuan] = React.useState(0);
+  const [gecenSn, setGecenSn] = React.useState(0);
+
+  React.useEffect(() => {
+    // Son adıma gelince ilerleme DURUR — gerçek yanıt gelene kadar orada
+    // bekler. Süre uzarsa yazar "takıldı mı" diye düşünmesin diye geçen
+    // saniye gösteriliyor.
+    if (suan >= adimlar.length - 1) return;
+    const t = setTimeout(() => setSuan((x) => x + 1), 2600);
+    return () => clearTimeout(t);
+  }, [suan, adimlar.length]);
+
+  React.useEffect(() => {
+    const t = setInterval(() => setGecenSn((x) => x + 1), 1000);
+    return () => clearInterval(t);
+  }, []);
+
+  return (
+    <div style={{ marginTop: 14, padding: "14px 16px", borderRadius: "var(--r-b)",
+      background: "var(--yuzey2)", border: "1px solid var(--kenar)" }}>
+      <ol style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: 9 }}>
+        {adimlar.map((a, i) => {
+          const bitti = i < suan, aktif = i === suan;
+          return (
+            <li key={a.kod || i} style={{ display: "flex", gap: 10, alignItems: "flex-start",
+              opacity: i > suan ? .35 : 1, transition: "opacity .3s ease" }}>
+              <span aria-hidden="true" style={{ width: 18, minWidth: 18, marginTop: 1, textAlign: "center",
+                fontSize: 12.5, color: bitti ? "var(--iyi)" : aktif ? "var(--ana)" : "var(--metin3)" }}>
+                {bitti ? "✓" : aktif ? "●" : "○"}
+              </span>
+              <span style={{ fontSize: 13, lineHeight: 1.55,
+                color: bitti ? "var(--metin2)" : aktif ? "var(--metin)" : "var(--metin3)",
+                fontWeight: aktif ? 600 : 400 }}>
+                {a.metin}
+              </span>
+            </li>
+          );
+        })}
+      </ol>
+      <div style={{ marginTop: 12, paddingTop: 10, borderTop: "1px solid var(--kenar)",
+        display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap",
+        fontSize: 11.5, color: "var(--metin3)" }}>
+        <span>{takipEden || "Tasarım ekibimiz"} kitabınızı takip ediyor</span>
+        <span>{gecenSn} sn · sayfayı kapatsanız da işlem sürer</span>
+      </div>
+    </div>
+  );
+}
+
+// ── Onay kutusu ────────────────────────────────────────────────────────
+// Geri dönüşü olmayan iki karar (stil kilidi, karakter onayı) buradan
+// geçiyor. window.confirm kullanılmıyor: tarayıcıyı kilitler ve mobilde
+// kalıcı susturulabilir — susturulduğu anda geri alınamaz kararlar
+// sessizce onaylanmaya başlar.
+function YazarOnayKutusu({ istek, cevapla }) {
+  React.useEffect(() => {
+    const tus = (e) => { if (e.key === "Escape") cevapla(false); };
+    window.addEventListener("keydown", tus);
+    return () => window.removeEventListener("keydown", tus);
+  }, [cevapla]);
+
+  return (
+    <div role="dialog" aria-modal="true" aria-label={istek.baslik}
+      onClick={(e) => { if (e.target === e.currentTarget) cevapla(false); }}
+      style={{ position: "fixed", inset: 0, zIndex: 80, display: "grid", placeItems: "center",
+        background: "rgba(0,0,0,.55)", padding: "var(--a4)" }}>
+      <div style={{ width: "100%", maxWidth: 460, background: "var(--yuzey)",
+        border: "1px solid var(--kenar)", borderRadius: "var(--r-b)", padding: "var(--a5)",
+        boxShadow: "var(--golge-2)" }}>
+        <h3 style={{ fontFamily: "var(--f-baslik)", fontSize: 18, margin: "0 0 10px", letterSpacing: "-.01em" }}>
+          {istek.baslik}
+        </h3>
+        <p style={{ fontSize: 13.5, color: "var(--metin2)", lineHeight: 1.7, margin: 0 }}>{istek.mesaj}</p>
+        <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: "var(--a5)", flexWrap: "wrap" }}>
+          <button type="button" onClick={() => cevapla(false)}
+            style={{ padding: "10px 18px", borderRadius: "var(--r-o)", border: "1px solid var(--kenar)",
+              background: "var(--yuzey2)", color: "var(--metin)", fontWeight: 600, fontSize: 13.5 }}>
+            {istek.iptalEtiketi || "Vazgeç"}
+          </button>
+          <button type="button" onClick={() => cevapla(true)} autoFocus
+            style={{ padding: "10px 18px", borderRadius: "var(--r-o)", border: "1px solid var(--ana)",
+              background: "var(--ana)", color: "var(--ana-uzeri)", fontWeight: 700, fontSize: 13.5 }}>
+            {istek.onayEtiketi || "Onaylıyorum"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Yazar stüdyosu kabuğu ──────────────────────────────────────────────
+function YazarStudyo({ authFetch, kullanici }) {
+  const [durum, setDurum] = React.useState(null);
+  const [yukleniyor, setYukleniyor] = React.useState(true);
+  const [hata, setHata] = React.useState("");
+  const [calisan, setCalisan] = React.useState(null);   // hangi kart çalışıyor
+  const [acilisGoster, setAcilisGoster] = React.useState(() => {
+    try { return sessionStorage.getItem("mst_yazar_acilis") !== "gosterildi"; } catch { return true; }
+  });
+
+  const yukle = React.useCallback(async () => {
+    try {
+      const r = await authFetch("/api/yazar/studyo/durum");
+      const d = await r.json();
+      if (!r.ok) { setHata(d.error || "Yüklenemedi."); return; }
+      setDurum(d);
+    } catch { setHata("Sunucuya ulaşılamadı."); }
+    finally { setYukleniyor(false); }
+  }, [authFetch]);
+
+  React.useEffect(() => { yukle(); }, [yukle]);
+
+  // Üretim adımları SUNUCUDAN çekiliyor. Çekilemezse üretim yine başlar —
+  // anlatım olmadığı için iş durmamalı; yalnız yazar sade bir bekleme
+  // görür. Bu yüzden hata yutuluyor ama ana akış etkilenmiyor.
+  const [surec, setSurec] = React.useState([]);
+  const surecCek = async (sira, istek) => {
+    try {
+      const r = await authFetch(
+        `/api/yazar/studyo/karakter/${sira}/surec${istek ? `?istek=${encodeURIComponent(istek)}` : ""}`);
+      const d = await r.json();
+      setSurec(r.ok && Array.isArray(d.surec) ? d.surec : []);
+    } catch { setSurec([]); }
+  };
+
+  // ── Sayfalar (Faz 4.2) ──
+  // Ayrı bir uçtan çekiliyor: durum yanıtı her karakter üretiminde
+  // dönüyor, sayfa listesini oraya koymak her üretimde gereksiz bir
+  // sorgu demekti.
+  const [sayfaVerisi, setSayfaVerisi] = React.useState(null);
+  const sayfalariCek = React.useCallback(async () => {
+    try {
+      const r = await authFetch("/api/yazar/studyo/sayfalar");
+      const d = await r.json();
+      setSayfaVerisi(r.ok ? d : null);
+    } catch { setSayfaVerisi(null); }
+  }, [authFetch]);
+  React.useEffect(() => { sayfalariCek(); }, [sayfalariCek]);
+
+  const sayfaYorum = async (sira, yorum) => {
+    setCalisan("sayfa"); setHata("");
+    try {
+      const r = await authFetch(`/api/yazar/studyo/sayfalar/${sira}/yorum`,
+        { method: "POST", body: JSON.stringify({ yorum }) });
+      const d = await r.json();
+      if (!r.ok) { setHata(d.error || "Yorum gönderilemedi."); return; }
+      await sayfalariCek();
+    } catch { setHata("Sunucuya ulaşılamadı."); }
+    finally { setCalisan(null); }
+  };
+  const sayfaYorumSil = async (id) => {
+    setCalisan("sayfa"); setHata("");
+    try {
+      const r = await authFetch(`/api/yazar/studyo/sayfalar/yorum/${id}`, { method: "DELETE" });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { setHata(d.error || "Yorum silinemedi."); return; }
+      await sayfalariCek();
+    } catch { setHata("Sunucuya ulaşılamadı."); }
+    finally { setCalisan(null); }
+  };
+
+  const cagir = async (yol, govde, anahtar) => {
+    setCalisan(anahtar); setHata("");
+    try {
+      const r = await authFetch(yol, { method: "POST", body: JSON.stringify(govde || {}) });
+      const d = await r.json();
+      if (!r.ok) { setHata(d.error || "İşlem yapılamadı."); return null; }
+      setDurum((o) => ({ ...(o || {}), ...d }));
+      return d;
+    } catch { setHata("Sunucuya ulaşılamadı."); return null; }
+    finally { setCalisan(null); setSurec([]); }
+  };
+
+  // Stüdyonun kendi onay kutusu kullanılıyor — window.confirm DEĞİL.
+  // Sebebi kozmetik değil: window.confirm tarayıcıyı kilitler, mobilde
+  // "bu site tekrar sormasın" ile kalıcı susturulabilir ve o noktadan
+  // sonra geri dönülemez kararlar SESSİZCE onaylanır.
+  const [onay, setOnay] = React.useState(null);
+  const onaySor = React.useCallback((istek) => setOnay(istek), []);
+
+  const acilisKapat = React.useCallback(() => {
+    setAcilisGoster(false);
+    try { sessionStorage.setItem("mst_yazar_acilis", "gosterildi"); } catch { /* özel sekme */ }
+  }, []);
+
+  if (yukleniyor) {
+    return <div style={{ padding: "var(--a6)", color: "var(--metin2)" }}>Stüdyo açılıyor…</div>;
+  }
+
+  if (!durum?.proje) {
+    return (
+      <div style={{ maxWidth: 640, margin: "0 auto", padding: "var(--a6) var(--a5)", textAlign: "center" }}>
+        <h2 style={{ fontFamily: "var(--f-baslik)", fontSize: 22 }}>Stüdyo süreciniz henüz başlamadı</h2>
+        <p style={{ fontSize: 14, color: "var(--metin2)", lineHeight: 1.7 }}>
+          Eseriniz incelendikten sonra bu ekranda kitabınızın çizim stilini seçecek ve
+          karakterlerinizi onaylayacaksınız. Hazır olduğunda size haber vereceğiz.
+        </p>
+      </div>
+    );
+  }
+
+  const { proje, stiller = [], karakterler = [], ozet, revizeHakki } = durum;
+
+  return (
+    <>
+      {acilisGoster && (
+        <YazarAcilis ad={kullanici?.name} kitapAdi={proje.kitapAdi} kapat={acilisKapat} />
+      )}
+
+      {onay && (
+        <YazarOnayKutusu istek={onay}
+          cevapla={(kabul) => { const i = onay; setOnay(null); if (kabul) i.is(); }} />
+      )}
+
+      <div style={{ maxWidth: 1080, margin: "0 auto", padding: "var(--a6) var(--a5)" }}>
+        <YazarAdimlar asama={proje.asama} />
+
+        {hata && (
+          <div role="alert" style={{ marginBottom: 20, padding: "11px 14px", borderRadius: "var(--r-o)",
+            background: "var(--kotu-zemin)", border: "1px solid var(--kotu-kenar)",
+            color: "var(--kotu)", fontSize: 13 }}>{hata}</div>
+        )}
+
+        {proje.asama === "stil" && (
+          <YazarStilSecimi stiller={stiller} secilen={proje.stilKod} kilitli={proje.stilKilitli}
+            calisiyor={calisan === "stil"}
+            onSec={(s) => onaySor({
+              baslik: `"${s.ad}" stilini seçiyorsunuz`,
+              mesaj: "Kitabınızın BÜTÜN sayfaları bu çizgide üretilecek ve bu seçim sonradan "
+                + "değiştirilemez. Değiştirmek, kitabın baştan çizilmesi anlamına gelir.",
+              onayEtiketi: "Evet, bu stili seçiyorum",
+              iptalEtiketi: "Biraz daha bakayım",
+              is: () => cagir("/api/yazar/studyo/stil-sec", { kod: s.kod }, "stil"),
+            })} />
+        )}
+
+        {(proje.asama === "karakter" || proje.asama === "kapak" || proje.asama === "tamamlandi") && (
+          <div>
+            <h2 style={{ fontFamily: "var(--f-baslik)", fontSize: 22, margin: "0 0 6px", letterSpacing: "-.02em" }}>
+              Kitabınızın karakterleri
+            </h2>
+            <p style={{ fontSize: 14, color: "var(--metin2)", lineHeight: 1.7, margin: "0 0 4px", maxWidth: 720 }}>
+              Eserinizden <b>{ozet.toplam} karakter</b> çıkardık. Her birini <b>iki görünümde</b> çizip
+              onayınıza sunuyoruz — önden, yandan ve hareket hâlinde. Böylece tek bir resme değil,
+              karakterin kendisine bakarak karar veriyorsunuz. Onayladığınız karakter kitabın bütün
+              sayfalarında aynen kullanılacak.
+            </p>
+            <p style={{ fontSize: 13, color: "var(--metin3)", margin: "0 0 16px" }}>
+              Seçtiğiniz stil: <b style={{ color: "var(--metin2)" }}>{proje.stilAdi}</b> ·
+              {" "}Onaylanan: <b style={{ color: ozet.hepsiOnayli ? "var(--iyi)" : "var(--metin2)" }}>
+                {ozet.onaylanan}/{ozet.toplam}</b>
+            </p>
+
+            {/* Yazar yalnız olmadığını bilsin. Burada uydurma bir isim YOK —
+                tasarım ekibi gerçekten var ve kitabı gerçekten görüyor. */}
+            <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 22,
+              padding: "12px 14px", borderRadius: "var(--r-b)", background: "var(--yuzey)",
+              border: "1px solid var(--kenar)" }}>
+              <span aria-hidden="true" style={{ width: 34, height: 34, borderRadius: "var(--r-tam)",
+                display: "grid", placeItems: "center", background: "var(--yuzey2)",
+                border: "1px solid var(--kenar)" }}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="var(--bag)" strokeWidth="1.7"
+                  strokeLinecap="round" strokeLinejoin="round" width="17" height="17">
+                  <path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
+                </svg>
+              </span>
+              <div style={{ fontSize: 13, lineHeight: 1.6 }}>
+                <b>{durum.takipEden || "Tasarım ekibimiz"} kitabınızı takip ediyor.</b>
+                <span style={{ color: "var(--metin2)" }}>
+                  {" "}Onayladığınız karakterler sayfa üretimine girmeden önce son kontrolden geçer.
+                </span>
+              </div>
+            </div>
+
+            {ozet.hepsiOnayli && (
+              <div style={{ marginBottom: 22, padding: "14px 16px", borderRadius: "var(--r-b)",
+                background: "var(--iyi-zemin)", border: "1px solid var(--iyi-kenar)",
+                color: "var(--iyi)", fontSize: 14, lineHeight: 1.65 }}>
+                <b>Bütün karakterler onaylandı.</b>{" "}
+                {proje.asama === "kapak"
+                  ? "Sıra kapakta — aşağıdan kapak kurgunuzu seçin."
+                  : "Ekibimiz kitabınızın sayfalarını bu karakterlerle üretmeye başlıyor. "
+                    + "Sayfalar hazırlandıkça size haber vereceğiz."}
+              </div>
+            )}
+
+            {/* KAPAK — karakterlerin ÜSTÜNDE değil altında: yazar önce
+                onayladığı karakterleri görüp sonra kapağa karar veriyor. */}
+            {(proje.asama === "kapak" || durum.kapak?.onayliMi) && (
+              <div style={{ margin: "6px 0 30px", padding: "20px 22px", borderRadius: "var(--r-b)",
+                background: "var(--yuzey)", border: "1px solid var(--kenar)" }}>
+                <YazarKapakSecimi kapak={durum.kapak} kitapAdi={proje.kitapAdi}
+                  calisiyor={calisan === "kapak"}
+                  onUret={() => onaySor({
+                    baslik: `${(durum.kapak?.kurgular || []).length} kapak kurgusu hazırlanacak`,
+                    mesaj: (durum.kapak?.secenekler || []).length
+                      ? "Yeni bir set hazırlanınca şu anda gördüğünüz seçenekler KAYBOLUR ve geri "
+                        + `getirilemez. Bu haktan sonra ${Math.max(0, (durum.kapak?.kalanSetHakki || 1) - 1)} `
+                        + "hakkınız kalacak."
+                      : "Üç ayrı çizim yapılacağı için biraz sürebilir. Çizimlerde yazı olmaz; "
+                        + "kitabın adı dizgi aşamasında basılır.",
+                    onayEtiketi: "Hazırla",
+                    iptalEtiketi: "Vazgeç",
+                    is: () => cagir("/api/yazar/studyo/kapak/uret", {}, "kapak"),
+                  })}
+                  onSec={(s) => onaySor({
+                    baslik: `"${s.kurguAd}" kurgusunu kapak olarak seçiyorsunuz`,
+                    mesaj: "Kapak seçimi sonradan değiştirilemez. Kitabın adı ve adınız dizgi "
+                      + "aşamasında bu çizimin üzerine basılacak.",
+                    onayEtiketi: "Evet, kapağım bu",
+                    iptalEtiketi: "Biraz daha bakayım",
+                    is: () => cagir("/api/yazar/studyo/kapak/sec", { sira: s.sira }, "kapak"),
+                  })} />
+
+                {/* Örnek sayfa, kapak SEÇİLDİKTEN sonra anlam kazanıyor:
+                    karakterler ve kapak belliyken iç sayfa gerçekten
+                    kitabın hâlini gösteriyor. */}
+                <YazarOrnekSayfa ornek={durum.ornekSayfa} calisiyor={calisan === "ornek"}
+                  onUret={() => cagir("/api/yazar/studyo/ornek-sayfa", {}, "ornek")} />
+
+                {/* Arka kapak: hiçbir üretim yapmıyor, yani ücretsiz.
+                    Kapak seçildikten sonra gösteriliyor — yazar önce
+                    kitabın yüzünü görsün, sonra arkasını yazsın. */}
+                {/* Paylaşım kartı: kapak onaylandıysa. Hiçbir üretim
+                    yapmıyor, tarayıcıda çiziliyor. */}
+                {durum.kapak?.onayliMi && (
+                  <YazarPaylasimKarti
+                    kapakUrl={(durum.kapak.secenekler || [])[durum.kapak.secim]?.gorselUrl}
+                    kitapAdi={proje.kitapAdi} yazarAdi={kullanici?.name || ""} />
+                )}
+
+                {/* Sayfalar: tasarım ekibi paylaştıysa görünür. */}
+                <YazarSayfalar veri={sayfaVerisi} calisiyor={calisan === "sayfa"}
+                  onYorum={sayfaYorum} onSil={sayfaYorumSil} />
+
+                <YazarArkaKapak arkaKapak={durum.arkaKapak} calisiyor={calisan === "arkaKapak"}
+                  onKaydet={(yazi) => cagir("/api/yazar/studyo/arka-kapak", { yazi }, "arkaKapak")}
+                  onOnayla={() => onaySor({
+                    baslik: "Arka kapak yazınızı onaylıyorsunuz",
+                    mesaj: "Onaydan sonra bu metin değiştirilemez; kitabın arka kapağına aynen basılır.",
+                    onayEtiketi: "Onaylıyorum",
+                    iptalEtiketi: "Bir daha okuyayım",
+                    is: () => cagir("/api/yazar/studyo/arka-kapak/onayla", {}, "arkaKapak"),
+                  })} />
+              </div>
+            )}
+
+            <div style={{ display: "grid", gap: 16 }}>
+              {karakterler.map((k) => (
+                <YazarKarakterKarti key={k.sira} k={k} revizeHakki={revizeHakki}
+                  calisiyorMu={calisan === `k${k.sira}`}
+                  surecAdimlari={surec} takipEden={durum.takipEden}
+                  revizeEtiketleri={durum.revizeEtiketleri || []}
+                  onUret={() => { surecCek(k.sira); cagir(`/api/yazar/studyo/karakter/${k.sira}/uret`, {}, `k${k.sira}`); }}
+                  onRevize={(istek) => { surecCek(k.sira, istek); cagir(`/api/yazar/studyo/karakter/${k.sira}/revize`, { istek }, `k${k.sira}`); }}
+                  // Devir ÜRETİM DEĞİL: süreç anlatımı başlatılmıyor, çünkü
+                  // arkada o an çizen bir motor yok — talep sıraya giriyor.
+                  onDevret={(istek) => cagir(`/api/yazar/studyo/karakter/${k.sira}/devret`, { istek }, `k${k.sira}`)}
+                  onOnayla={() => onaySor({
+                    baslik: `${k.ad} karakterini onaylıyorsunuz`,
+                    mesaj: (k.ekGorunumUrl
+                        ? "Her iki görünüme de baktığınızdan emin olun — karakteriniz sayfalarda "
+                          + "önden, yandan ve hareket hâlinde görünecek. "
+                        : "")
+                      + "Onaydan sonra bu karakter değiştirilemez; kitabın bütün sayfalarında "
+                      + "bu çizim kullanılır. Kalan revize hakkınız da kapanır.",
+                    onayEtiketi: "Onaylıyorum",
+                    iptalEtiketi: "Vazgeç",
+                    is: () => cagir(`/api/yazar/studyo/karakter/${k.sira}/onayla`, {}, `k${k.sira}`),
+                  })} />
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
+
+const EPUB_CRC_TABLO = (() => {
+  const t = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1;
+    t[n] = c >>> 0;
+  }
+  return t;
+})();
+
+function crc32Bayt(bayt) {
+  let c = 0xFFFFFFFF;
+  for (let i = 0; i < bayt.length; i++) c = EPUB_CRC_TABLO[(c ^ bayt[i]) & 0xFF] ^ (c >>> 8);
+  return (c ^ 0xFFFFFFFF) >>> 0;
+}
+
+async function deflateHam(bayt) {
+  // CompressionStream yoksa (eski tarayıcı) sıkıştırmadan saklarız: dosya
+  // büyür ama GEÇERLİ kalır. Sessizce bozuk dosya üretmektense büyük dosya.
+  if (typeof CompressionStream === "undefined") return null;
+  try {
+    const akis = new Blob([bayt]).stream().pipeThrough(new CompressionStream("deflate-raw"));
+    return new Uint8Array(await new Response(akis).arrayBuffer());
+  } catch { return null; }
+}
+
+async function zipPaketle(dosyalar) {
+  const kodla = (x) => (typeof x === "string" ? new TextEncoder().encode(x) : x);
+  const parcalar = [];
+  const merkez = [];
+  let ofset = 0;
+  // Sabit tarih: aynı içerik her zaman aynı dosyayı üretsin.
+  const tarih = ((2026 - 1980) << 9) | (1 << 5) | 1;
+  const saat = 0;
+
+  for (const d of dosyalar) {
+    const ham = kodla(d.veri);
+    const adB = new TextEncoder().encode(d.ad);
+    const crc = crc32Bayt(ham);
+    let govde = ham, yontem = 0;
+    if (d.sikistir !== false) {
+      const sikistirilmis = await deflateHam(ham);
+      if (sikistirilmis && sikistirilmis.length < ham.length) { govde = sikistirilmis; yontem = 8; }
+    }
+
+    const yerel = new DataView(new ArrayBuffer(30));
+    yerel.setUint32(0, 0x04034b50, true);
+    yerel.setUint16(4, 20, true);
+    yerel.setUint16(6, 0x0800, true);     // UTF-8 dosya adı
+    yerel.setUint16(8, yontem, true);
+    yerel.setUint16(10, saat, true);
+    yerel.setUint16(12, tarih, true);
+    yerel.setUint32(14, crc, true);
+    yerel.setUint32(18, govde.length, true);
+    yerel.setUint32(22, ham.length, true);
+    yerel.setUint16(26, adB.length, true);
+    yerel.setUint16(28, 0, true);
+    parcalar.push(new Uint8Array(yerel.buffer), adB, govde);
+
+    const md = new DataView(new ArrayBuffer(46));
+    md.setUint32(0, 0x02014b50, true);
+    md.setUint16(4, 20, true); md.setUint16(6, 20, true);
+    md.setUint16(8, 0x0800, true);
+    md.setUint16(10, yontem, true);
+    md.setUint16(12, saat, true); md.setUint16(14, tarih, true);
+    md.setUint32(16, crc, true);
+    md.setUint32(20, govde.length, true);
+    md.setUint32(24, ham.length, true);
+    md.setUint16(28, adB.length, true);
+    md.setUint32(42, ofset, true);
+    merkez.push(new Uint8Array(md.buffer), adB);
+
+    ofset += 30 + adB.length + govde.length;
+  }
+
+  const merkezBoy = merkez.reduce((t, x) => t + x.length, 0);
+  const son = new DataView(new ArrayBuffer(22));
+  son.setUint32(0, 0x06054b50, true);
+  son.setUint16(8, dosyalar.length, true);
+  son.setUint16(10, dosyalar.length, true);
+  son.setUint32(12, merkezBoy, true);
+  son.setUint32(16, ofset, true);
+  return new Blob([...parcalar, ...merkez, new Uint8Array(son.buffer)], { type: "application/epub+zip" });
+}
+
+function xmlKacir(x) {
+  return String(x == null ? "" : x)
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;").replace(/'/g, "&apos;")
+    // eslint-disable-next-line no-control-regex
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, "");
+}
+
+const EPUB_CSS = `@page { margin: 0; }
+html, body { margin: 0; padding: 0; background: #ffffff; }
+.sayfa { margin: 0; padding: 0; text-align: center; page-break-after: always; }
+.sayfa img { max-width: 100%; max-height: 100vh; display: block; margin: 0 auto; }
+.metin { font-family: serif; font-size: 1em; line-height: 1.5; padding: 1em 1.2em; text-align: center; }
+.kunye { padding: 2em 1.5em; font-family: serif; line-height: 1.7; }
+.kunye h1 { font-size: 1.5em; margin: 0 0 .3em; }
+.kunye .yazar { color: #444; margin-bottom: 2em; }`;
+
+function epubSayfaXhtml(baslik, govde) {
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" lang="tr" xml:lang="tr">
+<head><meta charset="UTF-8"/><title>${xmlKacir(baslik)}</title>
+<link rel="stylesheet" type="text/css" href="stil.css"/></head>
+<body>${govde}</body></html>`;
+}
+
+/**
+ * @param {object} kitap { kitapAdi, yazarAdi, yayinevi, isbn, dil, sayfalar:[{ad, jpegBayt, genislik, yukseklik, metin, kapakMi}] }
+ * @returns {Promise<Blob>}
+ */
+async function epubPaketle(kitap) {
+  const kimlik = kitap.isbn ? `urn:isbn:${kitap.isbn}` : `urn:uuid:mst-${Date.now()}`;
+  const dil = kitap.dil || "tr";
+  const dosyalar = [];
+
+  // 1) mimetype — İLK ve SIKIŞTIRILMAMIŞ olmak ZORUNDA.
+  dosyalar.push({ ad: "mimetype", veri: "application/epub+zip", sikistir: false });
+
+  dosyalar.push({ ad: "META-INF/container.xml", veri: `<?xml version="1.0" encoding="UTF-8"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+<rootfiles><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles>
+</container>` });
+
+  dosyalar.push({ ad: "OEBPS/stil.css", veri: EPUB_CSS });
+
+  const manifest = [];
+  const omurga = [];
+  const icindekiler = [];
+
+  kitap.sayfalar.forEach((s, i) => {
+    const gorselAd = `gorseller/${s.ad}.jpg`;
+    const sayfaAd = `${s.ad}.xhtml`;
+    dosyalar.push({ ad: `OEBPS/${gorselAd}`, veri: s.jpegBayt, sikistir: false });   // JPEG zaten sıkışık
+    const metinBlogu = s.metin && s.metin.trim()
+      ? `<div class="metin">${xmlKacir(s.metin).replace(/\n/g, "<br/>")}</div>` : "";
+    dosyalar.push({
+      ad: `OEBPS/${sayfaAd}`,
+      veri: epubSayfaXhtml(s.baslik || kitap.kitapAdi,
+        `<div class="sayfa"><img src="${gorselAd}" alt="${xmlKacir(s.baslik || "")}"/>${metinBlogu}</div>`),
+    });
+    manifest.push(`<item id="g${i}" href="${gorselAd}" media-type="image/jpeg"${s.kapakMi ? ' properties="cover-image"' : ""}/>`);
+    manifest.push(`<item id="s${i}" href="${sayfaAd}" media-type="application/xhtml+xml"/>`);
+    omurga.push(`<itemref idref="s${i}"/>`);
+    if (s.baslik) icindekiler.push(`<li><a href="${sayfaAd}">${xmlKacir(s.baslik)}</a></li>`);
+  });
+
+  dosyalar.push({ ad: "OEBPS/nav.xhtml", veri: `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" lang="${dil}" xml:lang="${dil}">
+<head><meta charset="UTF-8"/><title>İçindekiler</title></head>
+<body><nav epub:type="toc" id="toc"><h1>İçindekiler</h1><ol>${icindekiler.join("")}</ol></nav></body></html>` });
+
+  dosyalar.push({ ad: "OEBPS/content.opf", veri: `<?xml version="1.0" encoding="UTF-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="kimlik" xml:lang="${dil}">
+<metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+<dc:identifier id="kimlik">${xmlKacir(kimlik)}</dc:identifier>
+<dc:title>${xmlKacir(kitap.kitapAdi || "Kitap")}</dc:title>
+<dc:language>${dil}</dc:language>
+${kitap.yazarAdi ? `<dc:creator>${xmlKacir(kitap.yazarAdi)}</dc:creator>` : ""}
+${kitap.yayinevi ? `<dc:publisher>${xmlKacir(kitap.yayinevi)}</dc:publisher>` : ""}
+<meta property="dcterms:modified">${new Date().toISOString().replace(/\.\d+Z$/, "Z")}</meta>
+<meta property="rendition:layout">pre-paginated</meta>
+<meta property="rendition:spread">landscape</meta>
+</metadata>
+<manifest>
+<item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>
+<item id="css" href="stil.css" media-type="text/css"/>
+${manifest.join("\n")}
+</manifest>
+<spine>${omurga.join("")}</spine>
+</package>` });
+
+  return zipPaketle(dosyalar);
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// BÖLGE DÜZELTME (19 Ağustos 2026)
+//
+// Sorun: bir sayfada tek bir kusur oluyor — bir yüz bozuk çıkıyor, bir
+// zebranın fazladan bacağı oluyor, bir el yanlış duruyor. Şimdiye kadar tek
+// çare sayfayı BAŞTAN üretmekti: yeni ücret, ve doğru çıkmış her şey de
+// (kompozisyon, ışık, öteki karakterler) değişiyordu. Beğenilen bir sayfayı
+// küçük bir kusur yüzünden kaybetmek en can sıkıcı kayıptı.
+//
+// NASIL ÇALIŞIYOR
+// Kullanıcı kusurlu alanı fırçayla boyar ve ne olması gerektiğini yazar.
+// Görselin TAMAMI referans olarak modele gider, düzeltme talimatıyla yeni
+// bir görsel üretilir. Sonra tarayıcıda birleştirme yapılır: ORİJİNAL her
+// yerde aynen korunur, YALNIZ boyanan alan yeni görselden alınır. Kenarlar
+// yumuşatılarak (bulanık maske) geçiş belli olmaz.
+//
+// NEDEN BÖYLE: modelin maske parametresinin bu uçtaki tam şemasını
+// doğrulayamadım. Doğrulanmamış bir API şeması göndermek, bugün editör
+// raporunda üç tur bedelini ödediğimiz hatanın aynısı olurdu. Buradaki yol
+// yalnızca ÇALIŞTIĞI KANITLANMIŞ çağrı biçimini kullanıyor (referanslı
+// üretim) ve "sadece bu bölge değişsin" güvencesini tarayıcıda, kendi
+// elimizde veriyor. Model gerçek maskeyi desteklediği doğrulandığında
+// aşağıdaki `maskeB64` doğrudan uca eklenebilir — birleştirme yine
+// güvenlik ağı olarak kalır.
+// ═══════════════════════════════════════════════════════════════════════
+const FIRCA_VARSAYILAN = 48;
+
+function BolgeDuzeltme({ acik, kapat, gorselUrl, baslik, stil, urlDenB64Al, uretFn, onayla, bildir }) {
+  const tuvalRef = React.useRef(null);        // maske tuvali (ekran ölçeğinde)
+  const gorselRef = React.useRef(null);       // yüklenen orijinal <img>
+  const [yukleniyor, setYukleniyor] = React.useState(false);
+  const [hazir, setHazir] = React.useState(false);
+  const [hata, setHata] = React.useState("");
+  const [firca, setFirca] = React.useState(FIRCA_VARSAYILAN);
+  const [tarif, setTarif] = React.useState("");
+  const [calisiyor, setCalisiyor] = React.useState(false);
+  const [durum, setDurum] = React.useState("");
+  const [sonuc, setSonuc] = React.useState(null);   // { oncekiUrl, yeniB64 }
+  const [boyandiMi, setBoyandiMi] = React.useState(false);
+  const surukluyorRef = React.useRef(false);
+
+  // Görseli yükle ve maske tuvalini onun ölçüsüne kur.
+  React.useEffect(() => {
+    if (!acik || !gorselUrl) return;
+    let iptal = false;
+    setYukleniyor(true); setHazir(false); setHata(""); setSonuc(null); setBoyandiMi(false);
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    const zamanAsimi = setTimeout(() => { if (!iptal) { setHata("Görsel 20 saniyede yüklenemedi."); setYukleniyor(false); } }, 20000);
+    img.onload = () => {
+      clearTimeout(zamanAsimi);
+      if (iptal) return;
+      gorselRef.current = img;
+      setHazir(true); setYukleniyor(false);
+    };
+    img.onerror = () => {
+      clearTimeout(zamanAsimi);
+      if (iptal) return;
+      setHata("Görsel yüklenemedi. (Depo adresi ölü olabilir.)");
+      setYukleniyor(false);
+    };
+    img.src = gorselUrl;
+    return () => { iptal = true; clearTimeout(zamanAsimi); };
+  }, [acik, gorselUrl]);
+
+  // DÜZELTİLDİ (19 Ağu 2026, tarayıcı denemesinde bulundu):
+  // Tuvalin ölçüsü görsel yüklenir yüklenmez ayarlanmaya çalışılıyordu, ama
+  // <canvas> yalnız `hazir` olunca RENDER EDİLİYOR — o anda tuvalRef.current
+  // hâlâ null'dı ve tuval tarayıcının varsayılan 300x150 ölçüsünde kalıyordu.
+  // Sonuç: fırça, görselin gerçek pikselleriyle hiç örtüşmeyen bir koordinat
+  // sisteminde boyuyordu; kullanıcı bir yeri boyayıp bambaşka bir yerin
+  // düzeltildiğini görecekti. Ölçü artık tuval GERÇEKTEN var olduktan sonra
+  // veriliyor.
+  React.useEffect(() => {
+    if (!hazir) return;
+    const t = tuvalRef.current, img = gorselRef.current;
+    if (!t || !img) return;
+    t.width = img.width;
+    t.height = img.height;
+    t.getContext("2d").clearRect(0, 0, t.width, t.height);
+    setBoyandiMi(false);
+  }, [hazir]);
+
+  // Ekrandaki tıklama noktasını görselin GERÇEK piksel koordinatına çevirir.
+  // Bu dönüşüm olmadan fırça, büyük görsellerde bambaşka bir yeri boyar.
+  const nokta = (e) => {
+    const t = tuvalRef.current;
+    const k = t.getBoundingClientRect();
+    const x = ((e.clientX - k.left) / k.width) * t.width;
+    const y = ((e.clientY - k.top) / k.height) * t.height;
+    return { x, y, olcek: t.width / k.width };
+  };
+
+  const boya = (e) => {
+    const t = tuvalRef.current;
+    if (!t || !hazir) return;
+    const { x, y, olcek } = nokta(e);
+    const cx = t.getContext("2d");
+    cx.fillStyle = "rgba(232,93,117,0.55)";
+    cx.beginPath();
+    cx.arc(x, y, (firca / 2) * olcek, 0, Math.PI * 2);
+    cx.fill();
+    if (!boyandiMi) setBoyandiMi(true);
+  };
+
+  const temizle = () => {
+    const t = tuvalRef.current;
+    if (t) t.getContext("2d").clearRect(0, 0, t.width, t.height);
+    setBoyandiMi(false);
+  };
+
+  // Maskeyi al: boyanan yerlerde beyaz, ötekinde saydam. Kenarları
+  // yumuşatmak için bulanıklaştırılır — sert kenar birleştirmede belli olur.
+  const maskeCanvas = (yumusatma) => {
+    const t = tuvalRef.current;
+    const m = document.createElement("canvas");
+    m.width = t.width; m.height = t.height;
+    const mx = m.getContext("2d");
+    if (yumusatma > 0) mx.filter = `blur(${yumusatma}px)`;
+    mx.drawImage(t, 0, 0);
+    mx.filter = "none";
+    // Yarı saydam fırçayı tam opak maskeye çevir (alfa eşiği yerine
+    // yumuşak geçiş korunur; yalnız doygunluk artırılır).
+    const v = mx.getImageData(0, 0, m.width, m.height);
+    const d = v.data;
+    for (let i = 0; i < d.length; i += 4) {
+      d[i] = 255; d[i + 1] = 255; d[i + 2] = 255;
+      d[i + 3] = Math.min(255, d[i + 3] * 2.2);
+    }
+    mx.putImageData(v, 0, 0);
+    return m;
+  };
+
+  // Boyanan alanın sınır kutusu — prompt'ta "görselin şu bölgesi" demek için.
+  const sinirKutusu = () => {
+    const t = tuvalRef.current;
+    const v = t.getContext("2d").getImageData(0, 0, t.width, t.height).data;
+    let x1 = t.width, y1 = t.height, x2 = 0, y2 = 0, varMi = false;
+    for (let y = 0; y < t.height; y += 2) {
+      for (let x = 0; x < t.width; x += 2) {
+        if (v[(y * t.width + x) * 4 + 3] > 8) {
+          varMi = true;
+          if (x < x1) x1 = x; if (x > x2) x2 = x;
+          if (y < y1) y1 = y; if (y > y2) y2 = y;
+        }
+      }
+    }
+    if (!varMi) return null;
+    const yatay = (x1 + x2) / 2 / t.width, dikey = (y1 + y2) / 2 / t.height;
+    const yer = `${dikey < 0.34 ? "üst" : dikey > 0.66 ? "alt" : "orta"} ${yatay < 0.34 ? "sol" : yatay > 0.66 ? "sağ" : "orta"}`;
+    const alanYuzde = Math.round((((x2 - x1) * (y2 - y1)) / (t.width * t.height)) * 100);
+    return { yer, alanYuzde };
+  };
+
+  const duzelt = async () => {
+    if (calisiyor) return;
+    if (!boyandiMi) { setHata("Önce düzeltilecek alanı fırçayla boya."); return; }
+    if (!tarif.trim()) { setHata("Ne olması gerektiğini yaz — örn. “yüzü düzelt, iki göz olsun”."); return; }
+    const kutu = sinirKutusu();
+    const onay = await onayla({
+      baslik: "Bölge düzeltme — ücretli",
+      tehlike: true,
+      onayEtiketi: "Düzelt (ücretli)",
+      mesaj: `Bir görsel üretimi kadar ücret harcanır (sayfayı baştan üretmekle aynı).\n\n` +
+        `Fark şu: sonuçta YALNIZ boyadığın alan değişir, geri kalan her piksel aynen kalır.\n\n` +
+        (kutu ? `Boyanan alan: görselin ${kutu.yer} bölgesi, yaklaşık %${kutu.alanYuzde}'i.` : ""),
+    });
+    if (!onay) return;
+
+    setCalisiyor(true); setHata(""); setDurum("Orijinal görsel hazırlanıyor…");
+    try {
+      const img = gorselRef.current;
+      const kutuBilgi = kutu ? `The area to correct is in the ${
+        { "üst sol": "upper-left", "üst orta": "upper-centre", "üst sağ": "upper-right",
+          "orta sol": "centre-left", "orta orta": "centre", "orta sağ": "centre-right",
+          "alt sol": "lower-left", "alt orta": "lower-centre", "alt sağ": "lower-right" }[kutu.yer] || kutu.yer
+      } region of the image.` : "";
+
+      const talimat = [
+        "Correct ONE defect in the supplied image. Keep everything else EXACTLY as it is:",
+        "same composition, same characters, same colours, same lighting, same style, same framing.",
+        "Do not re-imagine the scene. Do not move anything. Do not change the background.",
+        kutuBilgi,
+        "",
+        "THE CORRECTION REQUESTED:",
+        tarif.trim(),
+        "",
+        "MUST NOT APPEAR: no text, letters, numbers or watermarks; correct anatomy;",
+        "countable and correct number of limbs; no duplicated body parts; no extra characters.",
+      ].filter(Boolean).join("\n");
+
+      setDurum("Düzeltme üretiliyor… (bir görsel üretimi kadar sürer)");
+      const yeniB64 = await uretFn({ sahne: talimat, referanslar: [gorselUrl] });
+      if (!yeniB64) throw new Error("Düzeltme üretilemedi.");
+
+      setDurum("Sadece boyanan alan yerleştiriliyor…");
+      const birlesik = await birlestir(img, yeniB64, maskeCanvas(Math.max(2, Math.round(img.width / 220))));
+      setSonuc({ oncekiUrl: gorselUrl, yeniB64: birlesik });
+      setDurum("");
+    } catch (e) {
+      setHata(e.message || "Düzeltme başarısız.");
+      bildir?.(`Bölge düzeltme başarısız: ${e.message || ""}`, "hata");
+    } finally { setCalisiyor(false); }
+  };
+
+  if (!acik) return null;
+  const kutuStil = { background: "#fff", borderRadius: 14, padding: 16, maxWidth: 1100, width: "100%",
+    maxHeight: "92vh", overflowY: "auto", color: "#18181a" };
+
+  return (
+    <div className="mst-perde" role="dialog" aria-modal="true" aria-label="Bölge düzeltme"
+      onMouseDown={(e) => { if (e.target === e.currentTarget && !calisiyor) kapat(); }}
+      style={{ position: "fixed", inset: 0, zIndex: 4300, background: "rgba(18,18,20,.7)",
+               display: "grid", placeItems: "center", padding: 16 }}>
+      <div className="mst-kutu" style={kutuStil}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10, flexWrap: "wrap" }}>
+          <b style={{ fontFamily: "'Fredoka', sans-serif", fontSize: 16 }}>🖌 Bölge Düzeltme</b>
+          <span style={{ fontSize: 12, color: "#6f6f6c" }}>{baslik}</span>
+          <span style={{ marginLeft: "auto" }}>
+            <span onClick={() => !calisiyor && kapat()} style={{ cursor: calisiyor ? "not-allowed" : "pointer", fontSize: 13, color: "#6f6f6c" }}>Kapat ✕</span>
+          </span>
+        </div>
+
+        {!sonuc && (
+          <>
+            <div style={{ fontSize: 12.5, color: "#6f6f6c", marginBottom: 10, lineHeight: 1.6 }}>
+              Kusurlu alanı fırçayla boya, ne olması gerektiğini yaz. Sonuçta
+              <b style={{ color: "#18181a" }}> yalnız boyadığın alan </b>
+              değişir; sayfanın geri kalanı piksel piksel aynı kalır.
+            </div>
+
+            {yukleniyor && <div style={{ fontSize: 13, color: "#6f6f6c" }}>Görsel yükleniyor…</div>}
+            {hata && <div style={{ background: "#FDECEC", border: "1px solid #E3B4B4", color: "#8B2E2E",
+              borderRadius: 8, padding: "8px 10px", fontSize: 12.5, marginBottom: 10 }}>{hata}</div>}
+
+            {hazir && (
+              <>
+                <div style={{ position: "relative", display: "inline-block", maxWidth: "100%", lineHeight: 0,
+                  border: "1px solid #E4DFD1", borderRadius: 8, overflow: "hidden", background: "#F3EFE6" }}>
+                  <img src={gorselUrl} alt="" style={{ maxWidth: "100%", maxHeight: "56vh", display: "block" }} />
+                  <canvas ref={tuvalRef}
+                    onMouseDown={(e) => { surukluyorRef.current = true; boya(e); }}
+                    onMouseMove={(e) => { if (surukluyorRef.current) boya(e); }}
+                    onMouseUp={() => { surukluyorRef.current = false; }}
+                    onMouseLeave={() => { surukluyorRef.current = false; }}
+                    style={{ position: "absolute", inset: 0, width: "100%", height: "100%", cursor: "crosshair" }} />
+                </div>
+
+                <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", margin: "10px 0" }}>
+                  <label style={{ fontSize: 12, color: "#6f6f6c", display: "flex", alignItems: "center", gap: 6 }}>
+                    Fırça
+                    <input type="range" min="8" max="160" value={firca}
+                      onChange={(e) => setFirca(Number(e.target.value))} style={{ width: 140 }} />
+                    <span style={{ fontFamily: FONT_MONO, fontSize: 11 }}>{firca}px</span>
+                  </label>
+                  <button onClick={temizle} style={{ ...stil.buton, fontSize: 12, background: "#8E897A" }}>Boyamayı temizle</button>
+                  {boyandiMi && <span style={{ fontSize: 12, color: "#1E5E30" }}>✓ alan seçildi</span>}
+                </div>
+
+                <textarea value={tarif} onChange={(e) => setTarif(e.target.value)}
+                  placeholder="Ne olmalı? Örn: “yüzü düzelt — iki göz, bir ağız, simetrik olsun” / “fazladan olan bacağı kaldır, dört bacak olsun”"
+                  style={{ ...stil.input, minHeight: 62, marginBottom: 10 }} />
+
+                <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                  <button onClick={duzelt} disabled={calisiyor}
+                    style={{ ...stil.buton, ...(calisiyor ? stil.butonPasif : {}) }}>
+                    {calisiyor ? "Düzeltiliyor…" : "Bu Bölgeyi Düzelt (ücretli)"}
+                  </button>
+                  {durum && <span style={{ fontSize: 12, color: "#6f6f6c" }}>{durum}</span>}
+                </div>
+              </>
+            )}
+          </>
+        )}
+
+        {sonuc && (
+          <>
+            <div style={{ fontSize: 12.5, color: "#6f6f6c", marginBottom: 8 }}>
+              Solda önceki, sağda düzeltilmiş hâl. Beğenmezsen hiçbir şey değişmez.
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, minWidth: 0 }}>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: 11, color: "#6f6f6c", marginBottom: 4 }}>ÖNCEKİ</div>
+                <img src={sonuc.oncekiUrl} alt="önceki" style={{ width: "100%", borderRadius: 8, border: "1px solid #E4DFD1" }} />
+              </div>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: 11, color: "#1E5E30", marginBottom: 4 }}>DÜZELTİLMİŞ</div>
+                <img src={`data:image/png;base64,${sonuc.yeniB64}`} alt="düzeltilmiş"
+                  style={{ width: "100%", borderRadius: 8, border: "2px solid #4FAF7A" }} />
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
+              <button onClick={() => kapat(sonuc.yeniB64)} style={{ ...stil.buton, background: "#4FAF7A" }}>
+                Bunu Kullan
+              </button>
+              <button onClick={() => { setSonuc(null); setDurum(""); }} style={{ ...stil.buton, background: "#8E897A" }}>
+                Tekrar dene
+              </button>
+              <button onClick={() => kapat()} style={{ ...stil.buton, background: "#C0392B" }}>Vazgeç</button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Orijinali koru, yalnız maskeli alanı yeni görselden al.
+// Yeni görsel farklı ölçüde gelirse orijinalin ölçüsüne çekilir — aksi hâlde
+// birleştirme kayar ve düzeltme bambaşka bir yere yapışır.
+function birlestir(orijinalImg, yeniB64, maskeCanvas) {
+  return new Promise((resolve, reject) => {
+    const yeni = new Image();
+    const zamanAsimi = setTimeout(() => reject(new Error("Düzeltilmiş görsel yüklenemedi (zaman aşımı)")), 20000);
+    yeni.onerror = () => { clearTimeout(zamanAsimi); reject(new Error("Düzeltilmiş görsel okunamadı")); };
+    yeni.onload = () => {
+      clearTimeout(zamanAsimi);
+      try {
+        const G = orijinalImg.width, Y = orijinalImg.height;
+        // 1) Yeni görselin yalnız maskeli kısmını ayıkla
+        const parca = document.createElement("canvas");
+        parca.width = G; parca.height = Y;
+        const px = parca.getContext("2d");
+        px.drawImage(yeni, 0, 0, G, Y);
+        px.globalCompositeOperation = "destination-in";
+        px.drawImage(maskeCanvas, 0, 0, G, Y);
+        // 2) Orijinalin üstüne yapıştır
+        const son = document.createElement("canvas");
+        son.width = G; son.height = Y;
+        const sx = son.getContext("2d");
+        sx.drawImage(orijinalImg, 0, 0);
+        sx.drawImage(parca, 0, 0);
+        resolve(son.toDataURL("image/png").split(",")[1]);
+      } catch (e) { reject(e); }
+    };
+    yeni.src = "data:image/png;base64," + yeniB64;
+  });
+}
+
 // ============ MST Çocuk Stüdyo — Kitap Resim Atölyesi ============
 // Bağımsız aracın (kitap-resim-araci.html) admin panele taşınmış hali —
 // kendi Neon veritabanında kalıcı, artık her yerden erişilebilir.
@@ -4352,6 +6889,13 @@ function KitapStudyo({ authFetch, token }) {
   // NOT: bu bildirim, prompt motoru bloğunun DIŞINDA durmalı —
   // test-prompt-motoru.js o bloğu çıkarıp React olmadan çalıştırıyor.
   const [promptOnizleme, setPromptOnizleme] = React.useState(null);
+  // Bölge düzeltme (19 Ağu 2026): { url, baslik, uygula(b64) }
+  const [duzeltmeHedefi, setDuzeltmeHedefi] = React.useState(null);
+  // Karakter kütüphanesi (19 Ağu 2026)
+  const [kutuphaneAcik, setKutuphaneAcik] = React.useState(false);
+  const [kutuphane, setKutuphane] = React.useState(null);
+  const [kutuphaneArama, setKutuphaneArama] = React.useState("");
+  const [kutuphaneCalisiyor, setKutuphaneCalisiyor] = React.useState(false);
 
   // ---- Bildirimler ve uygulama içi onay (19 Ağu 2026, madde 33-42) --------
   React.useEffect(() => { studyoStiliYukle(); }, []);
@@ -4463,12 +7007,19 @@ function KitapStudyo({ authFetch, token }) {
   // Artık: kayıp tespit edilirse kullanıcıya SORULUYOR. "Evet, sil" derse
   // onaylı olarak tekrar gönderiliyor. "Hayır" derse ekran ve bellek
   // SUNUCUDAKİ gerçek hâle geri çekiliyor — ikisi asla ayrışmıyor.
+  // Sunucudaki `guncellendi` damgası. Kaydederken geri gönderiliyor:
+  // proje bu damgadan sonra başkası tarafından kaydedilmişse sunucu
+  // kaydı REDDEDİYOR. Damga olmadan iki kişi aynı projeyi düzenlediğinde
+  // ikinci kaydeden birincinin bütün çalışmasını siliyordu.
+  const damgaRef = React.useRef({});
+
   const projeyiSunucudanTazele = async (hedefId) => {
     try {
       const r = await authFetch(`/api/admin/kitap-studyo/projeler/${hedefId}`);
       const d = await r.json();
       if (d.ok) {
         aktifUretimVerisiRef.current[hedefId] = d.proje;
+        if (d.guncellendi) damgaRef.current[hedefId] = d.guncellendi;
         if (hedefId === seciliId) setSeciliProje(d.proje);
         return d.proje;
       }
@@ -4491,14 +7042,30 @@ function KitapStudyo({ authFetch, token }) {
         body: JSON.stringify({
           ...guncelMeta,
           asama: guncelMeta.asama || "uretim",
+          ...(damgaRef.current[hedefId] ? { beklenenGuncellendi: damgaRef.current[hedefId] } : {}),
           ...(gorselSilmeyiOnayla ? { gorselSilmeyiOnayla: true } : {}),
         }),
       });
       const d = await r.json();
 
       if (d.ok) {
+        if (d.guncellendi) damgaRef.current[hedefId] = d.guncellendi;
         if (hedefId === seciliId) { setKayitDurumu("kaydedildi"); setSonKayitZamani(new Date()); }
         return true;
+      }
+
+      // ---- Başkası kaydetmiş: SESSİZCE ÜZERİNE YAZMA ----
+      // Burada otomatik birleştirme yapmıyoruz: iki kişinin metnini
+      // makine birleştiremez. Doğrusu, durup kullanıcıya söylemek.
+      if (d.kod === "bayat_kopya") {
+        await projeyiSunucudanTazele(hedefId);
+        if (hedefId === seciliId) {
+          setKayitDurumu("hata");
+          setHata("Siz bu projeyi açtıktan sonra başka biri kaydetmiş. Kaydınız YAPILMADI ve "
+            + "ekran sunucudaki güncel hâle döndü — değişikliğinizi bunun üzerine tekrar yapın. "
+            + "Yenilemeden kaydetseydik diğer kişinin çalışması silinirdi.");
+        }
+        return false;
       }
 
       // ---- Koruma devreye girdi: sor, sonra ya onayla ya geri al ----
@@ -4595,7 +7162,7 @@ function KitapStudyo({ authFetch, token }) {
     const kutu = new Blob([JSON.stringify(paket, null, 2)], { type: "application/json" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(kutu);
-    a.download = `${(p.kitapAdi || "proje").replace(/[^a-zA-Z0-9_-]+/g, "-")}-analiz-${new Date().toISOString().slice(0, 10)}.json`;
+    a.download = `${dosyaAdiSadelestir(p.kitapAdi, "proje")}-analiz-${new Date().toISOString().slice(0, 10)}.json`;
     a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 2000);
   };
@@ -4678,6 +7245,7 @@ function KitapStudyo({ authFetch, token }) {
       const d = await r.json();
       if (acilanProjeRef.current !== id) return;   // kullanıcı başka projeye geçti
       if (d.ok) {
+        if (d.guncellendi) damgaRef.current[id] = d.guncellendi;
         setSeciliProje(d.proje);
         // DÜZELTİLDİ (16 Ağu 2026 — GÖRSEL KAYBININ KÖK NEDENİ):
         // Burada YALNIZCA ekran state'i tazeleniyordu; aktifUretimVerisiRef
@@ -5216,8 +7784,11 @@ function KitapStudyo({ authFetch, token }) {
       // Uzantı artık dosyanın GERÇEK türünden geliyor.
       const uzanti = blob.type === "image/jpeg" ? "jpg" : blob.type === "image/webp" ? "webp" : "png";
       a.href = geciciUrl;
-      a.download = /\.(png|jpe?g|webp)$/i.test(dosyaAdi) ? dosyaAdi : `${dosyaAdi}.${uzanti}`;
-      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      {
+        const govde = String(dosyaAdi || "gorsel").replace(/\.(png|jpe?g|webp)$/i, "");
+        a.download = `${dosyaAdiSadelestir(govde, "gorsel")}.${uzanti}`;
+      }
+      document.body.appendChild(a); a.click(); setTimeout(() => a.remove(), 0);
       // Firefox'ta hemen iptal edilirse büyük dosya boş iniyordu.
       setTimeout(() => URL.revokeObjectURL(geciciUrl), 2000);
     } catch { setHata("Görsel indirilemedi."); }
@@ -5516,6 +8087,118 @@ function KitapStudyo({ authFetch, token }) {
       }
     }
     throw sonHata;
+  };
+
+  // ── Bölge düzeltme köprüsü (19 Ağu 2026) ────────────────────────────────
+  // Bileşen yalnız "şu referansla şu sahneyi üret, base64 ver" biliyor;
+  // hangi alana yazılacağını burada kuruyoruz.
+  const duzeltmeUret = async ({ sahne, referanslar }) => {
+    const p = projeOku(seciliId);
+    const url = await gorselIsteYenidenDeneyerek({
+      karakterTanimi: p.stilTanimi, sahne, model: p.model, kalite: p.kalite, boyut: p.boyut,
+      referansGorseller: referanslar, amac: "bolge-duzeltme",
+    });
+    return await urlDenB64Al(url);
+  };
+
+  // Düzeltilmiş görseli yükler ve verilen alana yazar. Ham kopyaya
+  // DOKUNULMAZ: yazı yeniden dizilmek istenirse ham hâlâ elimizde olmalı.
+  const duzeltmeyiUygula = async (b64, alanYaz, ad) => {
+    try {
+      const yeniUrl = await gorselYukle(b64, ad || "duzeltme");
+      const p = projeOku(seciliId);
+      await projeGuncelle(seciliId, alanYaz(p, yeniUrl));
+      bildir("Bölge düzeltildi ve kaydedildi.", "basari");
+    } catch (e) {
+      setHata("Düzeltme kaydedilemedi: " + e.message);
+      bildir("Düzeltme kaydedilemedi: " + e.message, "hata");
+    }
+  };
+
+  // Bir sayfa görselini düzeltme kutusunda açar.
+  const bolgeDuzeltAc = (url, baslik, alanYaz, ad) =>
+    setDuzeltmeHedefi({ url, baslik, uygula: (b64) => duzeltmeyiUygula(b64, alanYaz, ad) });
+
+  // ── Karakter kütüphanesi (19 Ağu 2026) ──────────────────────────────────
+  // Aynı kahramanı her kitapta yeniden üretmek hem para hem tutarlılık
+  // kaybıydı: ikinci kitaptaki "Nazlı" birincisine benzemiyordu. Kütüphaneden
+  // aktarılan karakter AYNI referans görselini taşır — yeni üretim yok,
+  // dolayısıyla yeni ücret de yok ve görünüm birebir aynı kalır.
+  const kutuphaneyiYukle = async (arama) => {
+    setKutuphaneCalisiyor(true);
+    try {
+      const r = await authFetch(`/api/admin/kitap-studyo/karakter-kutuphanesi${arama ? `?arama=${encodeURIComponent(arama)}` : ""}`);
+      const d = await r.json();
+      if (d.ok) setKutuphane(d.karakterler);
+      else bildir(d.error || "Kütüphane okunamadı.", "hata");
+    } catch { bildir("Sunucuya ulaşılamadı — kütüphane açılamadı.", "hata"); }
+    finally { setKutuphaneCalisiyor(false); }
+  };
+
+  const kutuphaneyeKaydet = async (idx) => {
+    const p = projeOku(seciliId);
+    const k = (p.karakterler || [])[idx];
+    if (!k) return;
+    if (!k.gorselUrl && !await onayla({
+      baslik: "Referanssız karakter kaydedilsin mi?",
+      onayEtiketi: "Yine de kaydet",
+      mesaj: `"${k.ad}" için referans görseli yok. Kütüphanenin asıl faydası referansı ` +
+        `taşımak; referanssız kayıt yalnız tanımı saklar ve başka kitapta yine sıfırdan üretilir.`,
+    })) return;
+    setKutuphaneCalisiyor(true);
+    try {
+      const r = await authFetch("/api/admin/kitap-studyo/karakter-kutuphanesi", {
+        method: "POST",
+        body: JSON.stringify({
+          ad: k.ad, aciklama: k.aciklama, tanimEn: k.tanimEn, olcekCipasi: k.olcekCipasi,
+          gorselUrl: k.gorselUrl, ekPozlar: k.ekPozlar || [], kaynakProjeId: seciliId,
+        }),
+      });
+      const d = await r.json();
+      if (d.ok) bildir(d.guncellendi ? `"${k.ad}" kütüphanede güncellendi.` : `"${k.ad}" kütüphaneye eklendi.`, "basari");
+      else bildir(d.error || "Kaydedilemedi.", "hata");
+    } catch { bildir("Sunucuya ulaşılamadı — kütüphaneye kaydedilemedi.", "hata"); }
+    finally { setKutuphaneCalisiyor(false); }
+  };
+
+  const kutuphanedenAktar = async (kayit) => {
+    const p = projeOku(seciliId);
+    const mevcut = (p.karakterler || []);
+    if (mevcut.some((k) => (k.ad || "").toLocaleLowerCase("tr") === (kayit.ad || "").toLocaleLowerCase("tr"))) {
+      bildir(`"${kayit.ad}" bu projede zaten var.`, "uyari");
+      return;
+    }
+    // KOPYALAMA, bağlantı değil: kütüphane sonradan değişse bile bu kitabın
+    // karakteri değişmemeli.
+    const yeni = {
+      ad: kayit.ad, aciklama: kayit.aciklama || "", tanimEn: kayit.tanim_en || "",
+      olcekCipasi: kayit.olcek_cipasi || "", gorselUrl: kayit.gorsel_url || undefined,
+      ekPozlar: Array.isArray(kayit.ek_pozlar) ? kayit.ek_pozlar : [],
+      kutuphaneden: kayit.id,
+    };
+    const ok = await projeGuncelle(seciliId, { ...p, karakterler: [...mevcut, yeni] });
+    if (ok) {
+      bildir(`"${kayit.ad}" projeye aktarıldı${kayit.gorsel_url ? " — referans görseli birlikte geldi, yeni üretim gerekmiyor." : "."}`, "basari");
+      authFetch(`/api/admin/kitap-studyo/karakter-kutuphanesi/${kayit.id}/kullanildi`, { method: "POST" }).catch(() => {});
+      setKutuphaneAcik(false);
+    }
+  };
+
+  const kutuphanedenSil = async (kayit) => {
+    if (!await onayla({
+      baslik: "Kütüphaneden çıkarılsın mı?",
+      tehlike: true,
+      onayEtiketi: "Kütüphaneden çıkar",
+      mesaj: `"${kayit.ad}" kütüphaneden silinecek.\n\n` +
+        `Bu karakteri KULLANAN KİTAPLAR ETKİLENMEZ — aktarım bir kopyalamadır. ` +
+        `Görsel dosyası da depoda kalır.`,
+    })) return;
+    try {
+      const r = await authFetch(`/api/admin/kitap-studyo/karakter-kutuphanesi/${kayit.id}`, { method: "DELETE" });
+      const d = await r.json();
+      if (d.ok) { bildir("Kütüphaneden çıkarıldı.", "basari"); kutuphaneyiYukle(kutuphaneArama); }
+      else bildir(d.error || "Silinemedi.", "hata");
+    } catch { bildir("Sunucuya ulaşılamadı.", "hata"); }
   };
 
   const onKapakUret = async (hedefId) => {
@@ -6156,18 +8839,105 @@ function KitapStudyo({ authFetch, token }) {
   // PDF çıktısı ================= 
   const kitapSayfaListesiOlustur = () => {
     const liste = [];
-    if (seciliProje.onKapakGorselUrl) liste.push({ url: seciliProje.onKapakGorselUrl, etiket: "Ön kapak" });
-    if (seciliProje.kunyeGorselUrl) liste.push({ url: seciliProje.kunyeGorselUrl, etiket: "Künye (sayfa 1)" });
+    if (seciliProje.onKapakGorselUrl) liste.push({ url: seciliProje.onKapakGorselUrl, etiket: "Ön kapak", tur: "kapak" });
+    if (seciliProje.kunyeGorselUrl) liste.push({ url: seciliProje.kunyeGorselUrl, etiket: "Künye (sayfa 1)", tur: "ic" });
     (seciliProje.spreadler || []).forEach((s, i) => {
       const { solSayfa, sagSayfa } = spreadNumaralariGetir(i);
-      if (s.solGorselUrl) liste.push({ url: s.solGorselUrl, etiket: `Sayfa ${solSayfa}` });
-      if (s.sagGorselUrl) liste.push({ url: s.sagGorselUrl, etiket: `Sayfa ${sagSayfa}` });
+      if (s.solGorselUrl) liste.push({ url: s.solGorselUrl, etiket: `Sayfa ${solSayfa}`, tur: "ic" });
+      if (s.sagGorselUrl) liste.push({ url: s.sagGorselUrl, etiket: `Sayfa ${sagSayfa}`, tur: "ic" });
     });
-    if (seciliProje.arkaKapakGorselUrl) liste.push({ url: seciliProje.arkaKapakGorselUrl, etiket: "Arka kapak" });
+    if (seciliProje.arkaKapakGorselUrl) liste.push({ url: seciliProje.arkaKapakGorselUrl, etiket: "Arka kapak", tur: "kapak" });
     return liste;
   };
 
   const kitapiOnizle = () => { setOnizlemeIndex(0); setOnizlemeAcikMi(true); };
+
+  // ── EPUB ÇIKTISI (19 Ağu 2026) ──────────────────────────────────────────
+  // Baskı dosyaları e-kitap için KULLANILAMAZ: 20 sayfa çiftlik bir kitapta
+  // her sayfa 3-4 MB, toplam 150 MB'ı bulur. Hiçbir e-kitap rafı bunu kabul
+  // etmez, hiçbir okuyucu da açamaz. Bu yüzden EPUB'a girerken görseller
+  // e-kitap ölçüsüne indiriliyor — baskı dosyalarına DOKUNULMUYOR.
+  const [epubHazirlaniyorMu, setEpubHazirlaniyorMu] = React.useState(false);
+  const [epubIlerleme, setEpubIlerleme] = React.useState(null);
+  const [epubSonDurum, setEpubSonDurum] = React.useState(null);
+  const EPUB_UZUN_KENAR = 1600;
+
+  const epubGorselHazirla = (url) => new Promise((resolve, reject) => {
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    const zamanAsimi = setTimeout(() => reject(new Error("Görsel 20 saniyede yüklenemedi")), 20000);
+    img.onerror = () => { clearTimeout(zamanAsimi); reject(new Error("Görsel yüklenemedi (ölü adres)")); };
+    img.onload = () => {
+      clearTimeout(zamanAsimi);
+      try {
+        const olcek = Math.min(1, EPUB_UZUN_KENAR / Math.max(img.width, img.height));
+        const c = document.createElement("canvas");
+        c.width = Math.max(1, Math.round(img.width * olcek));
+        c.height = Math.max(1, Math.round(img.height * olcek));
+        const cx = c.getContext("2d");
+        cx.fillStyle = "#FFFFFF"; cx.fillRect(0, 0, c.width, c.height);
+        cx.imageSmoothingQuality = "high";
+        cx.drawImage(img, 0, 0, c.width, c.height);
+        c.toBlob(async (blob) => {
+          if (!blob) return reject(new Error("Görsel dönüştürülemedi"));
+          resolve({ bayt: new Uint8Array(await blob.arrayBuffer()), genislik: c.width, yukseklik: c.height });
+        }, "image/jpeg", 0.86);
+      } catch (e) { reject(e); }
+    };
+    img.src = url;
+  });
+
+  const epubIndir = async () => {
+    if (epubHazirlaniyorMu) return;
+    const liste = kitapSayfaListesiOlustur();
+    if (!liste.length) { setHata("Önce en az bir sayfa üretilmeli."); return; }
+    setEpubHazirlaniyorMu(true); setHata(""); setEpubSonDurum(null);
+    try {
+      const sayfalar = [];
+      const basarisiz = [];
+      for (let i = 0; i < liste.length; i++) {
+        setEpubIlerleme({ mevcut: i + 1, toplam: liste.length, etiket: liste[i].etiket });
+        try {
+          const g = await epubGorselHazirla(liste[i].url);
+          sayfalar.push({
+            ad: `sayfa-${String(i + 1).padStart(3, "0")}`,
+            baslik: liste[i].etiket,
+            jpegBayt: g.bayt, genislik: g.genislik, yukseklik: g.yukseklik,
+            kapakMi: i === 0,
+          });
+        } catch (e) {
+          // TEK SAYFA KİTABI İPTAL ETMEZ — hangi sayfanın düştüğü sonunda söylenir.
+          basarisiz.push(`${liste[i].etiket}: ${e.message}`);
+        }
+      }
+      if (!sayfalar.length) throw new Error("Hiçbir sayfa hazırlanamadı.");
+
+      setEpubIlerleme({ mevcut: liste.length, toplam: liste.length, etiket: "paketleniyor" });
+      const oz = seciliProje.ozellikler || {};
+      const blob = await epubPaketle({
+        kitapAdi: seciliProje.kitapAdi, yazarAdi: seciliProje.yazarAdi,
+        yayinevi: oz.yayinevi || "MST Yayıncılık", isbn: (oz.isbn || "").replace(/[^0-9Xx]/g, "") || null,
+        dil: "tr", sayfalar,
+      });
+
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${dosyaAdiSadelestir(seciliProje.kitapAdi, "kitap")}.epub`;
+      document.body.appendChild(a); a.click(); setTimeout(() => a.remove(), 0);
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+
+      setEpubSonDurum({
+        sayfa: sayfalar.length, atlanan: basarisiz,
+        boyutMb: blob.size / (1024 * 1024), uzunKenar: EPUB_UZUN_KENAR,
+      });
+      bildir(`EPUB indirildi — ${sayfalar.length} sayfa, ${(blob.size / (1024 * 1024)).toFixed(1)} MB.`,
+        basarisiz.length ? "uyari" : "basari");
+    } catch (e) {
+      setHata("EPUB üretilemedi: " + e.message);
+      bildir("EPUB üretilemedi: " + e.message, "hata");
+    } finally { setEpubHazirlaniyorMu(false); setEpubIlerleme(null); }
+  };
 
   const jspdfYukle = () => new Promise((resolve, reject) => {
     if (window.jspdf) return resolve();
@@ -6339,7 +9109,266 @@ function KitapStudyo({ authFetch, token }) {
     finally { setPdfHazirlaniyorMu(false); setPdfIlerleme(null); }
   };
 
-  // ================= EKLENDİ: 6. parça — karakter ek poz/ifade ================= 
+  // ═══════════════════════════════════════════════════════════════════
+  // FORMA DİZGİLİ PDF (19 Ağu 2026 — madde 24)
+  //
+  // Normal PDF sayfa sırasıyla çıkar (1,2,3...). Bu çıktı ise TABAKA
+  // sırasıyla çıkar: her PDF sayfası bir tabaka yüzüdür ve üzerinde iki
+  // kitap sayfası yan yana durur. Katlandığında sıraya girer.
+  //
+  // Üstüne matbaanın beklediği işaretler basılır:
+  //  · kesim işaretleri (crop marks) — köşelerde, kesim çizgisinin dışında
+  //  · katlama çizgisi — tabakanın ortasında, kesik çizgi
+  //  · tabaka künyesi — "Tabaka 3 / ön yüz · sayfa 6-11" (kesim dışında,
+  //    yani basılan kitapta görünmez)
+  // Boş sayfalar gri "BOŞ SAYFA" alanı olarak basılır; matbaa oraya bir
+  // şey basmaz ama dizginin doğru olduğu gözle görülür.
+  // ═══════════════════════════════════════════════════════════════════
+  const [formaHazirlaniyorMu, setFormaHazirlaniyorMu] = React.useState(false);
+  const [formaIlerleme, setFormaIlerleme] = React.useState(null);
+  const [formaSonDurum, setFormaSonDurum] = React.useState(null);
+
+  const formaPdfIndir = async ({ yontem, formaSayfa }) => {
+    const liste = kitapSayfaListesiOlustur().filter((s) => s.tur !== "kapak");
+    if (!liste.length) { setHata("Forma dizgisi için iç sayfa yok."); return; }
+    const dizgi = formaDizgisi(liste.length, { yontem, formaSayfa });
+    if (!dizgi.gecerli) { setHata(dizgi.sebep); return; }
+
+    setFormaHazirlaniyorMu(true); setHata(""); setFormaSonDurum(null);
+    try {
+      await jspdfYukle();
+      const { jsPDF } = window.jspdf;
+      const genislikCm = Number(seciliProje.ozellikler?.genislikCm) || 20;
+      const yukseklikCm = Number(seciliProje.ozellikler?.yukseklikCm) || genislikCm;
+      const tasmaMm = Math.max(0, Number(seciliProje.ozellikler?.tasmaPayiMm ?? 3));
+      const kesimG = genislikCm * 10, kesimY = yukseklikCm * 10;
+      const isaretPay = 10;                       // kesim işaretleri + künye için kenar payı
+      const tabakaG = kesimG * 2 + isaretPay * 2;
+      const tabakaY = kesimY + isaretPay * 2;
+
+      // ÖNBELLEK YOK — bilerek (19 Ağu 2026).
+      //
+      // İlk yazımda sayfa görselleri bir Map'te tutuluyordu. Ama forma
+      // dizgisinde HER SAYFA TAM BİR KEZ yerleşir (deneme bunu ölçüyor),
+      // yani önbellek hiçbir zaman isabet etmiyordu: tek yaptığı, 40 sayfalık
+      // bir kitabın baskı çözünürlüklü tüm görsellerini (sayfa başına 3-4 MB,
+      // toplam 150 MB'a yakın base64) PDF bitene kadar bellekte tutmaktı.
+      // jsPDF'in kendi kopyasıyla birlikte sekme çökebilirdi.
+      // Görsel artık kullanılacağı anda indiriliyor ve hemen bırakılıyor.
+      const gorselAl = async (no) => {
+        const s = liste[no - 1];
+        if (!s) return null;
+        try {
+          const b64 = await urlDenB64Al(s.url);
+          return { veriUrl: `data:${b64.startsWith("/9j/") ? "image/jpeg" : "image/png"};base64,` + b64,
+            tip: b64.startsWith("/9j/") ? "JPEG" : "PNG" };
+        } catch { return null; }
+      };
+
+      let doc = null;
+      const atlanan = [];
+      const yuzler = [];
+      dizgi.bloklar.forEach((blok) => blok.tabakalar.forEach((t) => {
+        yuzler.push({ blok: blok.no, tabaka: t.no, yuz: "ön", sayfalar: t.on });
+        yuzler.push({ blok: blok.no, tabaka: t.no, yuz: "arka", sayfalar: t.arka });
+      }));
+
+      for (let i = 0; i < yuzler.length; i++) {
+        const y = yuzler[i];
+        setFormaIlerleme({ mevcut: i + 1, toplam: yuzler.length,
+          etiket: `${dizgi.yontem === "forma" ? `Forma ${y.blok} · ` : ""}tabaka ${y.tabaka} ${y.yuz} yüz` });
+        if (!doc) doc = new jsPDF({ unit: "mm", format: [tabakaG, tabakaY], orientation: "landscape", compress: true });
+        else doc.addPage([tabakaG, tabakaY], "landscape");
+
+        for (let k = 0; k < 2; k++) {
+          const sf = y.sayfalar[k];
+          const x = isaretPay + k * kesimG;
+          if (sf.bos) {
+            doc.setFillColor(238, 238, 238);
+            doc.rect(x, isaretPay, kesimG, kesimY, "F");
+            doc.setFontSize(9); doc.setTextColor(120);
+            doc.text(`BOŞ SAYFA (${sf.no})`, x + kesimG / 2, isaretPay + kesimY / 2, { align: "center" });
+            continue;
+          }
+          const g = await gorselAl(sf.no);
+          if (!g) {
+            atlanan.push(sf.no);
+            doc.setFillColor(250, 230, 230);
+            doc.rect(x, isaretPay, kesimG, kesimY, "F");
+            doc.setFontSize(9); doc.setTextColor(150, 40, 40);
+            doc.text(`SAYFA ${sf.no} YÜKLENEMEDİ`, x + kesimG / 2, isaretPay + kesimY / 2, { align: "center" });
+            continue;
+          }
+          doc.addImage(g.veriUrl, g.tip, x, isaretPay, kesimG, kesimY);
+          // Sayfa numarası kesim dışında — basılan kitapta görünmez.
+          doc.setFontSize(7); doc.setTextColor(90);
+          doc.text(`s.${sf.no}`, x + kesimG / 2, isaretPay - 2, { align: "center" });
+        }
+
+        // Kesim işaretleri: kesim çizgisinin DIŞINDA, çizgiye değmeden.
+        doc.setDrawColor(0); doc.setLineWidth(0.2);
+        const u = 5, bosluk = 2;
+        [[isaretPay, isaretPay], [isaretPay + kesimG * 2, isaretPay],
+         [isaretPay, isaretPay + kesimY], [isaretPay + kesimG * 2, isaretPay + kesimY]]
+          .forEach(([cx, cy], idx) => {
+            const yatayYon = idx % 2 === 0 ? -1 : 1;
+            const dikeyYon = idx < 2 ? -1 : 1;
+            doc.line(cx + yatayYon * bosluk, cy, cx + yatayYon * (bosluk + u), cy);
+            doc.line(cx, cy + dikeyYon * bosluk, cx, cy + dikeyYon * (bosluk + u));
+          });
+
+        // Katlama çizgisi — ortada, kesik.
+        doc.setDrawColor(150); doc.setLineWidth(0.15);
+        const orta = isaretPay + kesimG;
+        for (let yy = isaretPay - 6; yy < isaretPay + kesimY + 6; yy += 4) doc.line(orta, yy, orta, yy + 2);
+
+        doc.setFontSize(7); doc.setTextColor(60);
+        doc.text(
+          `${seciliProje.kitapAdi || "Kitap"} · ${dizgi.yontem === "forma" ? `forma ${y.blok} · ` : ""}`
+          + `tabaka ${y.tabaka}/${dizgi.tabakaSayisi} · ${y.yuz} yüz · sayfa ${y.sayfalar.map((s) => s.no).join(" + ")}`
+          + ` · kesim ${kesimG}×${kesimY} mm · taşma ${tasmaMm} mm YOK (tam kanan sayfalarda matbaa payı eklemeli)`,
+          isaretPay, tabakaY - 3);
+      }
+
+      if (!doc) { setHata("Forma dizgisi üretilemedi."); return; }
+      try {
+        doc.setProperties({ title: `${seciliProje.kitapAdi || "Kitap"} — forma dizgisi`,
+          creator: "MST Tasarım Stüdyo", subject: `${dizgi.yontem} · ${dizgi.tabakaSayisi} tabaka` });
+      } catch { /* eski jsPDF */ }
+      doc.save(`${dosyaAdiSadelestir(seciliProje.kitapAdi, "kitap")}-forma-dizgisi.pdf`);
+      setFormaSonDurum({ dizgi, atlanan, tabakaG, tabakaY, yuzSayisi: yuzler.length });
+      bildir(`Forma dizgisi indirildi — ${dizgi.tabakaSayisi} tabaka, ${yuzler.length} yüz.`,
+        atlanan.length ? "uyari" : "basari");
+    } catch (err) { setHata("Forma dizgisi üretilemedi: " + err.message); }
+    finally { setFormaHazirlaniyorMu(false); setFormaIlerleme(null); }
+  };
+
+  // ═══════════════════════════════════════════════════════════════════
+  // MÜREKKEP TARAMASI (19 Ağu 2026 — madde 24)
+  // Gerçek CMYK ayrımı DEĞİL; profilsiz tahmin. Ne olduğu ekranda yazıyor.
+  // ═══════════════════════════════════════════════════════════════════
+  const [murekkepTaraniyorMu, setMurekkepTaraniyorMu] = React.useState(false);
+  const [murekkepSonuc, setMurekkepSonuc] = React.useState(null);
+
+  const murekkepTara = async () => {
+    const liste = kitapSayfaListesiOlustur();
+    if (!liste.length) { setHata("Taranacak sayfa yok."); return; }
+    const kagit = seciliProje.ozellikler?.kagit || "150g mat kuşe";
+    const sinir = MUREKKEP_SINIRI[kagit] ?? 300;
+    setMurekkepTaraniyorMu(true); setHata(""); setMurekkepSonuc(null);
+    try {
+      const sayfalar = [];
+      for (let i = 0; i < liste.length; i++) {
+        setFormaIlerleme({ mevcut: i + 1, toplam: liste.length, etiket: `mürekkep: ${liste[i].etiket}` });
+        let olcum = null;
+        try {
+          const b64 = await urlDenB64Al(liste[i].url);
+          const img = await new Promise((res) => {
+            const im = new Image();
+            const zs = setTimeout(() => res(null), 15000);
+            im.onload = () => { clearTimeout(zs); res(im); };
+            im.onerror = () => { clearTimeout(zs); res(null); };
+            im.src = `data:${b64.startsWith("/9j/") ? "image/jpeg" : "image/png"};base64,` + b64;
+          });
+          if (img) {
+            const g = MUREKKEP_ORNEK_GENISLIK;
+            const y = Math.max(1, Math.round(img.height * (g / img.width)));
+            const t = document.createElement("canvas");
+            t.width = g; t.height = y;
+            const c = t.getContext("2d", { willReadFrequently: true });
+            c.drawImage(img, 0, 0, g, y);
+            olcum = murekkepOlc(c.getImageData(0, 0, g, y).data, sinir);
+          }
+        } catch { olcum = null; }
+        sayfalar.push({ etiket: liste[i].etiket, olcum });
+      }
+      const olculen = sayfalar.filter((s) => s.olcum);
+      if (!olculen.length) { setHata("Hiçbir sayfa taranamadı."); return; }
+      setMurekkepSonuc({
+        kagit, sinir,
+        taranan: olculen.length, atlanan: sayfalar.length - olculen.length,
+        enYuksek: Math.max(...olculen.map((s) => s.olcum.enYuksekTac)),
+        ortalama: Math.round(olculen.reduce((t, s) => t + s.olcum.ortalamaTac, 0) / olculen.length),
+        riskli: olculen.filter((s) => s.olcum.asanOran > 0.02)
+          .map((s) => ({ etiket: s.etiket, oran: s.olcum.asanOran, tac: s.olcum.enYuksekTac }))
+          .sort((a, b) => b.oran - a.oran).slice(0, 8),
+        gamutDisi: olculen.reduce((t, s) => t + s.olcum.gamutDisiOran, 0) / olculen.length,
+        ornekGenislik: MUREKKEP_ORNEK_GENISLIK,
+      });
+    } catch (err) { setHata("Mürekkep taraması yapılamadı: " + err.message); }
+    finally { setMurekkepTaraniyorMu(false); setFormaIlerleme(null); }
+  };
+
+  // ═══════════════════════════════════════════════════════════════════
+  // BASKI KÜNYESİ — matbaaya dosyayla birlikte gönderilen metin.
+  // Matbaanın sorduğu her şey burada; "dosya RGB" gibi eksikler de.
+  // ═══════════════════════════════════════════════════════════════════
+  const baskiKunyesiIndir = () => {
+    const p = seciliProje, oz = p.ozellikler || {};
+    const spreadler = p.spreadler || [];
+    const icSayfa = (p.kunyeGorselUrl ? 1 : 0) + spreadler.filter((s) => s.solGorselUrl).length * 2;
+    const kagit = oz.kagit || "150g mat kuşe";
+    const kapakKagidi = oz.kapakKagidi || "300g";
+    const sirt = sirtGenisligiMm(icSayfa, kagit, kapakKagidi);
+    const cilt = ciltDurumu(icSayfa);
+    const isbn = isbnDogrula(oz.isbn);
+    const gcm = Number(oz.genislikCm) || 0, ycm = Number(oz.yukseklikCm) || gcm;
+    const tasma = Number(oz.tasmaPayiMm ?? 3);
+    const sinir = MUREKKEP_SINIRI[kagit] ?? 300;
+    const s = [];
+    s.push("MST YAYINCILIK — BASKI KÜNYESİ");
+    s.push("=".repeat(52));
+    s.push(`Kitap            : ${p.kitapAdi || "-"}`);
+    s.push(`Yazar            : ${p.yazarAdi || "-"}`);
+    s.push(`ISBN             : ${isbn.gecerli ? isbn.rakam : `GEÇERSİZ/EKSİK — ${isbn.sebep}`}`);
+    s.push(`Künye tarihi     : ${new Date().toLocaleDateString("tr-TR")}`);
+    s.push("");
+    s.push("ÖLÇÜ VE CİLT");
+    s.push("-".repeat(52));
+    s.push(`Kesim ölçüsü     : ${gcm ? `${gcm * 10} × ${ycm * 10} mm` : "GİRİLMEMİŞ"}`);
+    s.push(`Taşma payı       : ${tasma} mm (PDF sayfa ölçüsüne dahildir)`);
+    s.push(`İç sayfa         : ${icSayfa} ${cilt.dortKat ? "(4'ün katı ✔)" : cilt.cift ? "(çift, 4'ün katı DEĞİL)" : "(TEK SAYI — ciltlenemez)"}`);
+    s.push(`İç kâğıt         : ${kagit}`);
+    s.push(`Kapak kâğıdı     : ${kapakKagidi}`);
+    s.push(`Sırt genişliği   : ${sirt} mm (hesap: ${icSayfa}/2 × ${KAGIT_KALINLIK[kagit]} + 2 × ${KAPAK_KALINLIK[kapakKagidi]})`);
+    if (gcm) s.push(`Kapak açılımı    : ${(gcm * 20 + sirt + tasma * 2).toFixed(1)} × ${(ycm * 10 + tasma * 2).toFixed(1)} mm`);
+    s.push("");
+    s.push("RENK — DİKKAT");
+    s.push("-".repeat(52));
+    s.push("Gönderilen PDF sRGB renk uzayındadır. CMYK ayrımı YAPILMAMIŞTIR.");
+    s.push("Ayrımı matbaanın kendi hedef profiliyle yapması gerekmektedir.");
+    s.push(`Önerilen hedef profil: ${/kuşe/i.test(kagit) ? "ISO Coated v2 (ECI), toplam mürekkep %300" : "PSO Uncoated v3 (FOGRA52), toplam mürekkep %300"}`);
+    s.push(`Bu kâğıt için varsaydığımız mürekkep sınırı: %${sinir}`);
+    if (murekkepSonuc) {
+      s.push("");
+      s.push(`Panelde yapılan TAHMİNÎ tarama (profilsiz, ${murekkepSonuc.ornekGenislik} px örneklem):`);
+      s.push(`  en yüksek toplam mürekkep : ~%${murekkepSonuc.enYuksek}`);
+      s.push(`  ortalama toplam mürekkep  : ~%${murekkepSonuc.ortalama}`);
+      s.push(`  sınırı aşan sayfa         : ${murekkepSonuc.riskli.length}`);
+      murekkepSonuc.riskli.forEach((r) => s.push(`    · ${r.etiket} — alanın %${(r.oran * 100).toFixed(1)}'i sınır üstü`));
+      s.push(`  CMYK'te sönümlenecek canlı renk oranı: ~%${(murekkepSonuc.gamutDisi * 100).toFixed(1)}`);
+      s.push("  (Bu rakamlar ICC dönüşümü değil, yön göstermek içindir.)");
+    }
+    s.push("");
+    s.push("EKSİKLER — AÇIKÇA BEYAN");
+    s.push("-".repeat(52));
+    s.push("· Dosya PDF/X-1a ya da PDF/X-4 uyumlu DEĞİLDİR.");
+    s.push("· ICC profili gömülü DEĞİLDİR.");
+    s.push("· Overprint / trapping ayarı YAPILMAMIŞTIR.");
+    s.push("· Yazılar görsele gömülüdür; canlı metin ve font gömme yoktur.");
+    s.push("Bu maddeler gizlenmemekte, matbaanın yapması için beyan edilmektedir.");
+    s.push("");
+    s.push("İletişim: MST Yayıncılık — mstyayincilik.com");
+    const kutu = new Blob([s.join("\r\n")], { type: "text/plain;charset=utf-8" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(kutu);
+    a.download = `${dosyaAdiSadelestir(p.kitapAdi, "kitap")}-baski-kunyesi.txt`;
+    document.body.appendChild(a); a.click(); setTimeout(() => a.remove(), 0);
+    setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+    bildir("Baskı künyesi indirildi — PDF ile birlikte matbaaya gönderin.", "basari");
+  };
+
+  // ================= EKLENDİ: 6. parça — karakter ek poz/ifade =================
   // DÜZELTİLDİ (15 Ağu 2026): projeOku/projeGuncelle desenine geçirildi.
   const ekPozUret = async (karakterIdx, hedefId) => {
     hedefId = hedefId || seciliId;
@@ -6462,8 +9491,84 @@ function KitapStudyo({ authFetch, token }) {
   return (
     <div style={stil.sayfa}>
       <BildirimYigini liste={bildirimler} kapat={bildirimKapat} />
+      <BolgeDuzeltme
+        acik={!!duzeltmeHedefi}
+        gorselUrl={duzeltmeHedefi?.url}
+        baslik={duzeltmeHedefi?.baslik}
+        stil={stil}
+        urlDenB64Al={urlDenB64Al}
+        uretFn={duzeltmeUret}
+        onayla={onayla}
+        bildir={bildir}
+        kapat={(b64) => { const h = duzeltmeHedefi; setDuzeltmeHedefi(null); if (b64 && h) h.uygula(b64); }} />
       <OnayKutusu istek={onayIstegi} cevapla={onayCevapla} />
       <KisayolYardimi acik={kisayolYardimi} kapat={() => setKisayolYardimi(false)} />
+
+      {/* KARAKTER KÜTÜPHANESİ (19 Ağu 2026) */}
+      {kutuphaneAcik && (
+        <div className="mst-perde" role="dialog" aria-modal="true" aria-label="Karakter kütüphanesi"
+          onMouseDown={(e) => { if (e.target === e.currentTarget) setKutuphaneAcik(false); }}
+          style={{ position: "fixed", inset: 0, zIndex: 4150, background: "rgba(18,18,20,.6)",
+                   display: "grid", placeItems: "center", padding: 16 }}>
+          <div className="mst-kutu" style={{ background: "#fff", borderRadius: 14, padding: 16,
+            maxWidth: 900, width: "100%", maxHeight: "88vh", overflowY: "auto", color: "#18181a" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8, flexWrap: "wrap" }}>
+              <b style={{ fontFamily: "'Fredoka', sans-serif", fontSize: 16 }}>📚 Karakter Kütüphanesi</b>
+              <span style={{ marginLeft: "auto", cursor: "pointer", fontSize: 13, color: "#6f6f6c" }}
+                onClick={() => setKutuphaneAcik(false)}>Kapat ✕</span>
+            </div>
+            <div style={{ fontSize: 12.5, color: "#6f6f6c", marginBottom: 10, lineHeight: 1.6 }}>
+              Buradan aktarılan karakter, referans görselini de birlikte getirir —
+              <b style={{ color: "#18181a" }}> yeni üretim yapılmaz, ücret ödenmez</b> ve
+              karakter önceki kitaptakiyle birebir aynı görünür.
+            </div>
+            <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+              <input style={{ ...stil.input }} placeholder="Ada, etikete ya da açıklamaya göre ara…"
+                value={kutuphaneArama}
+                onChange={(e) => setKutuphaneArama(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") kutuphaneyiYukle(kutuphaneArama); }} />
+              <button style={{ ...stil.buton, whiteSpace: "nowrap" }} onClick={() => kutuphaneyiYukle(kutuphaneArama)}>Ara</button>
+            </div>
+            {kutuphaneCalisiyor && <div style={{ fontSize: 13, color: "#6f6f6c" }}>Yükleniyor…</div>}
+            {kutuphane && !kutuphane.length && (
+              <div style={{ fontSize: 13, color: "#6f6f6c", padding: "16px 0", lineHeight: 1.6 }}>
+                Kütüphane boş. Bir karakteri kaydetmek için karakter kartındaki
+                <b> “📚 Kütüphaneye kaydet”</b> bağlantısını kullan.
+              </div>
+            )}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(190px, 1fr))", gap: 12 }}>
+              {(kutuphane || []).map((k) => (
+                <div key={k.id} style={{ border: "1px solid #E4DFD1", borderRadius: 10, padding: 10, background: "#FBF9F6" }}>
+                  {k.gorsel_url ? (
+                    <img src={k.gorsel_url} alt={k.ad} loading="lazy" decoding="async"
+                      style={{ width: "100%", height: 130, objectFit: "cover", borderRadius: 6, background: "#F3EFE6" }} />
+                  ) : (
+                    <div style={{ width: "100%", height: 130, borderRadius: 6, background: "#FFF4E5",
+                      display: "grid", placeItems: "center", fontSize: 11, color: "#7A4A12", textAlign: "center", padding: 8 }}>
+                      referans görseli yok
+                    </div>
+                  )}
+                  <div style={{ fontWeight: 600, fontSize: 13, marginTop: 6 }}>{k.ad}</div>
+                  {k.olcek_cipasi && <div style={{ fontSize: 10.5, color: "#6f6f6c" }}>{k.olcek_cipasi}</div>}
+                  {k.aciklama && (
+                    <div style={{ fontSize: 11, color: "#6f6f6c", marginTop: 3, display: "-webkit-box",
+                      WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{k.aciklama}</div>
+                  )}
+                  <div style={{ fontSize: 10, color: "#9a9a96", marginTop: 4 }}>
+                    {k.kullanim_sayisi > 0 ? `${k.kullanim_sayisi} kitapta kullanıldı` : "henüz kullanılmadı"}
+                  </div>
+                  <button style={{ ...stil.buton, width: "100%", fontSize: 11, padding: "7px 8px", marginTop: 8 }}
+                    onClick={() => kutuphanedenAktar(k)}>Bu Projeye Aktar</button>
+                  <span onClick={() => kutuphanedenSil(k)}
+                    style={{ fontSize: 10.5, color: "#C0392B", cursor: "pointer", display: "inline-block", marginTop: 6 }}>
+                    Kütüphaneden çıkar
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
       {/* Kısayol ipucu — ekranda görünmeyen kısayol, olmayan kısayoldur. */}
       <button type="button" onClick={() => setKisayolYardimi(true)} title="Klavye kısayolları"
         style={{ position: "fixed", right: 18, bottom: 18, zIndex: 3900, width: 34, height: 34,
@@ -6639,7 +9744,10 @@ function KitapStudyo({ authFetch, token }) {
                   🎈 %{Math.round((aktifUretimIlerleme[p.id].mevcut / Math.max(1, aktifUretimIlerleme[p.id].toplam)) * 100)}
                 </span>
               )}
-              <div style={{ fontSize: 11, color: "#9a9a96", marginTop: 6 }}>{new Date(p.guncellendi).toLocaleString("tr-TR")}</div>
+              {/* Geçersiz/boş tarihte "Invalid Date" yazmasın (19 Ağu 2026). */}
+              <div style={{ fontSize: 11, color: "#9a9a96", marginTop: 6 }}>
+                {(() => { const t = new Date(p.guncellendi); return isNaN(t) ? "" : t.toLocaleString("tr-TR"); })()}
+              </div>
             </div>
           ))}
         </div>
@@ -7012,6 +10120,12 @@ function KitapStudyo({ authFetch, token }) {
                             <div style={{ marginBottom: 8 }}>
                               <img src={kucukAdres(k.gorselUrl)} alt={`${k.ad} referans görseli`} loading="lazy" decoding="async" style={{ width: "100%", borderRadius: 8, cursor: "zoom-in" }} onClick={() => setBuyukGorsel({ url: k.gorselUrl, baslik: k.ad })} />
                               <span onClick={() => gorselIndir(k.gorselUrl, `karakter-${k.ad}`)} style={{ fontSize: 10, color: "#3E8ED0", cursor: "pointer", display: "inline-block", marginTop: 2 }}>⬇ İndir</span>
+                              <span onClick={() => kutuphaneyeKaydet(idx)}
+                                style={{ fontSize: 10, color: "#6B4BA8", cursor: "pointer", display: "inline-block", marginTop: 2, marginLeft: 8 }}>📚 Kütüphaneye kaydet</span>
+                              <span onClick={() => bolgeDuzeltAc(k.gorselUrl, `${k.ad} referansı`,
+                                (p0, yeniUrl) => ({ ...p0, karakterler: p0.karakterler.map((kk, i) =>
+                                  i === idx ? { ...kk, gorselUrl: yeniUrl } : kk) }), "karakter-duzeltme")}
+                                style={{ fontSize: 10, color: "#B0663A", cursor: "pointer", display: "inline-block", marginTop: 2, marginLeft: 8 }}>🖌 Düzelt</span>
                             </div>
                           )}
                           {!k.gorselUrl && (
@@ -7122,6 +10236,9 @@ function KitapStudyo({ authFetch, token }) {
                           <div style={{ marginTop: 10 }}>
                             <img src={kucukAdres(seciliProje.onKapakGorselUrl)} alt="Ön kapak" loading="lazy" decoding="async" style={{ width: "100%", borderRadius: 8, cursor: "zoom-in" }} onClick={() => setBuyukGorsel({ url: seciliProje.onKapakGorselUrl, baslik: "Ön kapak" })} />
                             <span onClick={() => gorselIndir(seciliProje.onKapakGorselUrl, "on-kapak")} style={{ fontSize: 11, color: "#3E8ED0", cursor: "pointer", display: "inline-block", marginTop: 4 }}>⬇ İndir</span>
+                            <span onClick={() => bolgeDuzeltAc(seciliProje.onKapakGorselUrl, "Ön kapak",
+                              (p0, yeniUrl) => ({ ...p0, onKapakGorselUrl: yeniUrl }), "on-kapak-duzeltme")}
+                              style={{ fontSize: 11, color: "#B0663A", cursor: "pointer", display: "inline-block", marginTop: 4, marginLeft: 10 }}>🖌 Bölgeyi düzelt</span>
                           </div>
                         )}
                       </div>
@@ -7147,10 +10264,84 @@ function KitapStudyo({ authFetch, token }) {
                           <div style={{ marginTop: 10 }}>
                             <img src={kucukAdres(seciliProje.arkaKapakGorselUrl)} alt="Arka kapak" loading="lazy" decoding="async" style={{ width: "100%", borderRadius: 8, cursor: "zoom-in" }} onClick={() => setBuyukGorsel({ url: seciliProje.arkaKapakGorselUrl, baslik: "Arka kapak" })} />
                             <span onClick={() => gorselIndir(seciliProje.arkaKapakGorselUrl, "arka-kapak")} style={{ fontSize: 11, color: "#3E8ED0", cursor: "pointer", display: "inline-block", marginTop: 4 }}>⬇ İndir</span>
+                            <span onClick={() => bolgeDuzeltAc(seciliProje.arkaKapakGorselUrl, "Arka kapak",
+                              (p0, yeniUrl) => ({ ...p0, arkaKapakGorselUrl: yeniUrl }), "arka-kapak-duzeltme")}
+                              style={{ fontSize: 11, color: "#B0663A", cursor: "pointer", display: "inline-block", marginTop: 4, marginLeft: 10 }}>🖌 Bölgeyi düzelt</span>
                           </div>
                         )}
                       </div>
                     </div>
+
+                    {/* EKLENDİ (19 Ağu 2026, tarayıcı denemesinde bulundu):
+                        ÜRETİM EKRANINDA KARAKTERLER HİÇ GÖRÜNMÜYORDU.
+                        Karakter kartları yalnız ② Karakter aşamasındaydı; sayfa
+                        üretirken kullanıcı ne kimlerin çizileceğini görebiliyor
+                        ne de referansı olmayan karakteri fark edebiliyordu.
+                        Zebra projesinde 9 karakterin 8'inin referanssız kalması
+                        tam olarak buradan geçti: uyarı yalnız aşama geçişinde
+                        bir kez çıkıyor, sonra bir daha görünmüyordu.
+                        Burası şerit hâlinde: kim var, referansı var mı, yoksa
+                        tek tuşla üret. */}
+                    {(seciliProje.karakterler || []).length > 0 && (() => {
+                      const kars = seciliProje.karakterler || [];
+                      const referanssiz = kars.filter((k) => !k.gorselUrl);
+                      return (
+                        <div style={{ background: "#FBF9F6", borderRadius: 16, padding: 14,
+                          border: `2px solid ${referanssiz.length ? "#C0392B" : "#F4A83E"}`, marginBottom: 16 }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
+                            <span style={{ fontFamily: "'Fredoka', sans-serif", fontWeight: 600, fontSize: 14 }}>
+                              Bu Kitabın Karakterleri
+                            </span>
+                            <span style={{ fontSize: 11.5, color: "#6f6f6c" }}>
+                              Her sayfa üretiminde referansı olan karakterler modele gönderilir.
+                            </span>
+                            <span style={{ marginLeft: "auto" }}>
+                              <span onClick={() => { setKutuphaneAcik(true); kutuphaneyiYukle(""); }}
+                                style={{ fontSize: 11.5, color: "#6B4BA8", cursor: "pointer" }}>📚 Kütüphaneden ekle</span>
+                            </span>
+                          </div>
+                          {referanssiz.length > 0 && (
+                            <div style={{ background: "#FDECEC", border: "1px solid #E3B4B4", borderRadius: 8,
+                              padding: "8px 10px", fontSize: 12, color: "#8B2E2E", marginBottom: 10, lineHeight: 1.55 }}>
+                              <b>{referanssiz.map((k) => k.ad).join(", ")}</b> için referans görseli yok.
+                              Bu karakterler HER SAYFADA FARKLI görünür — modele "aynı karakter" diyebileceğimiz
+                              hiçbir dayanak gitmiyor. Aşağıdan tek tuşla üretebilirsin.
+                            </div>
+                          )}
+                          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                            {kars.map((k, idx) => (
+                              <div key={idx} style={{ width: 132, background: "#fff", borderRadius: 10,
+                                border: `1px solid ${k.gorselUrl ? "#E4DFD1" : "#E3B4B4"}`, padding: 8 }}>
+                                {k.gorselUrl ? (
+                                  <img src={kucukAdres(k.gorselUrl)} alt={`${k.ad} referansı`} loading="lazy" decoding="async"
+                                    onClick={() => setBuyukGorsel({ url: k.gorselUrl, baslik: k.ad })}
+                                    style={{ width: "100%", height: 96, objectFit: "cover", borderRadius: 6, cursor: "zoom-in", background: "#F3EFE6" }} />
+                                ) : (
+                                  <div style={{ width: "100%", height: 96, borderRadius: 6, background: "#FDECEC",
+                                    display: "grid", placeItems: "center", fontSize: 11, color: "#8B2E2E", textAlign: "center", padding: 6 }}>
+                                    referans yok
+                                  </div>
+                                )}
+                                <div style={{ fontSize: 12, fontWeight: 600, marginTop: 6, whiteSpace: "nowrap",
+                                  overflow: "hidden", textOverflow: "ellipsis" }} title={k.ad}>{k.ad}</div>
+                                {k.olcekCipasi && (
+                                  <div style={{ fontSize: 10, color: "#6f6f6c", whiteSpace: "nowrap",
+                                    overflow: "hidden", textOverflow: "ellipsis" }} title={k.olcekCipasi}>{k.olcekCipasi}</div>
+                                )}
+                                {!k.gorselUrl && (
+                                  <button style={{ ...stil.buton, width: "100%", fontSize: 10.5, padding: "6px 8px", marginTop: 6,
+                                    ...(karakterUretiliyorIdx !== null ? stil.butonPasif : {}) }}
+                                    disabled={karakterUretiliyorIdx !== null}
+                                    onClick={() => karakterGorseliUret(idx)}>
+                                    {karakterUretiliyorIdx === idx ? "Üretiliyor…" : "Referans Üret"}
+                                  </button>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })()}
 
                     {/* EKLENDİ (14 Ağu 2026): ③ Sahneler, 3. parça — sayfa çiftleri */}
                     <div style={{ background: "#FBF9F6", borderRadius: 16, padding: 18, border: "2px solid #F4A83E", marginBottom: 16 }}>
@@ -7291,9 +10482,17 @@ function KitapStudyo({ authFetch, token }) {
                                         onClick={() => setBuyukGorsel({ url, baslik: `Sayfa ${no}` })}
                                         style={{ width: "100%", borderRadius: 8, cursor: "zoom-in", display: "block", background: "#F3EFE6", minHeight: 60 }} />
                                     )}
-                                    <div style={{ display: "flex", gap: 10, marginTop: 4 }}>
+                                    <div style={{ display: "flex", gap: 10, marginTop: 4, flexWrap: "wrap" }}>
                                       <span onClick={() => setBuyukGorsel({ url, baslik: `Sayfa ${no}` })}
                                         style={{ fontSize: 11, color: "#3E8ED0", cursor: "pointer" }}>⤢ Tam ekran</span>
+                                      {/* EKLENDİ (19 Ağu 2026): tek kusur yüzünden
+                                          beğenilen bir sayfayı baştan üretmek zorunda
+                                          kalmamak için. Yalnız boyanan alan değişir. */}
+                                      <span onClick={() => bolgeDuzeltAc(url, `Sayfa ${no}`,
+                                        (p0, yeniUrl) => ({ ...p0, spreadler: p0.spreadler.map((sp, i) =>
+                                          i === idx ? { ...sp, [taraf === "sol" ? "solGorselUrl" : "sagGorselUrl"]: yeniUrl } : sp) }),
+                                        "sayfa-duzeltme")}
+                                        style={{ fontSize: 11, color: "#B0663A", cursor: "pointer" }}>🖌 Bölgeyi düzelt</span>
                                       <span onClick={() => gorselIndir(url, `sayfa-${no}`)}
                                         style={{ fontSize: 11, color: "#3E8ED0", cursor: "pointer" }}>⬇ İndir</span>
                                     </div>
@@ -7647,6 +10846,29 @@ function KitapStudyo({ authFetch, token }) {
                             ? (pdfIlerleme ? `Hazırlanıyor… ${pdfIlerleme.mevcut}/${pdfIlerleme.toplam} (${pdfIlerleme.etiket})` : "Hazırlanıyor…")
                             : "PDF Olarak İndir"}
                         </button>
+                        {/* EPUB — e-kitap raflarına yüklenebilir çıktı (19 Ağu 2026) */}
+                        <button style={{ ...stil.buton, background: "#5B7FA6", marginLeft: 8,
+                          ...(epubHazirlaniyorMu ? stil.butonPasif : {}) }}
+                          disabled={epubHazirlaniyorMu || kitapSayfaListesiOlustur().length === 0} onClick={epubIndir}>
+                          {epubHazirlaniyorMu
+                            ? (epubIlerleme ? `EPUB… ${epubIlerleme.mevcut}/${epubIlerleme.toplam}` : "EPUB hazırlanıyor…")
+                            : "EPUB Olarak İndir"}
+                        </button>
+                        {epubSonDurum && (
+                          <div style={{ width: "100%", marginTop: 8, padding: "10px 12px", borderRadius: 8, fontSize: 12, lineHeight: 1.55,
+                            background: epubSonDurum.atlanan.length ? "#FFF4E5" : "#E8F3EC",
+                            border: `1px solid ${epubSonDurum.atlanan.length ? "#F0C48A" : "#A8D5B8"}`,
+                            color: epubSonDurum.atlanan.length ? "#7A4A12" : "#1E5E30" }}>
+                            EPUB hazır: <b>{epubSonDurum.sayfa} sayfa</b>, {epubSonDurum.boyutMb.toFixed(1)} MB.
+                            Görseller e-kitap için uzun kenarı {epubSonDurum.uzunKenar} px olacak şekilde
+                            küçültüldü — baskı dosyalarına dokunulmadı.
+                            {epubSonDurum.atlanan.length > 0 && (
+                              <div style={{ marginTop: 4 }}>
+                                <b>Atlanan sayfa:</b> {epubSonDurum.atlanan.join(" · ")}
+                              </div>
+                            )}
+                          </div>
+                        )}
                         {/* Çıktının GERÇEK çözünürlüğü söylenir — "baskıya hazır"
                             diye sessizce geçilmez (CALISMA-KURALLARI madde 9). */}
                         {pdfSonDurum && (
@@ -7709,7 +10931,10 @@ function KitapStudyo({ authFetch, token }) {
                     {/* Baskı hazırlığı: sırt, cilt matematiği, barkod, taşma payı */}
                     <BaskiHazirligi proje={seciliProje} stil={stil}
                       guncelle={(ad, deger) => ozellikGuncelle(ad, deger)}
-                      kaydet={() => metaKaydet(seciliProje)} />
+                      kaydet={() => metaKaydet(seciliProje)}
+                      formaPdfIndir={formaPdfIndir} formaHazirlaniyorMu={formaHazirlaniyorMu}
+                      murekkepTara={murekkepTara} murekkepTaraniyorMu={murekkepTaraniyorMu}
+                      murekkepSonuc={murekkepSonuc} baskiKunyesiIndir={baskiKunyesiIndir} />
 
                     {onizlemeAcikMi && (() => {
                       const liste = kitapSayfaListesiOlustur();
@@ -7935,6 +11160,140 @@ function ciltDurumu(icSayfaSayisi) {
   };
 }
 
+// ============================================================
+// FORMA DİZGİSİ (imposition) — 19 Ağustos 2026
+//
+// Matbaa kitabı sayfa sayfa basmaz. Bir tabakanın iki yüzüne 4 (tel
+// dikiş) ya da 16/32 (forma) sayfa birlikte basılır, tabaka katlanınca
+// sayfalar sıraya girer. Hangi sayfanın hangi tabakada, hangi yüzde ve
+// hangi tarafta duracağı SABİT bir matematiktir.
+//
+// Bugüne kadar bu hesap yoktu: matbaaya "sayfa sırasıyla" bir PDF
+// gidiyordu ve dizgiyi matbaa kendi yapıyordu. Bu iki şeye mal oluyor —
+// dizgi ücreti ve dizgi hatası (bir tabakada ters sayfa, katlandığında
+// baş aşağı bölüm). Şimdi dizgi burada çıkıyor ve kontrol edilebiliyor.
+//
+// Tel dikişte N sayfalık kitabın i. tabakası (0'dan):
+//   ön yüz  : sol = N-2i     , sağ = 2i+1
+//   arka yüz: sol = 2i+2     , sağ = N-2i-1
+// Formalı ciltte kitap önce 16'lık (ya da 32'lik) bloklara bölünür,
+// her blok kendi içinde aynı matematikle dizilir.
+// ============================================================
+function formaDizgisi(sayfaSayisi, { yontem = "tel-dikis", formaSayfa = 16 } = {}) {
+  const ham = Math.max(0, Math.floor(Number(sayfaSayisi) || 0));
+  if (ham === 0) return { gecerli: false, sebep: "Sayfa sayısı 0" };
+
+  const blokBoy = yontem === "forma" ? Math.max(4, Math.floor(formaSayfa / 4) * 4) : 4;
+  // Tel dikişte tüm kitap tek "blok"tur, 4'ün katına tamamlanır.
+  // Formalı ciltte son forma da tam dolmalı — matbaa yarım forma basmaz.
+  const toplam = Math.ceil(ham / blokBoy) * blokBoy;
+  const bosEklenen = toplam - ham;
+
+  const bloklar = [];
+  const blokAdedi = yontem === "forma" ? toplam / blokBoy : 1;
+  for (let b = 0; b < blokAdedi; b++) {
+    const bas = b * (yontem === "forma" ? blokBoy : toplam);   // bloğun ilk sayfası - 1
+    const N = yontem === "forma" ? blokBoy : toplam;
+    const tabakalar = [];
+    for (let i = 0; i < N / 4; i++) {
+      const sf = (n) => {
+        const mutlak = bas + n;
+        return mutlak > ham ? { no: mutlak, bos: true } : { no: mutlak, bos: false };
+      };
+      tabakalar.push({
+        no: i + 1,
+        on: [sf(N - 2 * i), sf(2 * i + 1)],
+        arka: [sf(2 * i + 2), sf(N - 2 * i - 1)],
+      });
+    }
+    bloklar.push({ no: b + 1, ilkSayfa: bas + 1, sonSayfa: bas + N, tabakalar });
+  }
+
+  return {
+    gecerli: true, yontem, blokBoy,
+    girilenSayfa: ham, toplamSayfa: toplam, bosEklenen,
+    bloklar,
+    tabakaSayisi: bloklar.reduce((t, b) => t + b.tabakalar.length, 0),
+    // Kâğıt sarfiyatı: her tabaka bir yaprak, iki yüzü de basılır.
+    yaprakSayisi: toplam / 4,
+  };
+}
+
+// ============================================================
+// MÜREKKEP TAHMİNİ (toplam mürekkep / TAC) — 19 Ağustos 2026
+//
+// DÜRÜSTLÜK NOTU — bu bir TAHMİNDİR, CMYK ayrımı DEĞİLDİR.
+// Gerçek ayrım bir ICC motoruyla, hedef profile (örn. ISO Coated v2)
+// göre yapılır; tarayıcı canvas'ı sRGB'dir ve ICC dönüşümü yapamaz.
+// Burada yapılan, profil kullanmayan standart "naif" GCR dönüşümüdür:
+// bir bölgede mürekkebin sınırı aşıp aşmadığını GÖSTERİR, matbaanın
+// yapacağı dönüşümün YERİNE GEÇMEZ. Arayüz de böyle yazar.
+//
+// Neden yine de gerekli: 4 renk üst üste %100 basılırsa toplam %400
+// mürekkep olur; kâğıt kurumaz, arkaya geçer, makine kirlenir. Matbaa
+// çoğu kuşe kâğıtta 300, 1. hamurda 260 sınırı koyar. Sınırın çok
+// aşıldığı sayfayı ÖNCEDEN bilmek, dosya reddedilmesini önler.
+// ============================================================
+// SİYAH ÜRETİMİ (GCR) — ölçülerek düzeltildi, 19 Ağu 2026.
+//
+// İlk yazımda kitaptaki en basit formül kullanılmıştı: k = min(c,m,y) ve
+// kalan üç renk ona göre. Deneme bunun YANLIŞ TARAFA yanıldığını gösterdi:
+// neredeyse siyah bir sayfa (RGB 7,9,11) o formülle ~%150 mürekkep
+// veriyordu. Oysa matbaa siyahı tek başına K ile basmaz — "zengin siyah"
+// için altına CMY de serer ve gerçek değer %300'ü aşar. Yani tam da
+// yakalaması gereken riski GÖREMİYORDU.
+//
+// Şimdi ticari ayrımın yaptığı gibi KISMÎ siyah üretimi uygulanıyor:
+// açık tonlarda siyah hiç kullanılmaz (üç renkle karışır), belli bir
+// koyuluktan sonra siyah devreye girer ve en çok %90'a çıkar — %100 düz
+// siyah yalnız metin için ayrılır. Bu hâlâ bir TAHMİNDİR; ICC ayrımının
+// yerine geçmez, ama artık gerçeğin doğru tarafında yanılır.
+const GCR_BASLA = 0.2;    // bu koyuluğa kadar siyah kullanılmaz
+const GCR_EN_COK = 0.9;   // siyahın çıkabileceği en yüksek oran
+function rgbdenCmyk(r, g, b) {
+  const c0 = 1 - r / 255, m0 = 1 - g / 255, y0 = 1 - b / 255;
+  const enAz = Math.min(c0, m0, y0);
+  const k = enAz <= GCR_BASLA ? 0 : ((enAz - GCR_BASLA) / (1 - GCR_BASLA)) * GCR_EN_COK;
+  if (k >= 0.9999) return { c: 1, m: 1, y: 1, k: 1 };
+  return { c: (c0 - k) / (1 - k), m: (m0 - k) / (1 - k), y: (y0 - k) / (1 - k), k };
+}
+
+// Örneklem: her sayfayı 200 px genişliğe indirip tarıyoruz. Tam çözünürlük
+// taraması 40 sayfada tarayıcıyı kilitliyor; mürekkep yoğunluğu ise geniş
+// alanların özelliği, tek piksel gürültüsünün değil.
+const MUREKKEP_ORNEK_GENISLIK = 200;
+function murekkepOlc(imgVeriDizisi, sinir) {
+  let enYuksek = 0, toplam = 0, adet = 0, asan = 0, doygunAsan = 0;
+  for (let i = 0; i < imgVeriDizisi.length; i += 4) {
+    const a = imgVeriDizisi[i + 3];
+    if (a === 0) continue;
+    const { c, m, y, k } = rgbdenCmyk(imgVeriDizisi[i], imgVeriDizisi[i + 1], imgVeriDizisi[i + 2]);
+    const tac = (c + m + y + k) * 100;
+    toplam += tac; adet++;
+    if (tac > enYuksek) enYuksek = tac;
+    if (tac > sinir) asan++;
+    // sRGB'de canlı ama CMYK'te karşılığı olmayan renkler: yüksek doygunluk
+    // + yüksek parlaklık. Baskıda MUTLAKA sönümlenir; yazara önceden söylenmeli.
+    const enB = Math.max(imgVeriDizisi[i], imgVeriDizisi[i + 1], imgVeriDizisi[i + 2]);
+    const enK = Math.min(imgVeriDizisi[i], imgVeriDizisi[i + 1], imgVeriDizisi[i + 2]);
+    if (enB > 200 && enB - enK > 150) doygunAsan++;
+  }
+  if (!adet) return null;
+  return {
+    enYuksekTac: Math.round(enYuksek),
+    ortalamaTac: Math.round(toplam / adet),
+    asanOran: asan / adet,
+    gamutDisiOran: doygunAsan / adet,
+    piksel: adet,
+  };
+}
+
+// Kâğıda göre mürekkep sınırı — matbaaların yaygın değerleri.
+const MUREKKEP_SINIRI = {
+  "70g kitap kâğıdı": 260, "80g kitap kâğıdı": 260, "90g kitap kâğıdı": 270,
+  "115g mat kuşe": 300, "135g mat kuşe": 300, "150g mat kuşe": 300, "170g mat kuşe": 320,
+};
+
 // EAN-13 barkodu — dış kütüphane yok, standardın kendisi uygulanıyor.
 // ISBN-13 zaten EAN-13'tür; 13. hane kontrol hanesidir.
 const EAN_L = ["0001101","0011001","0010011","0111101","0100011","0110001","0101111","0111011","0110111","0001011"];
@@ -8016,8 +11375,10 @@ function ean13Svg(isbn13, { yukseklikMm = 22, modulMm = 0.33 } = {}) {
 // matematiği, barkod. Matbaa "kapak açılımını ve barkodu gönderin"
 // dediğinde gönderilecek dosya yoktu.
 // ============================================================
-function BaskiHazirligiGovde({ proje, stil, guncelle, kaydet }) {
+function BaskiHazirligiGovde({ proje, stil, guncelle, kaydet,
+  formaPdfIndir, formaHazirlaniyorMu, murekkepTara, murekkepTaraniyorMu, murekkepSonuc, baskiKunyesiIndir }) {
   const [acik, setAcik] = React.useState(false);
+  const [dizgiYontemi, setDizgiYontemi] = React.useState("tel-dikis");
   const oz = proje.ozellikler || {};
   const spreadler = proje.spreadler || [];
 
@@ -8030,6 +11391,13 @@ function BaskiHazirligiGovde({ proje, stil, guncelle, kaydet }) {
   const barkod = isbn.gecerli ? ean13Svg(isbn.rakam) : null;
   const genislikCm = Number(oz.genislikCm) || 0;
   const tasma = Number(oz.tasmaPayiMm ?? 3);
+
+  // Dizgi seçimi tek yerde çözülüyor — tablo ile PDF'in farklı dizgi
+  // göstermesi, matbaada yanlış katlanmış kitap demektir.
+  const dizgiSecimi = dizgiYontemi === "tel-dikis"
+    ? { yontem: "tel-dikis", formaSayfa: 4 }
+    : { yontem: "forma", formaSayfa: dizgiYontemi === "forma-32" ? 32 : 16 };
+  const dizgi = formaDizgisi(icSayfa, dizgiSecimi);
 
   const barkodIndir = () => {
     const kutu = new Blob([barkod], { type: "image/svg+xml" });
@@ -8120,10 +11488,121 @@ function BaskiHazirligiGovde({ proje, stil, guncelle, kaydet }) {
                 </div>}
           </div>
 
+          {/* ── FORMA DİZGİSİ ────────────────────────────────────────── */}
+          <div style={{ padding: "10px 12px", borderRadius: 8, background: "var(--yuzey2)", border: "1px solid var(--kenar)" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 8 }}>
+              <b style={{ fontSize: 12 }}>📐 Forma Dizgisi (imposition)</b>
+              <select style={{ ...stil.input, fontSize: 11.5, padding: "5px 8px", width: "auto" }}
+                value={dizgiYontemi} onChange={(e) => setDizgiYontemi(e.target.value)}>
+                <option value="tel-dikis">Tel dikiş (tüm kitap tek blok)</option>
+                <option value="forma-16">Formalı cilt — 16 sayfalık forma</option>
+                <option value="forma-32">Formalı cilt — 32 sayfalık forma</option>
+              </select>
+              <button style={{ ...stil.buton, fontSize: 11.5, padding: "5px 12px" }}
+                disabled={formaHazirlaniyorMu || !icSayfa}
+                onClick={() => formaPdfIndir(dizgiSecimi)}>
+                {formaHazirlaniyorMu ? "hazırlanıyor…" : "⬇ Forma dizgili PDF"}
+              </button>
+            </div>
+
+            {dizgi.gecerli ? (
+              <>
+                <div style={{ fontSize: 11.5, color: "var(--metin2)", lineHeight: 1.7, marginBottom: 8 }}>
+                  {icSayfa} iç sayfa → <b>{dizgi.toplamSayfa} sayfa</b>
+                  {dizgi.bosEklenen > 0 && <> (<b style={{ color: "#B0663A" }}>{dizgi.bosEklenen} boş sayfa</b> eklendi — {dizgi.yontem === "forma" ? "forma tam dolmalı" : "tabaka 4 sayfayla çalışır"})</>}
+                  {" · "}<b>{dizgi.tabakaSayisi} tabaka</b> · {dizgi.tabakaSayisi * 2} yüz baskı
+                  {dizgi.yontem === "forma" && <> · {dizgi.bloklar.length} forma × {dizgi.blokBoy} sayfa</>}
+                </div>
+                <div style={{ maxHeight: 190, overflowY: "auto", border: "1px solid var(--kenar)", borderRadius: 6 }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
+                    <thead>
+                      <tr style={{ background: "var(--yuzey)", position: "sticky", top: 0 }}>
+                        {["Tabaka", "Ön yüz (sol · sağ)", "Arka yüz (sol · sağ)"].map((b) => (
+                          <th key={b} style={{ textAlign: "left", padding: "5px 8px", fontWeight: 600, borderBottom: "1px solid var(--kenar)" }}>{b}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {dizgi.bloklar.map((blok) => blok.tabakalar.map((t) => {
+                        const yaz = (c) => c.map((x) => x.bos ? `boş(${x.no})` : x.no).join(" · ");
+                        const bosVar = [...t.on, ...t.arka].some((x) => x.bos);
+                        return (
+                          <tr key={`${blok.no}-${t.no}`} style={{ background: bosVar ? "rgba(176,102,58,.08)" : "transparent" }}>
+                            <td style={{ padding: "4px 8px", borderBottom: "1px solid var(--kenar)" }}>
+                              {dizgi.yontem === "forma" ? `F${blok.no}/T${t.no}` : `T${t.no}`}
+                            </td>
+                            <td style={{ padding: "4px 8px", borderBottom: "1px solid var(--kenar)", fontFamily: "var(--f-mono, monospace)" }}>{yaz(t.on)}</td>
+                            <td style={{ padding: "4px 8px", borderBottom: "1px solid var(--kenar)", fontFamily: "var(--f-mono, monospace)" }}>{yaz(t.arka)}</td>
+                          </tr>
+                        );
+                      }))}
+                    </tbody>
+                  </table>
+                </div>
+                <div style={{ fontSize: 10.5, color: "var(--metin3)", marginTop: 6, lineHeight: 1.6 }}>
+                  Bu tablonun okunuşu: her satır bir <b>yaprak</b>. Tabaka basılıp katlandığında sayfalar
+                  1-2-3… sırasına girer. Kapaklar dizgiye girmez — ayrı kâğıda, ayrı basılır.
+                  PDF'te kesim işaretleri, katlama çizgisi ve tabaka künyesi kesim alanının dışındadır.
+                </div>
+              </>
+            ) : (
+              <div style={{ fontSize: 11.5, color: "var(--metin2)" }}>Dizgi için iç sayfa gerekiyor.</div>
+            )}
+          </div>
+
+          {/* ── MÜREKKEP / RENK ──────────────────────────────────────── */}
+          <div style={{ padding: "10px 12px", borderRadius: 8, background: "var(--yuzey2)", border: "1px solid var(--kenar)" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 8 }}>
+              <b style={{ fontSize: 12 }}>🎨 Mürekkep Yoğunluğu — tahmin</b>
+              <button style={{ ...stil.buton, fontSize: 11.5, padding: "5px 12px" }}
+                disabled={murekkepTaraniyorMu} onClick={murekkepTara}>
+                {murekkepTaraniyorMu ? "taranıyor…" : "Sayfaları tara"}
+              </button>
+              <button style={{ ...stil.buton, fontSize: 11.5, padding: "5px 12px", background: "var(--yuzey)", color: "var(--metin)" }}
+                onClick={baskiKunyesiIndir}>⬇ Baskı künyesi (.txt)</button>
+            </div>
+
+            <div style={{ padding: "8px 10px", borderRadius: 6, background: "rgba(62,142,208,.08)",
+              border: "1px solid rgba(62,142,208,.35)", fontSize: 11, lineHeight: 1.65, marginBottom: 8 }}>
+              <b>Bu bir CMYK ayrımı DEĞİLDİR.</b> Gerçek ayrım ICC profiliyle yapılır; tarayıcı bunu
+              yapamaz. Burada yapılan, profil kullanmayan bir tahmindir — mürekkebin nerede sınırı
+              zorladığını <i>gösterir</i>, matbaanın dönüşümünün yerine <i>geçmez</i>. Dosya matbaaya
+              sRGB gider ve baskı künyesinde bu açıkça yazar.
+            </div>
+
+            {murekkepSonuc ? (
+              <div style={{ fontSize: 11.5, lineHeight: 1.75 }}>
+                <div>Kâğıt <b>{murekkepSonuc.kagit}</b> → varsayılan sınır <b>%{murekkepSonuc.sinir}</b></div>
+                <div>En yüksek toplam mürekkep: <b style={{ color: murekkepSonuc.enYuksek > murekkepSonuc.sinir ? "#8B2E2E" : "#1E5E30" }}>~%{murekkepSonuc.enYuksek}</b>
+                  {" · "}ortalama ~%{murekkepSonuc.ortalama} · {murekkepSonuc.taranan} sayfa tarandı
+                  {murekkepSonuc.atlanan > 0 && <span style={{ color: "#B0663A" }}> · {murekkepSonuc.atlanan} sayfa taranamadı</span>}
+                </div>
+                <div>CMYK'te sönümlenecek canlı renk: ~%{(murekkepSonuc.gamutDisi * 100).toFixed(1)} — ekrandaki parlaklık baskıda birebir çıkmaz.</div>
+                {murekkepSonuc.riskli.length > 0 ? (
+                  <div style={{ marginTop: 6 }}>
+                    <b style={{ color: "#8B2E2E" }}>Sınırı zorlayan sayfalar:</b>
+                    <ul style={{ margin: "4px 0 0 18px", padding: 0 }}>
+                      {murekkepSonuc.riskli.map((r) => (
+                        <li key={r.etiket}>{r.etiket} — alanın %{(r.oran * 100).toFixed(1)}'i sınır üstü (tepe ~%{r.tac})</li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : (
+                  <div style={{ marginTop: 6, color: "#1E5E30" }}>Sınırı ciddi biçimde zorlayan sayfa görünmüyor.</div>
+                )}
+              </div>
+            ) : (
+              <div style={{ fontSize: 11.5, color: "var(--metin2)" }}>
+                Henüz taranmadı. Tarama, koyu/doygun sayfalarda mürekkebin kâğıdın kaldıramayacağı
+                yoğunluğa çıkıp çıkmadığını gösterir — matbaanın dosyayı geri çevirmesinin en sık sebebi budur.
+              </div>
+            )}
+          </div>
+
           <div style={{ fontSize: 11, color: "var(--metin3)", lineHeight: 1.6 }}>
-            Hâlâ eksik olanlar: CMYK dönüşümü, toplam mürekkep sınırı, PDF/X uyumu, imposition
-            ve tek parça kapak dosyası. Bunlar matbaanın yapması gereken ya da ayrı bir iş —
-            gizlenmiyor, listede duruyor.
+            Hâlâ eksik olanlar: gerçek ICC/CMYK ayrımı, PDF/X-1a uyumu, overprint/trapping ve tek
+            parça kapak açılım dosyası. Bunlar matbaanın yapması gereken ya da ayrı bir iş —
+            gizlenmiyor, hem burada hem baskı künyesinde yazıyor.
           </div>
         </div>
       )}
@@ -11329,6 +14808,41 @@ function TranslationRequestsView({ requests, loading, onUpdateStatus }) {
 
 
 // ============ Destek / Şikayet Talepleri (AI'dan gelen) ============
+// DÜZELTİLDİ (19 Ağu 2026): backend talebe YANIT yazmayı destekliyordu
+// (PATCH .../status → { status, yanit }) ve yazar paneli o yanıtı gösteriyordu,
+// ama yöneticinin yanıtı YAZACAĞI yer yoktu. Tek yapılabilen "Çözüldü
+// İşaretle"ydi: yazar hiçbir açıklama görmeden talebinin kapandığını
+// görüyordu. Artık yanıt yazılıyor, yazılmış yanıt da kartta duruyor.
+// Yanıt kutusu AYRI bir modül düzeyi bileşen: her talebin metni kendi
+// içinde durur. Tek bir ortak sözlükte tutulunca bir talebe yazarken liste
+// yenilenirse (10 sn'de bir) yazılan metin başka karta kayabiliyordu.
+function DestekYanitKutusu({ talep, onGonder }) {
+  const [metin, setMetin] = useState("");
+  const dolu = metin.trim().length > 0;
+  return (
+    <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 8 }}>
+      <textarea
+        value={metin}
+        onChange={(e) => setMetin(e.target.value)}
+        placeholder="Yazara gönderilecek yanıt — talebi yanıtsız kapatmak yazarın tek geri dönüşünü kesiyor."
+        rows={3}
+        style={{ width: "100%", background: THEME.panelBgAlt, color: THEME.textLight, fontSize: 12.5,
+          border: `1px solid ${THEME.border}`, borderRadius: 6, padding: "8px 10px",
+          fontFamily: "inherit", resize: "vertical" }} />
+      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        <Btn small variant="success" onClick={() => { onGonder(talep.id, "cozuldu", metin.trim()); setMetin(""); }}>
+          {dolu ? "Yanıtla ve Çözüldü İşaretle" : "Yanıtsız Çözüldü İşaretle"}
+        </Btn>
+        {!dolu && (
+          <span style={{ fontSize: 11, color: THEME.textFaint }}>
+            Yanıt yazmadan kapatırsan yazar yalnız "çözüldü" görür, sebebini göremez.
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function DestekTalepleriView({ requests, loading, onUpdateStatus }) {
   const KAT = { sikayet: "Şikayet", destek: "Destek" };
   return (
@@ -11350,10 +14864,20 @@ function DestekTalepleriView({ requests, loading, onUpdateStatus }) {
             {r.konu && <div style={{ color: THEME.textLight, fontSize: 13, marginTop: 4, fontWeight: 600 }}>{r.konu}</div>}
             <div style={{ color: THEME.textMuted, fontSize: 12.5, marginTop: 4, lineHeight: 1.5 }}>{r.mesaj}</div>
             <div style={{ color: THEME.textFaint, fontSize: 10.5, marginTop: 6 }}>{r.created_at ? new Date(r.created_at).toLocaleDateString("tr-TR") : ""}</div>
+
+            {r.yanit && (
+              <div style={{ marginTop: 10, padding: "8px 10px", borderRadius: 6, background: "rgba(93,214,163,.07)",
+                border: `1px solid ${THEME.success}`, fontSize: 12.5, color: THEME.textLight, lineHeight: 1.55 }}>
+                <b style={{ fontSize: 11, color: THEME.success }}>Yazara gönderilen yanıt</b>
+                <div style={{ marginTop: 3 }}>{r.yanit}</div>
+              </div>
+            )}
+
+            {r.status === "bekliyor" && <DestekYanitKutusu talep={r} onGonder={onUpdateStatus} />}
           </div>
           <div style={{ display: "flex", gap: 8, alignItems: "center", flexShrink: 0 }}>
             <Badge fg={r.status === "bekliyor" ? THEME.warn : THEME.success} bg={r.status === "bekliyor" ? THEME.warnBg : "rgba(93,214,163,.1)"}>{r.status === "bekliyor" ? "Bekliyor" : "Çözüldü"}</Badge>
-            {r.status === "bekliyor" && <Btn small variant="success" onClick={() => onUpdateStatus(r.id, "cozuldu")}>Çözüldü İşaretle</Btn>}
+
           </div>
         </div>
       ))}
@@ -13329,6 +16853,10 @@ function TelifPanel({ author, onPayout, onUpdateRoyalty, onUpdateWallet, flash }
   const [royalty, setRoyalty] = useState(author.royaltyRate != null ? String(author.royaltyRate) : "");
   const [nextDate, setNextDate] = useState(author.nextPayoutDate ? String(author.nextPayoutDate).slice(0, 10) : "");
   const [walletDelta, setWalletDelta] = useState("");
+  // EKLENDİ (19 Ağu 2026): elle cüzdan düzeltmesi cüzdan hareketlerine
+  // GEREKÇESİZ yazılıyordu. Yazar "param nereye gitti" diye sorduğunda
+  // cevap verecek kayıt olmuyordu. Gerekçe artık zorunlu.
+  const [walletSebep, setWalletSebep] = useState("");
   const [busy, setBusy] = useState("");
 
   const bakiye = Number(author.wallet?.balance || 0);
@@ -13351,10 +16879,12 @@ function TelifPanel({ author, onPayout, onUpdateRoyalty, onUpdateWallet, flash }
   };
   const yapWallet = async () => {
     if (!walletDelta || Number(walletDelta) === 0) return flash(false, "Miktar girin (+ ekle, - çıkar).");
+    if (walletSebep.trim().length < 5)
+      return flash(false, "Gerekçe yazın — bu düzeltme yazarın cüzdan dökümünde görünecek.");
     setBusy("wallet");
     try {
-      const d = await onUpdateWallet(author.id, { delta: Number(walletDelta) });
-      if (d?.ok) { flash(true, "Cüzdan güncellendi."); setWalletDelta(""); }
+      const d = await onUpdateWallet(author.id, { delta: Number(walletDelta), sebep: walletSebep.trim() });
+      if (d?.ok) { flash(true, "Cüzdan güncellendi."); setWalletDelta(""); setWalletSebep(""); }
       else flash(false, d?.error || "Hata");
     } catch { flash(false, "Sunucuya bağlanılamadı."); } finally { setBusy(""); }
   };
@@ -13387,6 +16917,12 @@ function TelifPanel({ author, onPayout, onUpdateRoyalty, onUpdateWallet, flash }
           <div style={{ display: "flex", gap: 8 }}>
             <input style={inputStyle} value={walletDelta} onChange={(e) => setWalletDelta(e.target.value.replace(/[^0-9.\-]/g, ""))} placeholder="+500 / -200" />
             <Btn small disabled={busy === "wallet"} onClick={yapWallet}>Uygula</Btn>
+          </div>
+          <input style={{ ...inputStyle, marginTop: 8 }} value={walletSebep}
+            onChange={(e) => setWalletSebep(e.target.value)}
+            placeholder="Gerekçe (zorunlu) — örn. eksik yatan Temmuz telifi" />
+          <div style={{ fontSize: 10.5, color: THEME.textFaint, marginTop: 4, lineHeight: 1.5 }}>
+            Bu gerekçe yazarın cüzdan dökümüne düşer. Düşüm bakiyeden fazlaysa işlem reddedilir.
           </div>
         </div>
       </div>
@@ -14213,8 +17749,8 @@ export default function AdminPanel() {
       .catch(() => {})
       .finally(() => setLoadingDestek(false));
   };
-  const updateDestekStatus = (id, status) => {
-    authFetch(`/api/admin/destek-talepleri/${id}/status`, { method: "PATCH", body: JSON.stringify({ status }) })
+  const updateDestekStatus = (id, status, yanit) => {
+    authFetch(`/api/admin/destek-talepleri/${id}/status`, { method: "PATCH", body: JSON.stringify({ status, yanit }) })
       .then((r) => r.json())
       .then(() => loadDestekTalepleri())
       .catch(() => {});
@@ -14350,6 +17886,7 @@ export default function AdminPanel() {
     ["eslesme", "Eşleşme Teşhisi"],
     ["isbn", "Toplu ISBN"],
     ["kitapStudyo", "Kitap Resim Stüdyosu"],
+    ["yazarStudyoTakip", "Yazar Stüdyo Takibi"],
     ["kullanicilar", "Kullanıcı Yönetimi"],
   ];
 
@@ -14491,12 +18028,17 @@ export default function AdminPanel() {
         {view === "vaatYonetimi" && <VaatYonetimi authFetch={authFetch} />}
         {view === "labKuyrugu" && <LaboratuvarKuyrugu authFetch={authFetch} />}
         {view === "senkronUyarilari" && <SenkronUyarilari authFetch={authFetch} />}
+        {/* DÜZELTİLDİ (19 Ağu 2026): menüde "Versiyon Testi" vardı ama router'da
+            karşılığı YOKTU — tıklayan herkes boş ekran görüyordu. Bileşen
+            (VersiyonSkorboard) baştan beri yazılıydı, yalnız bağlanmamıştı. */}
+        {view === "versiyonTest" && <VersiyonSkorboard authFetch={authFetch} />}
         {view === "reklamMerkezi" && <ReklamMerkezi authFetch={authFetch} />}
         {view === "yazarKampanya" && <YazarKampanyalari authFetch={authFetch} />}
         {view === "reklamTeklif" && <ReklamBasvurulari authFetch={authFetch} />}
         {view === "eslesme" && <EslesmeTeshisi authFetch={authFetch} onSelectAuthor={(id) => { setView("authors"); setSelectedId(id); }} />}
         {view === "isbn" && <BulkIsbnUpload onSubmit={bulkIsbn} />}
         {view === "kitapStudyo" && <KitapStudyo authFetch={authFetch} token={session?.token} />}
+        {view === "yazarStudyoTakip" && <YazarStudyoTakip authFetch={authFetch} />}
         {view === "kullanicilar" && <KullaniciYonetimi authFetch={authFetch} />}
       </div>
 
