@@ -7154,7 +7154,61 @@ function AsamaRayi({ asama }) {
   );
 }
 
-function KitapStudyo({ authFetch, token }) {
+// ══════════════════════════════════════════════════════════════
+// PROJE İÇİ BÖLÜM MENÜSÜ (23 Ağu 2026 — onaylanan maket)
+//
+// Üretim ekranı tek kesintisiz kaydırmaydı: künye, kapaklar, karakterler,
+// sayfa çiftleri, üretim ve baskı alt alta ~6 ekran boyu sürüyordu.
+// "Baskı Hazırlığı nerede?" sorusunun cevabı "aşağı in" idi — bu bir
+// adres değil. Artık her işin adresi solda, kendi adıyla duruyor ve
+// yanında durumu yazıyor (kaç görsel eksik, kapak üretildi mi).
+// ══════════════════════════════════════════════════════════════
+function BolumMenusu({ bolum, setBolum, proje }) {
+  const spreadler = proje.spreadler || [];
+  const gorselli = spreadler.filter((sp) => sp.solGorselUrl && sp.sagGorselUrl).length;
+  const refEksik = (proje.karakterler || []).filter((k) => !k.gorselUrl).length;
+  const OGELER = [
+    ["sayfalar", "Sayfa Çiftleri", `${gorselli}/${spreadler.length} görselli`],
+    // Referanssız karakter MENÜDEN görünür: zebra projesinde 9 karakterin
+    // 8'i referanssız kalmıştı çünkü uyarı yalnız bir kez, aşama geçişinde
+    // gösteriliyordu. Artık eksik olduğu sürece burada kırmızı yazıyor.
+    ["karakter", "Karakterler",
+      refEksik ? `${refEksik} karakterin referansı YOK` : `${(proje.karakterler || []).length} kayıt`,
+      refEksik > 0],
+    ["kapak", "Kapaklar",
+      `${proje.onKapakGorselUrl ? "ön hazır" : "ön yok"} · ${proje.arkaKapakGorselUrl ? "arka hazır" : "arka yok"}`],
+    ["kunye", "Künye ve Özellikler", proje.kunyeGorselUrl ? "künye üretildi" : "künye henüz yok"],
+    ["cikti", "Üretim ve Çıktı", "toplu üretim · PDF · EPUB"],
+    ["baski", "Baskı Hazırlığı", "sırt · forma · mürekkep"],
+  ];
+  return (
+    <nav aria-label="Proje bölümleri" style={{ position: "sticky", top: 84,
+      display: "flex", flexDirection: "column", gap: 4 }}>
+      {OGELER.map(([kod, ad, alt, uyari]) => {
+        const bu = bolum === kod;
+        return (
+          <button key={kod} type="button" onClick={() => setBolum(kod)}
+            aria-current={bu ? "true" : undefined}
+            style={{ textAlign: "left", padding: "9px 12px", borderRadius: 10, cursor: "pointer",
+              background: bu ? "#F5F0E4" : "transparent",
+              border: "1px solid transparent",
+              borderLeft: `3px solid ${bu ? "#A9762F" : "transparent"}` }}>
+            <span style={{ display: "block", fontSize: 13, fontWeight: bu ? 700 : 500, color: "#18181A" }}>{ad}</span>
+            <span style={{ display: "block", fontSize: 10.5, marginTop: 1,
+              color: uyari ? "#8B2E2E" : "#6F6F6C", fontWeight: uyari ? 700 : 400 }}>{alt}</span>
+          </button>
+        );
+      })}
+    </nav>
+  );
+}
+
+// gorunum: kabuktaki ray hangi bölümü istiyor — "tezgah" (pano + proje),
+// "surum" (Sürüm Geçmişi) ya da "sistem" (Sistem ve Ölçüm). Ayrı bileşen
+// DEĞİL prop: üçü de aynı proje seçimini ve oturum durumunu paylaşıyor —
+// tezgâhta bir proje açıp Sürüm Geçmişi'ne geçince O projenin sürümlerini
+// görmelisin, sıfırlanmış bir ekranı değil.
+function KitapStudyo({ authFetch, token, gorunum = "tezgah" }) {
   const [projeler, setProjeler] = React.useState(null);
   const [hata, setHata] = React.useState("");
   const [yeniAd, setYeniAd] = React.useState("");
@@ -7199,6 +7253,10 @@ function KitapStudyo({ authFetch, token }) {
   const [depoVeri, setDepoVeri] = React.useState(null);
   const [depoYukleniyor, setDepoYukleniyor] = React.useState(false);
   const [depoSadeceBagsiz, setDepoSadeceBagsiz] = React.useState(false);
+  // Bölümlü düzen (23 Ağu 2026): üretim ekranında hangi bölüm açık ve
+  // sayfa gezgininde hangi çift seçili.
+  const [bolum, setBolum] = React.useState("sayfalar");
+  const [seciliSpreadIdx, setSeciliSpreadIdx] = React.useState(0);
   // PDF indirildikten sonra gerçek çözünürlüğü bildirmek için.
   const [pdfSonDurum, setPdfSonDurum] = React.useState(null);
   // Ölü Blob adreslerini işaretle — kırık resim ikonu yerine kurtarma kutusu.
@@ -8673,7 +8731,7 @@ function KitapStudyo({ authFetch, token }) {
       onayEtiketi: "Sayfayı sil",
       mesaj:
         (gorselSayisi ? `Üretilmiş ${gorselSayisi} görsel de silinecek (parası ödenmişti).\n\n` : "") +
-        `Yanlışlıkla sildiysen en alttaki "Kayıp Koruma" bölümünden geri alabilirsin.`,
+        `Yanlışlıkla sildiysen soldaki "Sürüm Geçmişi" bölümünden geri alabilirsin.`,
     })) return;
     const guncelMeta = { ...seciliProje, spreadler: seciliProje.spreadler.filter((_, i) => i !== idx) };
     await projeGuncelle(seciliId, guncelMeta, true);
@@ -9961,6 +10019,7 @@ function KitapStudyo({ authFetch, token }) {
                  fontFamily: "'Fredoka', sans-serif", fontWeight: 700, fontSize: 14, cursor: "pointer",
                  boxShadow: "0 4px 14px rgba(0,0,0,.12)", opacity: bildirimler.length ? 0 : 1,
                  pointerEvents: bildirimler.length ? "none" : "auto", transition: "opacity 160ms" }}>?</button>
+      {gorunum === "tezgah" && (<>
       {/* Emoji kaldırıldı (23 Ağu 2026): 🌈 her işletim sisteminde başka
           bir resim, siyah-beyaz baskıda hiç yok ve ekran okuyucu onu
           "gökkuşağı" diye okuyor. Başlığın anlamına hiçbir şey katmıyordu. */}
@@ -10118,7 +10177,10 @@ function KitapStudyo({ authFetch, token }) {
         </button>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: seciliId ? "280px 1fr" : "1fr", gap: 20 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 20 }}>
+        {/* Proje AÇIKKEN liste gizli (23 Ağu 2026): maketteki gibi çalışma
+            alanı tam genişlik. Panoya dönüş "← Proje Panosuna Dön" ile. */}
+        {!seciliId && (
         <div>
           <div style={{ fontFamily: "'Fredoka', sans-serif", fontWeight: 600, fontSize: 13, color: "#6f6f6c", marginBottom: 10 }}>
             PROJELER {projeler ? `(${projeler.length})` : ""}
@@ -10151,6 +10213,7 @@ function KitapStudyo({ authFetch, token }) {
             </div>
           ))}
         </div>
+        )}
 
         {seciliId && (
           <div>
@@ -10575,7 +10638,9 @@ function KitapStudyo({ authFetch, token }) {
                 {/* DEĞİŞTİRİLDİ (15 Ağu 2026): ④ Kitap Üretimi aşaması, 1. parça —
                     kitap metni yükleme + otomatik sahne bölme. */}
                 {seciliProje.asama === "uretim" && (
-                  <div>
+                  <div style={{ display: "grid", gridTemplateColumns: "196px minmax(0, 1fr)", gap: 18, alignItems: "start" }}>
+                    <BolumMenusu bolum={bolum} setBolum={setBolum} proje={seciliProje} />
+                    <div style={{ minWidth: 0 }}>
                     {/* Karakter ve sayfa sayısı başlıkta, aşama rayda yazıyor.
                         Burada yalnız RAYDA GÖRÜNMEYEN bilgi kaldı: hangi stil
                         kilitlendi. Aynı sayıyı üçüncü kez yazmıyoruz. */}
@@ -10583,6 +10648,9 @@ function KitapStudyo({ authFetch, token }) {
                       Onaylanan stil: <b style={{ color: "#18181A" }}>{seciliProje.onaylananStilEtiket}</b>
                     </div>
 
+                    {/* ── bölüm: kunye — display:none ile gizli (unmount DEĞİL):
+                        yarım yazılmış metin, bölüm değiştirip dönünce yerinde durur. */}
+                    <div style={{ display: bolum === "kunye" ? undefined : "none" }}>
                     {/* EKLENDİ (14 Ağu 2026): ④ Kitap Üretimi, 2. parça — künye + kapaklar */}
                     <div style={{ background: "#FFFFFF", borderRadius: 14, padding: 18, border: "1px solid #E4DFD1", marginBottom: 16 }}>
                       <div style={{ fontFamily: "'Fredoka', sans-serif", fontWeight: 600, fontSize: 14, marginBottom: 10 }}>Özellikler ve Künye</div>
@@ -10620,7 +10688,11 @@ function KitapStudyo({ authFetch, token }) {
                         </div>
                       )}
                     </div>
+                    </div>
 
+                    {/* ── bölüm: kapak — display:none ile gizli (unmount DEĞİL):
+                        yarım yazılmış metin, bölüm değiştirip dönünce yerinde durur. */}
+                    <div style={{ display: bolum === "kapak" ? undefined : "none" }}>
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 16 }}>
                       <div style={{ background: "#FFFFFF", borderRadius: 14, padding: 18, border: "1px solid #E4DFD1" }}>
                         <div style={{ fontFamily: "'Fredoka', sans-serif", fontWeight: 600, fontSize: 14, marginBottom: 10 }}>Ön Kapak</div>
@@ -10676,6 +10748,7 @@ function KitapStudyo({ authFetch, token }) {
                         )}
                       </div>
                     </div>
+                    </div>
 
                     {/* EKLENDİ (19 Ağu 2026, tarayıcı denemesinde bulundu):
                         ÜRETİM EKRANINDA KARAKTERLER HİÇ GÖRÜNMÜYORDU.
@@ -10687,6 +10760,9 @@ function KitapStudyo({ authFetch, token }) {
                         bir kez çıkıyor, sonra bir daha görünmüyordu.
                         Burası şerit hâlinde: kim var, referansı var mı, yoksa
                         tek tuşla üret. */}
+                    {/* ── bölüm: karakter — display:none ile gizli (unmount DEĞİL):
+                        yarım yazılmış metin, bölüm değiştirip dönünce yerinde durur. */}
+                    <div style={{ display: bolum === "karakter" ? undefined : "none" }}>
                     {(seciliProje.karakterler || []).length > 0 && (() => {
                       const kars = seciliProje.karakterler || [];
                       const referanssiz = kars.filter((k) => !k.gorselUrl);
@@ -10750,15 +10826,80 @@ function KitapStudyo({ authFetch, token }) {
                         </div>
                       );
                     })()}
+                    </div>
 
                     {/* EKLENDİ (14 Ağu 2026): ③ Sahneler, 3. parça — sayfa çiftleri */}
+                    {/* ── bölüm: sayfalar — display:none ile gizli (unmount DEĞİL). */}
+                    <div style={{ display: bolum === "sayfalar" ? undefined : "none" }}>
+                    {/* Referanssız karakter uyarısı ÜRETİMİN YAPILDIĞI EKRANDA:
+                        bölümlere ayırınca Karakterler'deki uyarı gözden
+                        kaybolabilirdi — ama sayfa TAM BURADAN üretiliyor. */}
+                    {(seciliProje.karakterler || []).some((k) => !k.gorselUrl) && (
+                      <div style={{ marginBottom: 12, padding: "10px 12px", borderRadius: 10,
+                        background: "#FDECEC", border: "1px solid #E3B4B4", color: "#8B2E2E",
+                        fontSize: 12.5, lineHeight: 1.55 }}>
+                        <b>{(seciliProje.karakterler || []).filter((k) => !k.gorselUrl).map((k) => k.ad).join(", ")}</b>{" "}
+                        için referans görseli yok — bu karakterler her sayfada FARKLI çizilir.{" "}
+                        <span onClick={() => setBolum("karakter")}
+                          style={{ textDecoration: "underline", cursor: "pointer", fontWeight: 700 }}>
+                          Karakterler bölümünde üret
+                        </span>
+                      </div>
+                    )}
                     <div style={{ background: "#FFFFFF", borderRadius: 14, padding: 18, border: "1px solid #E4DFD1", marginBottom: 16 }}>
                       <div style={{ fontFamily: "'Fredoka', sans-serif", fontWeight: 600, fontSize: 14, marginBottom: 6 }}>Sayfa Çiftleri</div>
                       <div style={{ fontSize: 12, color: "#6f6f6c", marginBottom: 12 }}>
                         Her kart bir sayfa ÇİFTİ (ör. sayfa 2-3). Tek bir geniş görsel üretilip ortadan bölünüyor, kitap açıldığında kesintisiz görünsün diye.
                         Sayfa 1 künye sayfasıdır, çiftler 2. sayfadan başlar.
                       </div>
+                        {/* ── SAYFA GEZGİNİ (23 Ağu 2026, onaylı maket) ──
+                            Eskiden bütün sayfa çiftleri alt alta tek kaydırmadaydı; 20
+                            sayfalık kitapta aranan sayfaya "aşağı inerek" ulaşılıyordu.
+                            Artık solda küçük görselli gezgin, sağda YALNIZ seçili çiftin
+                            tuvali: bir sayfada çalışırken diğer 19'u ekranda durmuyor. */}
+                        <div style={{ display: "grid", gridTemplateColumns: "212px minmax(0, 1fr)", gap: 14, alignItems: "start" }}>
+                          <div style={{ position: "sticky", top: 84, display: "flex", flexDirection: "column", gap: 6,
+                            maxHeight: "calc(100vh - 130px)", overflowY: "auto", paddingRight: 2 }}>
+                            {(seciliProje.spreadler || []).map((s, i) => {
+                              const n = spreadNumaralariGetir(i);
+                              const bu = i === Math.min(seciliSpreadIdx, (seciliProje.spreadler || []).length - 1);
+                              const hazir = s.solGorselUrl && s.sagGorselUrl;
+                              return (
+                                <button key={i} type="button" onClick={() => setSeciliSpreadIdx(i)}
+                                  aria-current={bu ? "true" : undefined}
+                                  style={{ display: "flex", gap: 8, alignItems: "center", textAlign: "left", padding: 6,
+                                    borderRadius: 10, cursor: "pointer",
+                                    border: `1px solid ${bu ? "#A9762F" : "#E4DFD1"}`,
+                                    background: bu ? "#F5F0E4" : "#FFFFFF" }}>
+                                  <span style={{ width: 52, height: 30, flexShrink: 0, borderRadius: 4, overflow: "hidden",
+                                    background: "#F3EFE6", border: "1px solid #E4DFD1", display: "grid", placeItems: "center" }}>
+                                    {s.solGorselUrl
+                                      ? <img src={kucukAdres(s.solGorselUrl)} alt="" loading="lazy" decoding="async"
+                                          style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                                      : <span style={{ fontSize: 9, color: "#9A9A96" }}>boş</span>}
+                                  </span>
+                                  <span style={{ minWidth: 0 }}>
+                                    <span style={{ display: "block", fontSize: 12, fontWeight: bu ? 700 : 500 }}>
+                                      Sayfa {n.solSayfa}–{n.sagSayfa}
+                                    </span>
+                                    {/* Durum yalnız renkle DEĞİL kelimeyle: renk körü de okusun. */}
+                                    <span style={{ display: "block", fontSize: 10.5, color: hazir ? "#1E5E30" : "#7A4A12" }}>
+                                      {hazir ? (s.yaziBasildi ? "görsel + yazı" : "yazı basılmadı") : "görsel eksik"}
+                                    </span>
+                                  </span>
+                                </button>
+                              );
+                            })}
+                            {/* Yeni çift: ekle VE ona geç — eklediğin şeyi görmelisin. */}
+                            <button style={{ ...stil.buton, fontSize: 12 }}
+                              onClick={() => { const yeniIdx = (seciliProje.spreadler || []).length; spreadEkle(); setSeciliSpreadIdx(yeniIdx); }}>
+                              + Sayfa Çifti Ekle
+                            </button>
+                          </div>
+                          <div style={{ minWidth: 0 }}>
                       {(seciliProje.spreadler || []).map((s, idx) => {
+                        {/* Gezgin varken yalnız SEÇİLİ çift çizilir — 40 kartlık liste bitti. */}
+                        if (idx !== Math.min(seciliSpreadIdx, (seciliProje.spreadler || []).length - 1)) return null;
                         const { solSayfa, sagSayfa } = spreadNumaralariGetir(idx);
                         return (
                           // mst-spread-kart: content-visibility:auto. 40 sayfalık bir
@@ -10770,6 +10911,12 @@ function KitapStudyo({ authFetch, token }) {
                           // zıplamasını önlüyor.
                           <div key={idx} className="mst-spread-kart" style={{ background: "#fff", border: "1.5px solid #E4DFD1", borderRadius: 12, padding: 14, marginBottom: 10 }}>
                             <div style={{ fontFamily: "'Fredoka', sans-serif", fontWeight: 600, fontSize: 13, marginBottom: 8, color: "#6f6f6c" }}>Sayfa {solSayfa} — {sagSayfa}</div>
+                            {/* ── TUVAL + DENETÇİ (23 Ağu 2026, onaylı maket) ──
+                                Solda görsel (tuval), sağda 340px denetçi: sahne, metinler ve
+                                eylemler. Eskiden hepsi alt altaydı; görsele bakarken metin
+                                ekran dışında kalıyor, karşılaştırma yapılamıyordu. */}
+                            <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 340px", gap: 14, alignItems: "start" }}>
+                            <div style={{ minWidth: 0, order: 2 }}>
                             <textarea style={{ ...stil.input, minHeight: 60 }} placeholder="Sahne (iki sayfaya birden yayılan tek kompozisyon)"
                               value={s.sahne} onChange={(e) => spreadAlanGuncelle(idx, "sahne", e.target.value)} onBlur={() => metaKaydet(seciliProje)} />
                             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginTop: 8 }}>
@@ -10849,6 +10996,19 @@ function KitapStudyo({ authFetch, token }) {
                                 disabled={idx === (seciliProje.spreadler || []).length - 1} title="Aşağı taşı" onClick={() => spreadTasi(idx, 1)}>↓</button>
                               <span onClick={() => spreadSil(idx)} style={{ color: "#C0392B", cursor: "pointer", fontSize: 12, alignSelf: "center" }}>Sayfa çiftini sil</span>
                             </div>
+                            </div>
+                            {/* ── TUVAL (sol sütun) ── görseller büyük, göz burada. */}
+                            <div style={{ minWidth: 0, order: 1 }}>
+                              {/* Görsel yokken tuval boş bir beyazlık olarak kalmasın —
+                                  ne olacağı ve nereden üretileceği yazsın. */}
+                              {!s.solGorselUrl && (
+                                <div style={{ aspectRatio: "2 / 1", borderRadius: 10, border: "1px dashed #C9C2B2",
+                                  background: "#FBF9F6", display: "flex", flexDirection: "column", alignItems: "center",
+                                  justifyContent: "center", gap: 6, color: "#8E897A", fontSize: 12.5, textAlign: "center", padding: 16 }}>
+                                  <b style={{ fontSize: 13.5, color: "#6F6F6C" }}>Bu çiftin görseli henüz yok</b>
+                                  <span>Sağdaki panelden üretebilir ya da depodan bağlayabilirsin.</span>
+                                </div>
+                              )}
                             {s.solGorselUrl && (
                               <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
                                 {[["sol", s.solGorselUrl, solSayfa], ["sag", s.sagGorselUrl, sagSayfa]].map(([taraf, url, no]) => (
@@ -11098,11 +11258,18 @@ function KitapStudyo({ authFetch, token }) {
                                 )}
                               </div>
                             )}
+                            </div>
+                            </div>
                           </div>
                         );
                       })}
-                      <button style={stil.buton} onClick={spreadEkle}>+ Sayfa Çifti Ekle</button>
+                          </div>
+                        </div>
                     </div>
+                    </div>
+                    {/* ── bölüm: cikti — display:none ile gizli (unmount DEĞİL):
+                        yarım yazılmış metin, bölüm değiştirip dönünce yerinde durur. */}
+                    <div style={{ display: bolum === "cikti" ? undefined : "none" }}>
 
                     {/* EKLENDİ: 4-5. parça — Üretim (tümünü üret, maliyet, PDF, önizleme) */}
                     <div style={{ background: "#FFFFFF", borderRadius: 14, padding: 18, border: "1px solid #E4DFD1" }}>
@@ -11336,6 +11503,10 @@ function KitapStudyo({ authFetch, token }) {
                       </div>
                     )}
 
+                    </div>
+                    {/* ── bölüm: baski — display:none ile gizli (unmount DEĞİL):
+                        yarım yazılmış metin, bölüm değiştirip dönünce yerinde durur. */}
+                    <div style={{ display: bolum === "baski" ? undefined : "none" }}>
                     {/* Baskı hazırlığı: sırt, cilt matematiği, barkod, taşma payı */}
                     <BaskiHazirligi proje={seciliProje} stil={stil}
                       guncelle={(ad, deger) => ozellikGuncelle(ad, deger)}
@@ -11344,6 +11515,7 @@ function KitapStudyo({ authFetch, token }) {
                       murekkepTara={murekkepTara} murekkepTaraniyorMu={murekkepTaraniyorMu}
                       murekkepSonuc={murekkepSonuc} baskiKunyesiIndir={baskiKunyesiIndir}
                       formaIlerleme={formaIlerleme} formaSonDurum={formaSonDurum} />
+                    </div>
 
                     {onizlemeAcikMi && (() => {
                       const liste = kitapSayfaListesiOlustur();
@@ -11386,7 +11558,8 @@ function KitapStudyo({ authFetch, token }) {
                         </div>
                       );
                     })()}
-                  </div>
+                      </div>
+                    </div>
                 )}
               </div>
             )}
@@ -11427,13 +11600,43 @@ function KitapStudyo({ authFetch, token }) {
           </div>
         )}
 
-        <HataSinir ad="Kayıp Koruma">
-          <SurumGecmisi authFetch={authFetch} stil={stil} projeId={seciliId} projeAdi={seciliProje?.kitapAdi} onGeriYuklendi={() => projeAc(seciliId)} onayla={onayla} bildir={bildir} />
-        </HataSinir>
-        <HataSinir ad="Test Alanı">
-          <KitapStudyoTestAlani authFetch={authFetch} stil={stil} seciliProje={seciliProje} seciliId={seciliId} sonOlcum={sonOlcum} onayla={onayla} bildir={bildir} />
-        </HataSinir>
       </div>
+        </>)}
+
+        {/* Ray bölümleri (23 Ağu 2026): bu ikisi eskiden pano kaydırmasının
+            EN DİBİNDE, yanlış adlarla duruyordu ("Kayıp Koruma", "Test
+            Alanı"). Sürüm geçmişini arayan kişi "kayıp" kelimesini,
+            fiyat ayarını arayan "test" kelimesini aramıyor. Artık sol
+            rayda kendi adlarıyla birer bölümler. */}
+        {gorunum === "surum" && (
+          <HataSinir ad="Sürüm Geçmişi">
+            {/* Proje seçilmeden gelindiyse "tezgâha dön, proje aç, geri gel"
+                yaptırmıyoruz — seçim burada da yapılabiliyor. */}
+            {!seciliId && (projeler || []).length > 0 && (
+              <div style={{ marginBottom: 14, padding: "12px 14px", borderRadius: 10,
+                background: "#FFFFFF", border: "1px solid #E4DFD1" }}>
+                <div style={{ fontSize: 12.5, color: "#6F6F6C", marginBottom: 8 }}>
+                  Hangi projenin sürümleri?
+                </div>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  {(projeler || []).map((p) => (
+                    <button key={p.id} style={{ ...stil.buton, fontSize: 12 }} onClick={() => projeAc(p.id)}>
+                      {p.kitap_adi}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+            <SurumGecmisi authFetch={authFetch} stil={stil} projeId={seciliId} projeAdi={seciliProje?.kitapAdi}
+              onGeriYuklendi={() => projeAc(seciliId)} onayla={onayla} bildir={bildir} acikBaslangic />
+          </HataSinir>
+        )}
+        {gorunum === "sistem" && (
+          <HataSinir ad="Sistem ve Ölçüm">
+            <KitapStudyoTestAlani authFetch={authFetch} stil={stil} seciliProje={seciliProje} seciliId={seciliId}
+              sonOlcum={sonOlcum} onayla={onayla} bildir={bildir} acikBaslangic />
+          </HataSinir>
+        )}
     </div>
   );
 }
@@ -11790,7 +11993,9 @@ function BaskiHazirligiGovde({ proje, stil, guncelle, kaydet,
   // taraması KitapStudyo'nun içinde). Prop olarak geçiyorlar; kapsam
   // denetimi bunu zorunlu tutuyor — eskiden bu iki isim hiç okunmuyordu.
   formaIlerleme, formaSonDurum }) {
-  const [acik, setAcik] = React.useState(false);
+  // Artık "Baskı Hazırlığı" kendi bölümü — menüden buraya gelen kişiye
+  // bir de "aç"a bastırmak fazladan bir kapı.
+  const [acik, setAcik] = React.useState(true);
   const [dizgiYontemi, setDizgiYontemi] = React.useState("tel-dikis");
   const oz = proje.ozellikler || {};
   const spreadler = proje.spreadler || [];
@@ -12255,8 +12460,10 @@ class HataSinir extends React.Component {
 // o kayıtları gösterir ve tek tıkla geri döndürür. Ayrıca silinmiş projeler
 // de burada — silinen bir kitap tamamen yok olmuyor.
 // ============================================================
-function SurumGecmisi({ authFetch, stil, projeId, projeAdi, onGeriYuklendi, onayla, bildir }) {
-  const [acik, setAcik] = React.useState(false);
+function SurumGecmisi({ authFetch, stil, projeId, projeAdi, onGeriYuklendi, onayla, bildir, acikBaslangic }) {
+  // Ray bölümü olarak açılıyorsa kapalı gelmesi anlamsız — kişi zaten
+  // menüden "Sürüm Geçmişi"ne tıkladı.
+  const [acik, setAcik] = React.useState(!!acikBaslangic);
   const [surumler, setSurumler] = React.useState(null);
   const [silinenler, setSilinenler] = React.useState([]);
   const [durum, setDurum] = React.useState("");
@@ -12329,8 +12536,8 @@ function SurumGecmisi({ authFetch, stil, projeId, projeAdi, onGeriYuklendi, onay
           <path d="M3 7.5v9a2 2 0 0 0 1.1 1.8l7 3.4a2 2 0 0 0 1.8 0l7-3.4A2 2 0 0 0 21 16.5v-9"/>
           <path d="M12 12.6 3.3 8.3a1 1 0 0 1 0-1.8l7.8-3.8a2 2 0 0 1 1.8 0l7.8 3.8a1 1 0 0 1 0 1.8L12 12.6z"/>
         </svg>
-        <b style={{ fontFamily: "'Fredoka', sans-serif", fontSize: 14 }}>Kayıp Koruma — Sürüm Geçmişi</b>
-        <span style={{ fontSize: 11.5, color: "#6f6f6c" }}>her kayıttan önceki hâl saklanıyor, geri alınabilir</span>
+        <b style={{ fontFamily: "'Fredoka', sans-serif", fontSize: 14 }}>Sürüm Geçmişi</b>
+        <span style={{ fontSize: 11.5, color: "#6f6f6c" }}>her kayıttan önceki hâl saklanır — silinen, geri alınabilir</span>
         <span style={{ marginLeft: "auto", fontSize: 12, color: "#3E8ED0" }}>{acik ? "▴ gizle" : "▾ aç"}</span>
       </div>
 
@@ -12411,8 +12618,8 @@ function SurumGecmisi({ authFetch, stil, projeId, projeAdi, onGeriYuklendi, onay
 // Tahmin gösterilmez. Kredi harcayan tek düğme açıkça işaretlidir; geri
 // kalan her kontrol ücretsizdir ve OpenAI'yi hiç çağırmaz.
 // ============================================================
-function KitapStudyoTestAlani({ authFetch, stil, seciliProje, seciliId, sonOlcum, onayla, bildir }) {
-  const [acik, setAcik] = React.useState(false);
+function KitapStudyoTestAlani({ authFetch, stil, seciliProje, seciliId, sonOlcum, onayla, bildir, acikBaslangic }) {
+  const [acik, setAcik] = React.useState(!!acikBaslangic);
   const [fiyat, setFiyat] = React.useState(null);
   const [form, setForm] = React.useState({ girdiMetin1M: "", girdiGorsel1M: "", cikti1M: "", usdTry: "", kaynak: "" });
   const [fiyatDurum, setFiyatDurum] = React.useState("");
@@ -12567,8 +12774,8 @@ function KitapStudyoTestAlani({ authFetch, stil, seciliProje, seciliId, sonOlcum
           strokeLinecap="round" strokeLinejoin="round" width="16" height="16" aria-hidden="true">
           <path d="M9 3h6v5l3.6 8.2A2 2 0 0 1 16.8 19H7.2a2 2 0 0 1-1.8-2.8L9 8z"/><path d="M8 14h8"/>
         </svg>
-        <b style={{ fontFamily: "'Fredoka', sans-serif", fontSize: 14 }}>Test Alanı — ölçüm, kredi ve sistem kontrolü</b>
-        <span style={{ fontSize: 11.5, color: "#6f6f6c" }}>tahmin yok, sadece ölçülen</span>
+        <b style={{ fontFamily: "'Fredoka', sans-serif", fontSize: 14 }}>Sistem ve Ölçüm</b>
+        <span style={{ fontSize: 11.5, color: "#6f6f6c" }}>fiyat ayarı · maliyet ölçümü · sistem kontrolü · depo temizliği</span>
         <span style={{ marginLeft: "auto", fontSize: 12, color: "#3E8ED0" }}>{acik ? "▴ gizle" : "▾ aç"}</span>
       </div>
 
@@ -12900,7 +13107,7 @@ function KitapStudyoTestAlani({ authFetch, stil, seciliProje, seciliId, sonOlcum
               <li><b>Yazı yerleşimi</b> — üretilen görsel <u>yazısız</u> gelmeli. Yazı panelde ekleniyor; konumu sürüklenebiliyor mu, uzun metin taşıyor mu.</li>
               <li><b>PDF ölçüsü</b> — PDF indir, Acrobat'ta “Belge özellikleri”nde sayfa boyutu projede yazan cm ile birebir aynı mı.</li>
               <li><b>Kalite farkı gerçekten görünüyor mu</b> — aynı sahneyi düşük ve orta kalitede üretip yan yana koy; fark maliyeti hak ediyor mu.</li>
-              <li><b>Kayıp koruması</b> — bir projeyi kaydet, sonra “Kayıp Koruma” bölümünden önceki sürüme dön; görseller geri gelmeli.</li>
+              <li><b>Kayıp koruması</b> — bir projeyi kaydet, sonra “Sürüm Geçmişi” bölümünden önceki sürüme dön; görseller geri gelmeli.</li>
             </ol>
           </div>
 
