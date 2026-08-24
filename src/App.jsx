@@ -2,6 +2,79 @@ import React, { useState, useEffect } from "react";
 
 const BACKEND_URL = "https://mst-backend-mauve.vercel.app";
 
+// ============================================================
+// REKLAM HARCAMA KAPISI — PANEL TARAFI (24 Ağustos 2026)
+// Backend'deki TOTP kapısıyla eşleşir: para harcatan / reklam
+// aktifleştiren uçlara istek giderken kullanıcıdan 6 haneli authenticator
+// kodu istenir ve "x-mst-totp" başlığıyla gönderilir. Kod yalnız hesap
+// sahibinin telefonundadır; panel de yapay zekâ da bu kodu üretemez.
+// ============================================================
+
+// Riskli uç mu? Öyleyse insana okunur işlem adını döndürür, değilse null.
+function riskliReklamUcu(path, options) {
+  const p = String(path || "");
+  if (/\/reklam\/kampanya\/[^/]+\/onayla/.test(p)) return "kampanya yayınlama";
+  if (p.includes("/reklam/metinden-reklam")) return "metinden reklam kurma";
+  if (p.includes("/reklam/organik-reklamlastir")) return "organik gönderiyi reklamlaştırma";
+  if (p.includes("/reklam/advantage-kur")) return "Advantage+ kampanya kurma";
+  if (p.includes("/reklam/deney-kur")) return "A/B deney kurma";
+  if (p.includes("/reklam/aksiyon-uygula")) {
+    // Yalnız bütçe artıran aksiyon TOTP ister; duraklatma/kitle onaysız akar.
+    try {
+      const g = typeof options?.body === "string" ? JSON.parse(options.body) : (options?.body || {});
+      if (g?.aksiyon?.tur === "butce_kaydir") return "bütçe artırma";
+    } catch { /* gövde okunamadıysa güvenli tarafta kal: isteme */ }
+    return null;
+  }
+  return null;
+}
+
+// 6 haneli onay kodunu soran, söze bağlı (promise) küçük modal.
+// Vanilla DOM — React ağacından bağımsız çalışır, her yerden çağrılabilir.
+function reklamOnayKoduIste(islemAdi) {
+  return new Promise((resolve) => {
+    if (typeof document === "undefined") { resolve(null); return; }
+    const ort = document.createElement("div");
+    ort.style.cssText = "position:fixed;inset:0;z-index:99999;background:rgba(6,10,20,.72);"
+      + "display:flex;align-items:center;justify-content:center;padding:20px;"
+      + "font-family:system-ui,Segoe UI,Roboto,sans-serif";
+    ort.innerHTML =
+      '<div style="width:100%;max-width:380px;background:#151D30;border:1px solid #24304a;'
+      + 'border-radius:16px;padding:22px;color:#F7F5EF">'
+      + '<div style="font-size:16px;font-weight:600;margin-bottom:6px">Reklam onayı gerekli</div>'
+      + '<div style="font-size:13px;color:#9fb0c9;line-height:1.55;margin-bottom:14px">Bu işlem gerçek '
+      + 'para harcatır ya da reklamı yayına alır (<b style="color:#C5A367">' + (islemAdi || "reklam işlemi")
+      + '</b>). Authenticator uygulamandaki 6 haneli kodu gir.</div>'
+      + '<input id="mstTotpInput" inputmode="numeric" autocomplete="one-time-code" maxlength="6" '
+      + 'placeholder="______" style="width:100%;text-align:center;letter-spacing:8px;font-size:22px;'
+      + 'padding:12px;border-radius:10px;border:1px solid #24304a;background:#0b1120;color:#F7F5EF">'
+      + '<div id="mstTotpHata" style="color:#e06a6a;font-size:12px;min-height:16px;margin-top:6px"></div>'
+      + '<div style="display:flex;gap:10px;margin-top:8px">'
+      + '<button id="mstTotpIptal" style="flex:1;background:transparent;color:#9fb0c9;border:1px solid #24304a;'
+      + 'border-radius:10px;padding:11px;font-size:14px;cursor:pointer">İptal</button>'
+      + '<button id="mstTotpOnay" style="flex:1;background:#C5A367;color:#1a1200;border:0;'
+      + 'border-radius:10px;padding:11px;font-weight:600;font-size:14px;cursor:pointer">Onayla</button>'
+      + '</div></div>';
+    document.body.appendChild(ort);
+    const inp = ort.querySelector("#mstTotpInput");
+    const hata = ort.querySelector("#mstTotpHata");
+    const kapat = (deger) => { try { document.body.removeChild(ort); } catch {} resolve(deger); };
+    inp.addEventListener("input", () => { inp.value = inp.value.replace(/\D/g, "").slice(0, 6); });
+    const onayla = () => {
+      const kod = (inp.value || "").replace(/\D/g, "");
+      if (kod.length !== 6) { hata.textContent = "6 haneli kodu gir."; return; }
+      kapat(kod);
+    };
+    ort.querySelector("#mstTotpOnay").addEventListener("click", onayla);
+    ort.querySelector("#mstTotpIptal").addEventListener("click", () => kapat(null));
+    ort.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") onayla();
+      else if (e.key === "Escape") kapat(null);
+    });
+    setTimeout(() => inp.focus(), 30);
+  });
+}
+
 // ============ Ortak tema (mobil yazar uygulamasıyla aynı marka dili) ============
 // ============================================================
 // AÇIK TEMA — modern, yüksek okunabilirlik
@@ -1187,6 +1260,10 @@ function YazarStudyoTakip({ authFetch }) {
   const [baslatYukleniyor, setBaslatYukleniyor] = React.useState(false);
   const [seciliYazar, setSeciliYazar] = React.useState("");
   const [seciliEser, setSeciliEser] = React.useState("");
+  // ── Tasarım projesini doğrudan yazara atama (24 Ağu 2026) ──
+  const [ataAcik, setAtaAcik] = React.useState(false);
+  const [seciliAtaYazar, setSeciliAtaYazar] = React.useState("");
+  const [seciliAtaProje, setSeciliAtaProje] = React.useState("");
   const baslatVeriCek = async () => {
     setBaslatYukleniyor(true); setMesaj(null);
     try {
@@ -1250,6 +1327,23 @@ function YazarStudyoTakip({ authFetch }) {
         ? `${d.paylasilanSayfa} sayfa çifti paylaşıldı, yazara bildirim gitti.`
         : `${d.paylasilanSayfa} sayfa çifti güncellendi (yazar zaten haberdardı, tekrar bildirim gönderilmedi).` });
       setPaylasAcik(null); setPaylasSecim("");
+      await yukle();
+    } catch { setMesaj({ ok: false, text: "Sunucuya ulaşılamadı." }); }
+    finally { setCalisan(null); }
+  };
+
+  // ── Tasarım projesini doğrudan yazara ata (aday-eser/karakter çıkarımı YOK) ──
+  const tasarimdanAta = async () => {
+    setCalisan("ata"); setMesaj(null);
+    try {
+      const r = await authFetch("/api/admin/yazar-studyo/tasarimdan-ata", {
+        method: "POST",
+        body: JSON.stringify({ authorId: Number(seciliAtaYazar), kitapProjeId: Number(seciliAtaProje) }),
+      });
+      const d = await r.json();
+      if (!r.ok) { setMesaj({ ok: false, text: [d.error, d.not].filter(Boolean).join(" ") }); return; }
+      setMesaj({ ok: true, text: d.mesaj || "Proje yazara atandı." });
+      setAtaAcik(false); setSeciliAtaYazar(""); setSeciliAtaProje("");
       await yukle();
     } catch { setMesaj({ ok: false, text: "Sunucuya ulaşılamadı." }); }
     finally { setCalisan(null); }
@@ -1460,6 +1554,68 @@ function YazarStudyoTakip({ authFetch }) {
                 </div>
               </>
             )}
+          </div>
+        )}
+      </div>
+
+      {/* ── TASARIM PROJESİNİ DOĞRUDAN YAZARA ATA ────────────────────
+          Aday-eser hattından geçmeyen, studyoda elle çizilen bir kitabı
+          bir yazara bağlar. Ücret doğurmaz, metin okumaz. */}
+      <div style={{ background: THEME.panelBg, border: `1px solid ${THEME.border}`,
+        borderRadius: 10, padding: "13px 16px", marginBottom: 18 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          <b style={{ color: THEME.textLight, fontSize: 13.5 }}>Tasarım projesini yazara ata</b>
+          <span style={{ color: THEME.textMuted, fontSize: 12 }}>
+            Studyoda çizdiğiniz bir kitabı bir yazara bağlar — aday eseri ya da ücret gerekmez.
+          </span>
+          <span style={{ flex: 1 }} />
+          <Btn small variant="ghost" onClick={() => {
+            const acilacak = !ataAcik;
+            setAtaAcik(acilacak);
+            if (acilacak) { if (!baslatVeri) baslatVeriCek(); if (!kitapProjeleri) kitapProjeleriCek(); }
+          }}>{ataAcik ? "Kapat" : "Aç"}</Btn>
+        </div>
+
+        {ataAcik && (
+          <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
+            <div style={{ fontSize: 12, color: THEME.textMuted, lineHeight: 1.55 }}>
+              Seçtiğiniz tasarım projesinin çizilmiş sayfaları yazarla paylaşılır; yazar kendi
+              giriş bilgileriyle girip kitabını görür ve yorum bırakabilir. Çizilmiş sayfası
+              olmayan bir proje seçilirse sunucu reddeder.
+            </div>
+            <div>
+              <div style={{ fontSize: 11, color: THEME.textMuted, marginBottom: 4 }}>YAZAR HESABI</div>
+              <select value={seciliAtaYazar} onChange={(e) => setSeciliAtaYazar(e.target.value)}
+                style={{ width: "100%", padding: "8px 10px", borderRadius: 6, fontSize: 13,
+                  background: THEME.bg, border: `1px solid ${THEME.border}`, color: THEME.textLight }}>
+                <option value="">— seçin —</option>
+                {(baslatVeri?.yazarlar || []).map((y) => (
+                  <option key={y.id} value={y.id}>{y.name} ({y.username})</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <div style={{ fontSize: 11, color: THEME.textMuted, marginBottom: 4 }}>TASARIM PROJESİ</div>
+              <select value={seciliAtaProje} onChange={(e) => setSeciliAtaProje(e.target.value)}
+                style={{ width: "100%", padding: "8px 10px", borderRadius: 6, fontSize: 13,
+                  background: THEME.bg, border: `1px solid ${THEME.border}`, color: THEME.textLight }}>
+                <option value="">— seçin —</option>
+                {(kitapProjeleri || []).map((kp) => (
+                  <option key={kp.id} value={kp.id}>
+                    {kp.kitap_adi || `Proje #${kp.id}`}{kp.yazar_adi ? ` — ${kp.yazar_adi}` : ""}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+              <Btn small disabled={!seciliAtaYazar || !seciliAtaProje || calisan === "ata"}
+                onClick={tasarimdanAta}>
+                {calisan === "ata" ? "Atanıyor…" : "Yazara ata ve sayfaları paylaş"}
+              </Btn>
+              <Btn small variant="ghost" onClick={() => { kitapProjeleriCek(); if (!baslatVeri) baslatVeriCek(); }}>
+                ⟳ Listeleri yenile
+              </Btn>
+            </div>
           </div>
         )}
       </div>
@@ -6383,20 +6539,26 @@ function YazarStudyo({ authFetch, kullanici }) {
 
         {(proje.asama === "karakter" || proje.asama === "kapak" || proje.asama === "tamamlandi") && (
           <div>
-            <h2 style={{ fontFamily: "var(--f-baslik)", fontSize: 22, margin: "0 0 6px", letterSpacing: "-.02em" }}>
-              Kitabınızın karakterleri
-            </h2>
-            <p style={{ fontSize: 14, color: "var(--metin2)", lineHeight: 1.7, margin: "0 0 4px", maxWidth: 720 }}>
-              Eserinizden <b>{ozet.toplam} karakter</b> çıkardık. Her birini <b>iki görünümde</b> çizip
-              onayınıza sunuyoruz — önden, yandan ve hareket hâlinde. Böylece tek bir resme değil,
-              karakterin kendisine bakarak karar veriyorsunuz. Onayladığınız karakter kitabın bütün
-              sayfalarında aynen kullanılacak.
-            </p>
-            <p style={{ fontSize: 13, color: "var(--metin3)", margin: "0 0 16px" }}>
-              Seçtiğiniz stil: <b style={{ color: "var(--metin2)" }}>{proje.stilAdi}</b> ·
-              {" "}Onaylanan: <b style={{ color: ozet.hepsiOnayli ? "var(--iyi)" : "var(--metin2)" }}>
-                {ozet.onaylanan}/{ozet.toplam}</b>
-            </p>
+            {/* Karakteri olmayan tasarım-odaklı projede (doğrudan atama)
+                bu başlık/metin gösterilmez — yazar yalnız sayfalarını görür. */}
+            {ozet.toplam > 0 && (
+              <>
+                <h2 style={{ fontFamily: "var(--f-baslik)", fontSize: 22, margin: "0 0 6px", letterSpacing: "-.02em" }}>
+                  Kitabınızın karakterleri
+                </h2>
+                <p style={{ fontSize: 14, color: "var(--metin2)", lineHeight: 1.7, margin: "0 0 4px", maxWidth: 720 }}>
+                  Eserinizden <b>{ozet.toplam} karakter</b> çıkardık. Her birini <b>iki görünümde</b> çizip
+                  onayınıza sunuyoruz — önden, yandan ve hareket hâlinde. Böylece tek bir resme değil,
+                  karakterin kendisine bakarak karar veriyorsunuz. Onayladığınız karakter kitabın bütün
+                  sayfalarında aynen kullanılacak.
+                </p>
+                <p style={{ fontSize: 13, color: "var(--metin3)", margin: "0 0 16px" }}>
+                  Seçtiğiniz stil: <b style={{ color: "var(--metin2)" }}>{proje.stilAdi}</b> ·
+                  {" "}Onaylanan: <b style={{ color: ozet.hepsiOnayli ? "var(--iyi)" : "var(--metin2)" }}>
+                    {ozet.onaylanan}/{ozet.toplam}</b>
+                </p>
+              </>
+            )}
 
             {/* Yazar yalnız olmadığını bilsin. Burada uydurma bir isim YOK —
                 tasarım ekibi gerçekten var ve kitabı gerçekten görüyor. */}
@@ -18297,10 +18459,22 @@ export default function AdminPanel() {
   const [bildirimler, setBildirimler] = useState([]);
   const [bildirimAcik, setBildirimAcik] = useState(false);
 
-  const authFetch = (path, options = {}) => fetch(`${BACKEND_URL}${path}`, {
-    ...options,
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.token}`, ...(options.headers || {}) },
-  });
+  const authFetch = async (path, options = {}) => {
+    const basliklar = { "Content-Type": "application/json", Authorization: `Bearer ${session.token}`, ...(options.headers || {}) };
+    // Para harcatan / reklam aktifleştiren uçlarda önce 6 haneli onay kodu iste.
+    const islem = riskliReklamUcu(path, options);
+    if (islem) {
+      const kod = await reklamOnayKoduIste(islem);
+      if (!kod) {
+        // Kullanıcı iptal etti — isteği hiç gönderme, 403 gibi yanıt üret.
+        return new Response(
+          JSON.stringify({ error: "Onay iptal edildi", kod: "TOTP_IPTAL", islem }),
+          { status: 403, headers: { "Content-Type": "application/json" } });
+      }
+      basliklar["x-mst-totp"] = kod;
+    }
+    return fetch(`${BACKEND_URL}${path}`, { ...options, headers: basliklar });
+  };
 
   const loadAuthors = (includePassive = showPassive) => {
     setLoadingAuthors(true); setLoadError("");
