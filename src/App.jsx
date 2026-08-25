@@ -1290,20 +1290,31 @@ function YazarStudyoTakip({ authFetch }) {
       d = await r0.json();
       const eksik = (d.stiller || []).filter((s) => !s.gorselUrl);
       if (!eksik.length) { setMesaj({ ok: true, text: "Tüm stil örnekleri zaten üretilmiş." }); setStilUretimAktif(false); return; }
-      let biten = 0;
-      for (const s of eksik) {
-        setStilSuanki(`${s.ad} (${biten + 1}/${eksik.length})`);
+      let biten = 0, basarisiz = 0, sonHata = "";
+      for (let i = 0; i < eksik.length; i++) {
+        const s = eksik[i];
+        setStilSuanki(`${s.ad} (${i + 1}/${eksik.length})`);
         try {
-          await authFetch("/api/admin/yazar-studyo/stiller/uret", {
+          const rr = await authFetch("/api/admin/yazar-studyo/stiller/uret", {
             method: "POST", body: JSON.stringify({ kodlar: [s.kod] }),
           });
-          biten++;
+          const dd = await rr.json().catch(() => ({}));
+          if (!rr.ok) {
+            // Yetki/kurulum hatası tüm döngüde aynı olur — boşuna sürdürme, dur.
+            sonHata = dd.error || `Sunucu ${rr.status} döndü`;
+            setMesaj({ ok: false, text: `Üretim durduruldu: ${sonHata}` });
+            break;
+          }
+          if (dd.uretildi?.length) biten += dd.uretildi.length;
+          if (dd.basarisiz?.length) { basarisiz += dd.basarisiz.length; sonHata = dd.basarisiz[0]?.hata || sonHata; }
           await stilDurumCek();
-        } catch { /* bu stil atlandı; döngü sürer */ }
+        } catch (e) { basarisiz++; sonHata = e?.message || sonHata; }
       }
       setStilSuanki("");
       await stilDurumCek();
-      setMesaj({ ok: true, text: `${biten} stil örneği üretildi.` });
+      if (biten && !basarisiz && !sonHata) setMesaj({ ok: true, text: `${biten} stil örneği üretildi.` });
+      else if (biten) setMesaj({ ok: true, text: `${biten} üretildi, ${basarisiz} başarısız${sonHata ? " — " + sonHata : ""}.` });
+      else setMesaj({ ok: false, text: `Hiç üretilemedi${sonHata ? " — " + sonHata : ""}.` });
     } catch (e) { setMesaj({ ok: false, text: "Üretim hatası: " + (e?.message || "") }); }
     finally { setStilUretimAktif(false); }
   };
