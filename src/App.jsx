@@ -233,8 +233,8 @@ function Huni({ impressions = 0, clicks = 0, conversions = 0, C }) {
         return (
           <g key={i}>
             <rect x={x0} y={yy} width={w} height={barH} rx="6" fill={a.renk} fillOpacity="0.9" />
-            <text x={W / 2} y={yy + barH / 2 - 2} textAnchor="middle" fontSize="12" fontWeight="700" fill="#FFFFFF">{a.ad}</text>
-            <text x={W / 2} y={yy + barH / 2 + 11} textAnchor="middle" fontSize="10" fill="#FFFFFF" fillOpacity="0.9" fontFamily="monospace">{fmt(a.v)}</text>
+            <text x={W / 2} y={yy + barH / 2 - 2} textAnchor="middle" fontSize="12" fontWeight="700" fill="#fff">{a.ad}</text>
+            <text x={W / 2} y={yy + barH / 2 + 11} textAnchor="middle" fontSize="10" fill="#fff" fillOpacity="0.9" fontFamily="monospace">{fmt(a.v)}</text>
             {oran != null && (
               <text x={W - 4} y={yy - 4} textAnchor="end" fontSize="9.5" fill={C.muted} fontFamily="monospace">↓ %{oran}</text>
             )}
@@ -440,22 +440,18 @@ function Badge({ children, fg, bg }) {
   return <span style={{ fontSize: 11, color: fg, background: bg, borderRadius: 20, padding: "3px 10px", fontWeight: 600 }}>{children}</span>;
 }
 
-function Btn({ children, onClick, variant = "primary", small, disabled, className, title, style }) {
-  // Netlik (24 Ağu): "görünmez düğme" kalmasın — her varyantın belirgin
-  // dolgusu/kenarı/gölgesi var. ghost artık şeffaf değil, hafif dolgulu.
+function Btn({ children, onClick, variant = "primary", small, disabled }) {
   const styles = {
-    primary: { bg: THEME.cyan, fg: THEME.onAccent, border: "1px solid transparent", shadow: "0 2px 8px rgba(0,0,0,.28)" },
-    ghost:   { bg: "rgba(255,255,255,.06)", fg: THEME.textLight, border: `1px solid ${THEME.border}`, shadow: "0 1px 3px rgba(0,0,0,.18)" },
-    danger:  { bg: THEME.dangerBg, fg: THEME.danger, border: "1px solid rgba(255,107,107,.45)", shadow: "0 1px 4px rgba(0,0,0,.2)" },
-    success: { bg: THEME.successBg, fg: THEME.success, border: "1px solid rgba(89,227,157,.45)", shadow: "0 1px 4px rgba(0,0,0,.2)" },
+    primary: { bg: THEME.cyan, fg: THEME.onAccent },
+    ghost: { bg: "transparent", fg: THEME.textLight, border: `1px solid ${THEME.border}` },
+    danger: { bg: THEME.dangerBg, fg: THEME.danger, border: `1px solid rgba(255,107,107,.3)` },
+    success: { bg: THEME.successBg, fg: THEME.success, border: `1px solid rgba(89,227,157,.3)` },
   }[variant];
   return (
-    <button onClick={onClick} disabled={disabled} title={title} className={className} style={{
-      background: styles.bg, color: styles.fg, border: styles.border, borderRadius: 8,
-      padding: small ? "7px 13px" : "10px 17px", fontSize: small ? 12 : 13, fontWeight: 600,
-      letterSpacing: ".01em", cursor: disabled ? "not-allowed" : "pointer",
-      boxShadow: disabled ? "none" : styles.shadow, opacity: disabled ? 0.45 : 1, fontFamily: "inherit",
-      display: "inline-flex", alignItems: "center", gap: 7, ...(style || {}),
+    <button onClick={onClick} disabled={disabled} style={{
+      background: styles.bg, color: styles.fg, border: styles.border || "none", borderRadius: 6,
+      padding: small ? "6px 12px" : "9px 16px", fontSize: small ? 12 : 13, fontWeight: 600, cursor: disabled ? "default" : "pointer",
+      opacity: disabled ? 0.5 : 1, fontFamily: "inherit",
     }}>{children}</button>
   );
 }
@@ -1290,31 +1286,20 @@ function YazarStudyoTakip({ authFetch }) {
       d = await r0.json();
       const eksik = (d.stiller || []).filter((s) => !s.gorselUrl);
       if (!eksik.length) { setMesaj({ ok: true, text: "Tüm stil örnekleri zaten üretilmiş." }); setStilUretimAktif(false); return; }
-      let biten = 0, basarisiz = 0, sonHata = "";
-      for (let i = 0; i < eksik.length; i++) {
-        const s = eksik[i];
-        setStilSuanki(`${s.ad} (${i + 1}/${eksik.length})`);
+      let biten = 0;
+      for (const s of eksik) {
+        setStilSuanki(`${s.ad} (${biten + 1}/${eksik.length})`);
         try {
-          const rr = await authFetch("/api/admin/yazar-studyo/stiller/uret", {
+          await authFetch("/api/admin/yazar-studyo/stiller/uret", {
             method: "POST", body: JSON.stringify({ kodlar: [s.kod] }),
           });
-          const dd = await rr.json().catch(() => ({}));
-          if (!rr.ok) {
-            // Yetki/kurulum hatası tüm döngüde aynı olur — boşuna sürdürme, dur.
-            sonHata = dd.error || `Sunucu ${rr.status} döndü`;
-            setMesaj({ ok: false, text: `Üretim durduruldu: ${sonHata}` });
-            break;
-          }
-          if (dd.uretildi?.length) biten += dd.uretildi.length;
-          if (dd.basarisiz?.length) { basarisiz += dd.basarisiz.length; sonHata = dd.basarisiz[0]?.hata || sonHata; }
+          biten++;
           await stilDurumCek();
-        } catch (e) { basarisiz++; sonHata = e?.message || sonHata; }
+        } catch { /* bu stil atlandı; döngü sürer */ }
       }
       setStilSuanki("");
       await stilDurumCek();
-      if (biten && !basarisiz && !sonHata) setMesaj({ ok: true, text: `${biten} stil örneği üretildi.` });
-      else if (biten) setMesaj({ ok: true, text: `${biten} üretildi, ${basarisiz} başarısız${sonHata ? " — " + sonHata : ""}.` });
-      else setMesaj({ ok: false, text: `Hiç üretilemedi${sonHata ? " — " + sonHata : ""}.` });
+      setMesaj({ ok: true, text: `${biten} stil örneği üretildi.` });
     } catch (e) { setMesaj({ ok: false, text: "Üretim hatası: " + (e?.message || "") }); }
     finally { setStilUretimAktif(false); }
   };
@@ -1516,6 +1501,84 @@ function YazarStudyoTakip({ authFetch }) {
           border: `1px solid ${mesaj.ok ? THEME.success : THEME.danger}` }}>{mesaj.text}</div>
       )}
 
+      {/* ── YENİ SÜREÇ BAŞLATMA ──────────────────────────────────────
+          Sürecin GİRİŞ KAPISI. Bu kutu eklenene kadar yazar stüdyosu
+          hiçbir yerden başlatılamıyordu: uç vardı, düğmesi yoktu. */}
+      <div style={{ background: THEME.panelBg, border: `1px solid ${THEME.border}`,
+        borderRadius: 8, padding: "13px 16px", marginBottom: 18 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          <b style={{ color: THEME.textLight, fontSize: 13.5 }}>Yeni yazar süreci başlat</b>
+          <span style={{ color: THEME.textMuted, fontSize: 12 }}>
+            Bir eserin karakterlerini çıkarır ve yazarın stüdyo ekranını açar.
+          </span>
+          <span style={{ flex: 1 }} />
+          <Btn small variant="ghost" onClick={() => {
+            const acilacak = !baslatAcik;
+            setBaslatAcik(acilacak);
+            if (acilacak && !baslatVeri) baslatVeriCek();
+          }}>{baslatAcik ? "Kapat" : "Aç"}</Btn>
+        </div>
+
+        {baslatAcik && (
+          <div style={{ marginTop: 12 }}>
+            {baslatYukleniyor && <div style={{ fontSize: 12.5, color: THEME.textMuted }}>Listeler yükleniyor…</div>}
+            {baslatVeri?.not && (
+              <div style={{ fontSize: 12.5, color: THEME.warn, marginBottom: 8 }}>{baslatVeri.not}</div>
+            )}
+            {baslatVeri && (
+              <>
+                {/* ÜCRET UYARISI önce geliyor: bu düğme bir model çağrısı
+                    yapar, yani para harcar. Tıklamadan önce bilinmeli. */}
+                <div style={{ fontSize: 12, color: THEME.warn, marginBottom: 10, lineHeight: 1.55 }}>
+                  Bu işlem eserin tam metnini okuyup karakterleri çıkarır — <b>bir model çağrısıdır,
+                  ücret doğurur</b>. Aynı eser için ikinci kez çalıştırılamaz; yazarın onayları korunur.
+                </div>
+                <div style={{ display: "grid", gap: 10 }}>
+                  <div>
+                    <div style={{ fontSize: 11, color: THEME.textMuted, marginBottom: 4 }}>YAZAR HESABI</div>
+                    <select value={seciliYazar} onChange={(e) => setSeciliYazar(e.target.value)}
+                      style={{ width: "100%", padding: "8px 10px", borderRadius: 6, fontSize: 13,
+                        background: THEME.bg, border: `1px solid ${THEME.border}`, color: THEME.textLight }}>
+                      <option value="">— seçin —</option>
+                      {(baslatVeri.yazarlar || []).map((y) => (
+                        <option key={y.id} value={y.id}>{y.name} ({y.username})</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 11, color: THEME.textMuted, marginBottom: 4 }}>ESER</div>
+                    <select value={seciliEser} onChange={(e) => setSeciliEser(e.target.value)}
+                      style={{ width: "100%", padding: "8px 10px", borderRadius: 6, fontSize: 13,
+                        background: THEME.bg, border: `1px solid ${THEME.border}`, color: THEME.textLight }}>
+                      <option value="">— seçin —</option>
+                      {(baslatVeri.eserler || []).map((e) => (
+                        // Uygun olmayanlar GİZLENMİYOR, sebebiyle birlikte
+                        // kapatılıyor: "eserim listede yok" sorusunun cevabı
+                        // listenin kendisinde dursun.
+                        <option key={e.id} value={e.id}
+                          disabled={!e.metin_var || !!e.studyo_proje_id}>
+                          {e.eser_adi || `Eser #${e.id}`}
+                          {e.aday_adi ? ` — ${e.aday_adi}` : ""}
+                          {e.studyo_proje_id ? " · süreç zaten açık"
+                            : !e.metin_var ? " · metni sistemde yok"
+                            : e.karakter_sayisi ? ` · ${Number(e.karakter_sayisi).toLocaleString("tr-TR")} karakter` : ""}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                    <Btn small disabled={!seciliYazar || !seciliEser || calisan === "baslat"}
+                      onClick={surecBaslat}>
+                      {calisan === "baslat" ? "Karakterler çıkarılıyor… (30-60 sn)" : "Süreci başlat"}
+                    </Btn>
+                    <Btn small variant="ghost" onClick={baslatVeriCek}>⟳ Listeleri yenile</Btn>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+        )}
+      </div>
 
       {/* ── STİL ÖRNEKLERİ — BİR KEZ ÜRET ────────────────────────────
           Yazarın stil seçtiği ekran için 25 sabit örnek. Bir kez üretilir,
@@ -1602,9 +1665,7 @@ function YazarStudyoTakip({ authFetch }) {
       )}
 
       {(veri?.projeler || []).map((p) => (
-        <div key={p.id}
-          className={`mst-kart mst-giris${!p.tikanma && p.asama !== "tamamlandi" ? " mst-calisiyor" : ""}`}
-          style={{ display: "flex", alignItems: "center", justifyContent: "space-between",
+        <div key={p.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between",
           gap: 14, flexWrap: "wrap", background: THEME.panelBg, borderRadius: 8, marginBottom: 8,
           padding: "13px 16px",
           border: `1px solid ${p.tikanma === "kritik" ? THEME.danger
@@ -1681,6 +1742,50 @@ function YazarStudyoTakip({ authFetch }) {
               </div>
             ))}
 
+            {/* ── SAYFALARI YAZARLA PAYLAŞ ──────────────────────────────
+                Yazarın sayfa ekranı ve yorum kutusu hazırdı ama onları
+                GÖRÜNÜR yapan düğme yoktu; yani "her yorumunuz cevaplanır"
+                sözünün verildiği ekran hiç açılamıyordu.
+                Tıkanmış yazara anlamsız gelmesin diye yalnız karakter
+                onayı bitmiş projelerde gösteriliyor. */}
+            {(p.asama === "kapak" || p.asama === "tamamlandi") && (
+              <div style={{ marginTop: 8 }}>
+                {paylasAcik !== p.id ? (
+                  <Btn small variant="ghost" onClick={() => {
+                    setPaylasAcik(p.id); setPaylasSecim("");
+                    if (!kitapProjeleri) kitapProjeleriCek();
+                  }}>
+                    {p.sayfalarPaylasildi ? "Paylaşılan sayfaları güncelle" : "Sayfaları yazarla paylaş"}
+                  </Btn>
+                ) : (
+                  <div style={{ padding: "10px 12px", borderRadius: 8, background: THEME.bg,
+                    border: `1px solid ${THEME.border}`, display: "grid", gap: 8 }}>
+                    <div style={{ fontSize: 11.5, color: THEME.textMuted, lineHeight: 1.55 }}>
+                      Bu yazarın stüdyo sürecini, sayfalarını ürettiğiniz kitap projesine bağlar.
+                      Yazar sayfaları görür ve yorum bırakabilir. Çizilmiş sayfası olmayan bir
+                      proje seçilirse sunucu reddeder — yazara boş ekran açılmaz.
+                    </div>
+                    <select value={paylasSecim} onChange={(e) => setPaylasSecim(e.target.value)}
+                      style={{ padding: "8px 10px", borderRadius: 6, fontSize: 13,
+                        background: THEME.bg, border: `1px solid ${THEME.border}`, color: THEME.textLight }}>
+                      <option value="">— kitap projesi seçin —</option>
+                      {(kitapProjeleri || []).map((kp) => (
+                        <option key={kp.id} value={kp.id}>
+                          {kp.kitap_adi || `Proje #${kp.id}`}{kp.yazar_adi ? ` — ${kp.yazar_adi}` : ""}
+                        </option>
+                      ))}
+                    </select>
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <Btn small disabled={!paylasSecim || calisan === `p${p.id}`}
+                        onClick={() => sayfalariPaylas(p.id)}>
+                        {calisan === `p${p.id}` ? "…" : "Paylaş"}
+                      </Btn>
+                      <Btn small variant="ghost" onClick={() => setPaylasAcik(null)}>Vazgeç</Btn>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           <div style={{ display: "flex", alignItems: "center", gap: 12, flexShrink: 0 }}>
@@ -2924,7 +3029,7 @@ function AdayKokpiti({ authFetch }) {
   const rozetMini = (renk, bg) => ({ display: "inline-flex", alignItems: "center", gap: 3, padding: "2px 8px", borderRadius: 6, fontSize: 10.5, fontWeight: 600, color: renk, background: bg });
   const inputStyle = { background: THEME.panelBgAlt, color: THEME.textLight, border: `1px solid ${THEME.border}`, borderRadius: 8, padding: "8px 12px", fontSize: 13, fontFamily: FONT, width: "100%", boxSizing: "border-box" };
   const btn = (dolu, renk) => ({ padding: "8px 15px", borderRadius: 8, fontSize: 12.5, fontWeight: 600, cursor: "pointer",
-    border: dolu ? "none" : `1px solid ${THEME.border}`, background: dolu ? (renk || THEME.cyan) : THEME.panelBg, color: dolu ? "#FFFFFF" : THEME.textLight });
+    border: dolu ? "none" : `1px solid ${THEME.border}`, background: dolu ? (renk || THEME.cyan) : THEME.panelBg, color: dolu ? "#fff" : THEME.textLight });
 
   const kpiSayilar = { aktif: adaylar.length, gorusmeBekleyen: gorusmeler.filter(g => g.durum === "talep_edildi").length, takipOnerisi: oneriler.length };
 
@@ -2967,7 +3072,7 @@ function AdayKokpiti({ authFetch }) {
                   style={{ padding: "5px 11px", borderRadius: 20, fontSize: 11, cursor: "pointer",
                            border: `1px solid ${filtre === k ? THEME.cyan : THEME.border}`,
                            background: filtre === k ? THEME.cyan : THEME.panelBg,
-                           color: filtre === k ? "#FFFFFF" : THEME.textMuted }}>{ad}</span>
+                           color: filtre === k ? "#fff" : THEME.textMuted }}>{ad}</span>
               ))}
             </div>
           </div>
@@ -3013,7 +3118,7 @@ function AdayKokpiti({ authFetch }) {
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
                   <div style={{ display: "flex", gap: 14, alignItems: "center" }}>
                     <div style={{ width: 50, height: 50, borderRadius: "50%", background: `linear-gradient(135deg, ${THEME.altinAcik}, ${THEME.cyan})`,
-                                  color: "#FFFFFF", display: "flex", alignItems: "center", justifyContent: "center",
+                                  color: "#fff", display: "flex", alignItems: "center", justifyContent: "center",
                                   fontFamily: FONT_DISPLAY, fontWeight: 600, fontSize: 19 }}>{bashHarfleri(secili.ad_soyad)}</div>
                     <div>
                       <div style={{ fontFamily: FONT_DISPLAY, fontSize: 20, fontWeight: 600, color: THEME.textLight }}>{secili.ad_soyad}</div>
@@ -3061,7 +3166,7 @@ function AdayKokpiti({ authFetch }) {
                         <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                           {Object.entries(GORUSME_DURUM).map(([k, v]) => (
                             <span key={k} onClick={() => setGorusmeForm({ ...gorusmeForm, durum: k })}
-                              style={{ ...rozetMini(gorusmeForm.durum === k ? "#FFFFFF" : THEME.textMuted, gorusmeForm.durum === k ? THEME.cyan : THEME.panelBg),
+                              style={{ ...rozetMini(gorusmeForm.durum === k ? "#fff" : THEME.textMuted, gorusmeForm.durum === k ? THEME.cyan : THEME.panelBg),
                                        cursor: "pointer", border: `1px solid ${THEME.border}` }}>{v.ad}</span>
                           ))}
                         </div>
@@ -3094,7 +3199,7 @@ function AdayKokpiti({ authFetch }) {
                         <div style={{ display: "flex", gap: 6 }}>
                           {[["telefon", "Telefon"], ["sms", "SMS"], ["eposta", "E-posta"], ["panel_notu", "Sadece not"]].map(([k, ad]) => (
                             <span key={k} onClick={() => setTakipKanal(k)}
-                              style={{ ...rozetMini(takipKanal === k ? "#FFFFFF" : THEME.textMuted, takipKanal === k ? THEME.cyan : THEME.panelBg),
+                              style={{ ...rozetMini(takipKanal === k ? "#fff" : THEME.textMuted, takipKanal === k ? THEME.cyan : THEME.panelBg),
                                        cursor: "pointer", border: `1px solid ${THEME.border}` }}>{ad}</span>
                           ))}
                         </div>
@@ -3195,7 +3300,7 @@ function AdayKokpiti({ authFetch }) {
                               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                                 {[["hazir", "Yayına hazırlık için uygun"], ["gelistirme", "Editöryal geliştirmeyle uygun"], ["henuz_degil", "Henüz hazır değil"]].map(([k, ad]) => (
                                   <span key={k} onClick={() => setEditForm({ ...editForm, karar: k })}
-                                    style={{ ...rozetMini(editForm.karar === k ? "#FFFFFF" : THEME.textMuted, editForm.karar === k ? THEME.cyan : THEME.panelBg), cursor: "pointer", border: `1px solid ${THEME.border}`, padding: "6px 12px" }}>{ad}</span>
+                                    style={{ ...rozetMini(editForm.karar === k ? "#fff" : THEME.textMuted, editForm.karar === k ? THEME.cyan : THEME.panelBg), cursor: "pointer", border: `1px solid ${THEME.border}`, padding: "6px 12px" }}>{ad}</span>
                                 ))}
                               </div>
                               <textarea value={editForm.gucluYonler} onChange={ev => setEditForm({ ...editForm, gucluYonler: ev.target.value })} rows={2} placeholder="Güçlü yönler (zorunlu — en az bir madde)" style={{ ...inputStyle, resize: "vertical" }} />
@@ -3342,7 +3447,7 @@ function SenkronUyarilari({ authFetch }) {
               placeholder="Not (ör. pazaryerinde kontrol edildi, ürün pasif)" style={{ ...inputStyle, marginTop: 8, marginBottom: 6 }} />
             <div style={{ display: "flex", gap: 8 }}>
               <button disabled={calisiyor} onClick={() => karar(u.id, "reddet")}
-                style={{ background: "#2E7D32", color: "#FFFFFF", border: "none", borderRadius: 4,
+                style={{ background: "#2E7D32", color: "#fff", border: "none", borderRadius: 4,
                          padding: "8px 16px", fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}>
                 Reddet — stoğu koru
               </button>
@@ -3755,7 +3860,7 @@ function VaatYonetimi({ authFetch }) {
   const kart = { background: THEME.panelBg, border: `1px solid ${THEME.border}`, borderRadius: 14, padding: 20, marginBottom: 16 };
   const inputStyle = { background: THEME.panelBgAlt, color: THEME.textLight, border: `1px solid ${THEME.border}`, borderRadius: 8, padding: "8px 12px", fontSize: 13, fontFamily: FONT, boxSizing: "border-box" };
   const btn = (dolu, renk) => ({ padding: "8px 15px", borderRadius: 8, fontSize: 12.5, fontWeight: 600, cursor: "pointer",
-    border: dolu ? "none" : `1px solid ${THEME.border}`, background: dolu ? (renk || THEME.cyan) : THEME.panelBg, color: dolu ? "#FFFFFF" : THEME.textLight });
+    border: dolu ? "none" : `1px solid ${THEME.border}`, background: dolu ? (renk || THEME.cyan) : THEME.panelBg, color: dolu ? "#fff" : THEME.textLight });
 
   const Satir = ({ etiket, deger, vurgu }) => deger ? (
     <div style={{ marginBottom: 6 }}>
@@ -3931,7 +4036,7 @@ function LaboratuvarKuyrugu({ authFetch }) {
               placeholder="Uzman notu" style={{ ...pInput(), marginBottom: 6 }} />
             <div style={{ display: "flex", gap: 8 }}>
               <button disabled={calisiyor} onClick={() => karar(b.id, true)}
-                style={{ background: "#2E7D32", color: "#FFFFFF", border: "none", borderRadius: 4,
+                style={{ background: "#2E7D32", color: "#fff", border: "none", borderRadius: 4,
                          padding: "8px 16px", fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}>Onayla</button>
               <button disabled={calisiyor} onClick={() => karar(b.id, false)}
                 style={{ background: "transparent", color: "#C0392B", border: "1px solid #C0392B", borderRadius: 4,
@@ -3994,7 +4099,7 @@ function MenajerDirektifleri({ authFetch }) {
 
   const kutu = { background: THEME.panelBg, border: `1px solid ${THEME.border}`, borderRadius: 14, padding: 20, marginBottom: 16 };
   const btn = (dolu) => ({ padding: "9px 18px", borderRadius: 8, fontSize: 12.5, fontWeight: 600, cursor: "pointer",
-    border: dolu ? "none" : `1px solid ${THEME.border}`, background: dolu ? THEME.cyan : THEME.panelBg, color: dolu ? "#FFFFFF" : THEME.textLight });
+    border: dolu ? "none" : `1px solid ${THEME.border}`, background: dolu ? THEME.cyan : THEME.panelBg, color: dolu ? "#fff" : THEME.textLight });
 
   return (
     <div>
@@ -4100,7 +4205,7 @@ function AkademiUzmanKapisi({ authFetch }) {
               placeholder="Uzman notu" style={{ ...inputStyle, marginBottom: 6 }} />
             <div style={{ display: "flex", gap: 8 }}>
               <button disabled={calisiyor} onClick={() => karar(b.id, true)}
-                style={{ background: "#2E7D32", color: "#FFFFFF", border: "none", borderRadius: 4, padding: "8px 16px", fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}>Onayla</button>
+                style={{ background: "#2E7D32", color: "#fff", border: "none", borderRadius: 4, padding: "8px 16px", fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}>Onayla</button>
               <button disabled={calisiyor} onClick={() => karar(b.id, false)}
                 style={{ background: "transparent", color: "#C0392B", border: "1px solid #C0392B", borderRadius: 4, padding: "8px 16px", fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}>Reddet</button>
             </div>
@@ -5035,7 +5140,7 @@ function BildirimYigini({ liste, kapat }) {
                      display: "flex", gap: 10, alignItems: "flex-start", fontSize: 13, lineHeight: 1.45 }}>
             <span aria-hidden="true"
               style={{ flexShrink: 0, width: 18, height: 18, borderRadius: 999, background: r.kenar,
-                       color: "#FFFFFF", fontSize: 11, fontWeight: 700, display: "grid", placeItems: "center", marginTop: 1 }}>
+                       color: "#fff", fontSize: 11, fontWeight: 700, display: "grid", placeItems: "center", marginTop: 1 }}>
               {r.ikon}
             </span>
             <div style={{ flex: 1, minWidth: 0, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{b.mesaj}</div>
@@ -5073,7 +5178,7 @@ function OnayKutusu({ istek, cevapla }) {
       style={{ position: "fixed", inset: 0, zIndex: 4200, background: "rgba(18,18,20,.55)",
                display: "grid", placeItems: "center", padding: 16, backdropFilter: "blur(2px)" }}>
       <div className="mst-kutu"
-        style={{ background: "#FFFFFF", borderRadius: 16, maxWidth: 480, width: "100%", overflow: "hidden",
+        style={{ background: "#fff", borderRadius: 16, maxWidth: 480, width: "100%", overflow: "hidden",
                  boxShadow: "0 24px 60px rgba(0,0,0,.35)", color: "#18181a" }}>
         <div style={{ height: 5, background: tehlike ? "#C0392B" : "#3E8ED0" }} />
         <div style={{ padding: "18px 20px 4px" }}>
@@ -5090,7 +5195,7 @@ function OnayKutusu({ istek, cevapla }) {
           </button>
           <button type="button" ref={onayRef} onClick={() => cevapla(true)}
             style={{ fontFamily: "'Fredoka', sans-serif", fontWeight: 600, fontSize: 13,
-                     background: tehlike ? "#C0392B" : "#3E8ED0", color: "#FFFFFF", border: "none",
+                     background: tehlike ? "#C0392B" : "#3E8ED0", color: "#fff", border: "none",
                      padding: "10px 18px", borderRadius: 100, cursor: "pointer" }}>
             {istek.onayEtiketi || "Evet, devam et"}
           </button>
@@ -5119,7 +5224,7 @@ function KisayolYardimi({ acik, kapat }) {
       style={{ position: "fixed", inset: 0, zIndex: 4100, background: "rgba(18,18,20,.55)",
                display: "grid", placeItems: "center", padding: 16 }}>
       <div className="mst-kutu"
-        style={{ background: "#FFFFFF", borderRadius: 16, maxWidth: 440, width: "100%", padding: "20px 22px",
+        style={{ background: "#fff", borderRadius: 16, maxWidth: 440, width: "100%", padding: "20px 22px",
                  boxShadow: "0 24px 60px rgba(0,0,0,.35)", color: "#18181a" }}>
         <h3 style={{ fontFamily: "'Fredoka', sans-serif", fontSize: 17, margin: "0 0 14px" }}>Klavye kısayolları</h3>
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
@@ -5909,7 +6014,6 @@ function YazarStilSecimi({ stiller, secilen, kilitli, onSec, calisiyor }) {
           const bu = secilen === s.kod;
           return (
             <button key={s.kod} type="button"
-              className={`mst-kart mst-giris${bu ? " mst-secili" : ""}`}
               onMouseEnter={() => setOdak(s.kod)} onMouseLeave={() => setOdak(null)}
               onClick={() => !kilitli && !calisiyor && onSec(s)}
               disabled={kilitli && !bu}
@@ -5957,8 +6061,7 @@ function YazarKarakterKarti({ k, revizeHakki, calisiyorMu, surecAdimlari, takipE
   const devirBekliyor = k.devralma?.durum === "bekliyor";
 
   return (
-    <div className={`mst-kart mst-giris${calisiyorMu ? " mst-calisiyor" : ""}${onayli ? " mst-secili" : ""}`}
-      style={{ background: "var(--yuzey)", borderRadius: "var(--r-b)",
+    <div style={{ background: "var(--yuzey)", borderRadius: "var(--r-b)",
       border: `2px solid ${onayli ? "var(--iyi-kenar)" : "var(--kenar)"}`, overflow: "hidden" }}>
       <div style={{ display: "flex", gap: 0, flexWrap: "wrap" }}>
         {/* Karakteri TEK görselle onaylatmıyoruz. Yazar bir resmi değil bir
@@ -6995,7 +7098,7 @@ function BolgeDuzeltme({ acik, kapat, gorselUrl, baslik, stil, urlDenB64Al, uret
   };
 
   if (!acik) return null;
-  const kutuStil = { background: "#FFFFFF", borderRadius: 14, padding: 16, maxWidth: 1100, width: "100%",
+  const kutuStil = { background: "#fff", borderRadius: 14, padding: 16, maxWidth: 1100, width: "100%",
     maxHeight: "92vh", overflowY: "auto", color: "#18181a" };
 
   return (
@@ -7300,55 +7403,6 @@ function KitapStudyo({ authFetch, token, gorunum = "tezgah" }) {
   const [olusturuluyor, setOlusturuluyor] = React.useState(false);
   const [seciliId, setSeciliId] = React.useState(null);
   const [seciliProje, setSeciliProje] = React.useState(null);
-  // ── Proje içinden yazar atama / sayfa paylaşımı (25 Ağu 2026) ──
-  const [yazarPanelAcik, setYazarPanelAcik] = React.useState(false);
-  const [yazarListe, setYazarListe] = React.useState(null);
-  const [seciliAtaYazar, setSeciliAtaYazar] = React.useState("");
-  const [ataCalisan, setAtaCalisan] = React.useState("");
-  const [ataMesaj, setAtaMesaj] = React.useState(null);
-  const yazarlariCek = async () => {
-    try {
-      const r = await authFetch("/api/admin/yazar-studyo/baslatilabilir");
-      const d = await r.json();
-      if (r.ok) setYazarListe(d.yazarlar || []);
-    } catch { setYazarListe([]); }
-  };
-  // "Yazar ata" = projenin karakter kadrosuyla yazarın flow-B sürecini başlatır
-  // (yazar stili seçer → karakterler üretilir → onaylar → çizim). Mevcut baslat ucu.
-  const projedenYazarAta = async () => {
-    if (!seciliAtaYazar || !seciliProje) return;
-    const kadro = (seciliProje.karakterler || [])
-      .filter((k) => (k.ad || "").trim())
-      .map((k) => ({ ad: k.ad, tanimTr: k.aciklama || "", rol: k.rol || "yardimci", tur: k.tur || "hayvan" }));
-    if (!kadro.length) { setAtaMesaj({ ok: false, text: "Önce projede en az bir karakter tanımlayın (adı olan)." }); return; }
-    setAtaCalisan("ata"); setAtaMesaj(null);
-    try {
-      const r = await authFetch("/api/admin/yazar-studyo/baslat", {
-        method: "POST",
-        body: JSON.stringify({ authorId: Number(seciliAtaYazar), kitapAdi: seciliProje.kitapAdi || "", karakterler: kadro }),
-      });
-      const d = await r.json();
-      if (!r.ok) { setAtaMesaj({ ok: false, text: [d.error, d.not].filter(Boolean).join(" ") }); return; }
-      setAtaMesaj({ ok: true, text: `Süreç başlatıldı — yazar stilini seçebilir. ${d.karakterSayisi ?? kadro.length} karakter kadrosu iletildi.` });
-    } catch { setAtaMesaj({ ok: false, text: "Sunucuya ulaşılamadı." }); }
-    finally { setAtaCalisan(""); }
-  };
-  // "Sayfaları paylaş/güncelle" = bu tasarım projesinin çizilmiş sayfalarını
-  // seçilen yazarın sürecine bağlar/paylaşır. Mevcut tasarimdan-ata ucu.
-  const projedenSayfaPaylas = async () => {
-    if (!seciliAtaYazar || !seciliId) return;
-    setAtaCalisan("paylas"); setAtaMesaj(null);
-    try {
-      const r = await authFetch("/api/admin/yazar-studyo/tasarimdan-ata", {
-        method: "POST",
-        body: JSON.stringify({ authorId: Number(seciliAtaYazar), kitapProjeId: Number(seciliId) }),
-      });
-      const d = await r.json();
-      if (!r.ok) { setAtaMesaj({ ok: false, text: [d.error, d.not].filter(Boolean).join(" ") }); return; }
-      setAtaMesaj({ ok: true, text: d.mesaj || `Sayfalar paylaşıldı (${d.paylasilanSayfa ?? "?"} çift).` });
-    } catch { setAtaMesaj({ ok: false, text: "Sunucuya ulaşılamadı." }); }
-    finally { setAtaCalisan(""); }
-  };
   // EKLENDİ (14 Ağu 2026, Stil Seçimi aşaması): hangi stil adayının şu an
   // üretiliyor olduğunu (indeks) tutar — birden fazla eşzamanlı üretim
   // isteğini önlemek için.
@@ -7780,7 +7834,7 @@ function KitapStudyo({ authFetch, token, gorunum = "tezgah" }) {
              padding: "10px 18px", borderRadius: 6, cursor: "pointer" },
     // Birincil düğme: ekranda EN FAZLA BİR TANE. Altın yalnız burada.
     butonAna: { fontFamily: "'Fredoka', sans-serif", fontWeight: 600, fontSize: 13,
-                background: "#A9762F", color: "#FFFFFF", border: "1px solid #A9762F",
+                background: "#A9762F", color: "#fff", border: "1px solid #A9762F",
                 padding: "10px 18px", borderRadius: 6, cursor: "pointer" },
     // Geri alınamayan / para harcayan eylem. Kırmızı ZEMİN değil kırmızı
     // YAZI: dolu kırmızı düğme göz çekiyor ve "buraya bas" diyor; oysa
@@ -10087,7 +10141,7 @@ function KitapStudyo({ authFetch, token, gorunum = "tezgah" }) {
           onMouseDown={(e) => { if (e.target === e.currentTarget) setKutuphaneAcik(false); }}
           style={{ position: "fixed", inset: 0, zIndex: 4150, background: "rgba(18,18,20,.6)",
                    display: "grid", placeItems: "center", padding: 16 }}>
-          <div className="mst-kutu" style={{ background: "#FFFFFF", borderRadius: 14, padding: 16,
+          <div className="mst-kutu" style={{ background: "#fff", borderRadius: 14, padding: 16,
             maxWidth: 900, width: "100%", maxHeight: "88vh", overflowY: "auto", color: "#18181a" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8, flexWrap: "wrap" }}>
               <b style={{ fontFamily: "'Fredoka', sans-serif", fontSize: 16 }}><Simge ad="kutuphane" boy={16} />Karakter Kütüphanesi</b>
@@ -10359,55 +10413,6 @@ function KitapStudyo({ authFetch, token, gorunum = "tezgah" }) {
                     projeye geçmek için"): açık, tıklanır "panoya dön" linki —
                     proje kartına tekrar tıklamanın (yukarıda toggle edildi)
                     yanı sıra ikinci bir yol. */}
-                {/* ── SAĞ ÜST: Yazar ata / Sayfaları paylaş (25 Ağu 2026) ──
-                    Yazar süreci ve sayfa paylaşımı artık projenin içinde,
-                    belirgin biçimde. "Yeni yazar süreci başlat" ayrı kutusu kalktı. */}
-                <div style={{ float: "right", maxWidth: 340, textAlign: "right" }}>
-                  {!yazarPanelAcik ? (
-                    <Btn small variant="primary" onClick={() => { setYazarPanelAcik(true); if (!yazarListe) yazarlariCek(); }}>
-                      <Simge ad="kutuphane" />Yazar ata / Sayfa paylaş
-                    </Btn>
-                  ) : (
-                    <div style={{ background: "#FFFFFF", border: "1px solid #E4DFD1", borderRadius: 12,
-                      padding: 12, textAlign: "left", boxShadow: "0 8px 24px rgba(12,18,34,.10)", minWidth: 300 }}>
-                      <div style={{ display: "flex", alignItems: "center", marginBottom: 8 }}>
-                        <b style={{ fontSize: 13 }}>Yazara ata</b>
-                        <span style={{ flex: 1 }} />
-                        <span onClick={() => { setYazarPanelAcik(false); setAtaMesaj(null); }}
-                          style={{ cursor: "pointer", color: "#6f6f6c", fontSize: 18, lineHeight: 1 }}>×</span>
-                      </div>
-                      <select value={seciliAtaYazar} onChange={(e) => setSeciliAtaYazar(e.target.value)}
-                        style={{ width: "100%", padding: "8px 10px", borderRadius: 8, fontSize: 13,
-                          border: "1px solid #E4DFD1", marginBottom: 8 }}>
-                        <option value="">— yazar seçin —</option>
-                        {(yazarListe || []).map((y) => (
-                          <option key={y.id} value={y.id}>{y.name} ({y.username})</option>
-                        ))}
-                      </select>
-                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                        <Btn small variant="primary" disabled={!seciliAtaYazar || ataCalisan === "ata"}
-                          onClick={projedenYazarAta}>
-                          {ataCalisan === "ata" ? "Başlatılıyor…" : "Yazar ata (süreci başlat)"}
-                        </Btn>
-                        <Btn small variant="ghost" disabled={!seciliAtaYazar || ataCalisan === "paylas"}
-                          onClick={projedenSayfaPaylas}>
-                          {ataCalisan === "paylas" ? "Paylaşılıyor…" : "Sayfaları paylaş/güncelle"}
-                        </Btn>
-                      </div>
-                      <div style={{ fontSize: 11, color: "#6f6f6c", marginTop: 8, lineHeight: 1.5 }}>
-                        "Yazar ata" projedeki karakter kadrosuyla yazarın sürecini başlatır
-                        (yazar stili seçer → karakterler üretilir → onaylar). "Sayfaları paylaş"
-                        çizilmiş sayfaları yazara açar.
-                      </div>
-                      {ataMesaj && (
-                        <div style={{ marginTop: 8, fontSize: 12, padding: "7px 10px", borderRadius: 8,
-                          color: ataMesaj.ok ? "#2E7D32" : "#C0392B",
-                          background: ataMesaj.ok ? "#E8F3EC" : "#FDECEC",
-                          border: `1px solid ${ataMesaj.ok ? "#A8D5B8" : "#E3B4B4"}` }}>{ataMesaj.text}</div>
-                      )}
-                    </div>
-                  )}
-                </div>
                 <span onClick={() => { setSeciliId(null); setSeciliProje(null); }}
                   style={{ fontSize: 12, color: "#6f6f6c", cursor: "pointer", display: "inline-block", marginBottom: 10 }}>
                   ← Proje Panosuna Dön
@@ -10606,7 +10611,7 @@ function KitapStudyo({ authFetch, token, gorunum = "tezgah" }) {
                         {(seciliProje.spreadler || []).map((s, idx) => {
                           const { solSayfa, sagSayfa } = spreadNumaralariGetir(idx);
                           return (
-                            <div key={idx} style={{ background: "#FFFFFF", border: "1.5px solid #E4DFD1", borderRadius: 12, padding: 14, marginBottom: 10 }}>
+                            <div key={idx} style={{ background: "#fff", border: "1.5px solid #E4DFD1", borderRadius: 12, padding: 14, marginBottom: 10 }}>
                               <div style={{ fontFamily: "'Fredoka', sans-serif", fontWeight: 600, fontSize: 13, marginBottom: 8, color: "#6f6f6c" }}>Sayfa {solSayfa} — {sagSayfa}</div>
                               <textarea style={{ ...stil.input, minHeight: 50 }} placeholder="Sahne (iki sayfaya birden yayılan tek kompozisyon)"
                                 value={s.sahne} onChange={(e) => spreadAlanGuncelle(idx, "sahne", e.target.value)} onBlur={() => metaKaydet(seciliProje)} />
@@ -10662,7 +10667,7 @@ function KitapStudyo({ authFetch, token, gorunum = "tezgah" }) {
                     />
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 12 }}>
                       {(seciliProje.stilAdaylari || []).map((aday, idx) => (
-                        <div key={idx} style={{ background: "#FFFFFF", border: "1.5px solid #E4DFD1", borderRadius: 12, padding: 12,
+                        <div key={idx} style={{ background: "#fff", border: "1.5px solid #E4DFD1", borderRadius: 12, padding: 12,
                           ...(seciliProje.onaylananStilEtiket === aday.etiket ? { borderColor: "#4FAF7A", borderWidth: 2 } : {}) }}>
                           <div style={{ fontFamily: "'Fredoka', sans-serif", fontWeight: 600, fontSize: 13, marginBottom: 6 }}>{aday.etiket}</div>
                           <div style={{ fontSize: 11, color: "#6f6f6c", marginBottom: 8, lineHeight: 1.5, minHeight: 55 }}>{aday.stilTanimi}</div>
@@ -10741,7 +10746,7 @@ function KitapStudyo({ authFetch, token, gorunum = "tezgah" }) {
 
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(240px,1fr))", gap: 12, marginBottom: 20 }}>
                       {(seciliProje.karakterler || []).map((k, idx) => (
-                        <div key={idx} style={{ background: "#FFFFFF", border: "1.5px solid #E4DFD1", borderRadius: 12, padding: 12 }}>
+                        <div key={idx} style={{ background: "#fff", border: "1.5px solid #E4DFD1", borderRadius: 12, padding: 12 }}>
                           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
                             <div style={{ fontFamily: "'Fredoka', sans-serif", fontWeight: 600, fontSize: 13 }}>{k.ad}</div>
                             <span onClick={() => karakterSil(idx)} style={{ color: "#C0392B", cursor: "pointer", fontSize: 12 }}>✕</span>
@@ -10977,7 +10982,7 @@ function KitapStudyo({ authFetch, token, gorunum = "tezgah" }) {
                           )}
                           <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
                             {kars.map((k, idx) => (
-                              <div key={idx} style={{ width: 132, background: "#FFFFFF", borderRadius: 10,
+                              <div key={idx} style={{ width: 132, background: "#fff", borderRadius: 10,
                                 border: `1px solid ${k.gorselUrl ? "#E4DFD1" : "#E3B4B4"}`, padding: 8 }}>
                                 {k.gorselUrl ? (
                                   <img src={kucukAdres(k.gorselUrl)} alt={`${k.ad} referansı`} loading="lazy" decoding="async"
@@ -11092,7 +11097,7 @@ function KitapStudyo({ authFetch, token, gorunum = "tezgah" }) {
                           // Ctrl+F ile arayamama, yazdırmada eksik içerik) olmadan
                           // veriyor. contain-intrinsic-size kaydırma çubuğunun
                           // zıplamasını önlüyor.
-                          <div key={idx} className="mst-spread-kart" style={{ background: "#FFFFFF", border: "1.5px solid #E4DFD1", borderRadius: 12, padding: 14, marginBottom: 10 }}>
+                          <div key={idx} className="mst-spread-kart" style={{ background: "#fff", border: "1.5px solid #E4DFD1", borderRadius: 12, padding: 14, marginBottom: 10 }}>
                             <div style={{ fontFamily: "'Fredoka', sans-serif", fontWeight: 600, fontSize: 13, marginBottom: 8, color: "#6f6f6c" }}>Sayfa {solSayfa} — {sagSayfa}</div>
                             {/* ── TUVAL + DENETÇİ (23 Ağu 2026, onaylı maket) ──
                                 Solda görsel (tuval), sağda 340px denetçi: sahne, metinler ve
@@ -11715,21 +11720,21 @@ function KitapStudyo({ authFetch, token, gorunum = "tezgah" }) {
                           style={{ position: "fixed", inset: 0, zIndex: 9999, background: "rgba(12,18,34,.9)",
                             display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 20 }}>
                           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%", maxWidth: 900, marginBottom: 10 }}>
-                            <div style={{ fontFamily: "'Fredoka', sans-serif", fontWeight: 600, fontSize: 15, color: "#FFFFFF" }}>
+                            <div style={{ fontFamily: "'Fredoka', sans-serif", fontWeight: 600, fontSize: 15, color: "#fff" }}>
                               Kitap Önizleme — {seciliProje.kitapAdi}
                             </div>
                             <span onClick={() => setOnizlemeAcikMi(false)}
-                              style={{ cursor: "pointer", fontSize: 13, color: "#FFFFFF", background: "rgba(255,255,255,.15)", padding: "5px 14px", borderRadius: 100 }}>
+                              style={{ cursor: "pointer", fontSize: 13, color: "#fff", background: "rgba(255,255,255,.15)", padding: "5px 14px", borderRadius: 100 }}>
                               Kapat ✕
                             </span>
                           </div>
                           {sayfa
                             ? <img src={sayfa.url} alt={sayfa.etiket} decoding="async"
-                                style={{ maxWidth: "min(900px, 100%)", maxHeight: "72vh", borderRadius: 10, background: "#FFFFFF", objectFit: "contain" }} />
-                            : <div style={{ color: "#FFFFFF", fontSize: 13, padding: 40 }}>
+                                style={{ maxWidth: "min(900px, 100%)", maxHeight: "72vh", borderRadius: 10, background: "#fff", objectFit: "contain" }} />
+                            : <div style={{ color: "#fff", fontSize: 13, padding: 40 }}>
                                 Gösterilecek görsel yok — sayfaların görselleri henüz üretilmemiş olabilir.
                               </div>}
-                          <p style={{ fontWeight: 600, margin: "12px 0 10px", color: "#FFFFFF", fontSize: 13 }}>
+                          <p style={{ fontWeight: 600, margin: "12px 0 10px", color: "#fff", fontSize: 13 }}>
                             {sayfa ? `${sayfa.etiket} · ${onizlemeIndex + 1} / ${liste.length}` : ""}
                           </p>
                           <div style={{ display: "flex", gap: 8, justifyContent: "center" }}>
@@ -11768,7 +11773,7 @@ function KitapStudyo({ authFetch, token, gorunum = "tezgah" }) {
             onClick={(e) => { if (e.target === e.currentTarget) setPromptOnizleme(null); }}
             style={{ position: "fixed", inset: 0, zIndex: 9998, background: "rgba(12,18,34,.9)",
               display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 20 }}>
-            <div style={{ background: "#FFFFFF", borderRadius: 14, maxWidth: 820, width: "100%", maxHeight: "82vh", display: "flex", flexDirection: "column" }}>
+            <div style={{ background: "#fff", borderRadius: 14, maxWidth: 820, width: "100%", maxHeight: "82vh", display: "flex", flexDirection: "column" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "13px 16px", borderBottom: "1px solid #E4DFD1", flexWrap: "wrap" }}>
                 <b style={{ fontFamily: "'Fredoka', sans-serif", fontSize: 14 }}>Sayfa {promptOnizleme.sayfa} — modele giden prompt</b>
                 <span style={{ fontSize: 11.5, color: "#6f6f6c", fontFamily: FONT_MONO }}>{promptOnizleme.metin.length} karakter</span>
@@ -12144,7 +12149,7 @@ function ean13Svg(isbn13, { yukseklikMm = 22, modulMm = 0.33 } = {}) {
     `<text x="${(xModul * modulMm).toFixed(2)}" y="${(yukseklikMm - 0.4).toFixed(2)}" font-family="monospace" font-size="3.1" text-anchor="${ankor}" fill="#000">${metin}</text>`;
 
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${G.toFixed(2)}mm" height="${yukseklikMm}mm" viewBox="0 0 ${G.toFixed(2)} ${yukseklikMm}">`
-    + `<rect width="${G.toFixed(2)}" height="${yukseklikMm}" fill="#FFFFFF"/>${cubuklar}`
+    + `<rect width="${G.toFixed(2)}" height="${yukseklikMm}" fill="#fff"/>${cubuklar}`
     + yazi(r[0], sessizSol - 4, "end")
     + yazi(r.slice(1, 7), sessizSol + 3 + 21)
     + yazi(r.slice(7), sessizSol + 50 + 21)
@@ -12282,7 +12287,7 @@ function BaskiHazirligiGovde({ proje, stil, guncelle, kaydet,
               )}
             </div>
             {barkod
-              ? <div style={{ background: "#FFFFFF", padding: 10, borderRadius: 6, display: "inline-block" }}
+              ? <div style={{ background: "#fff", padding: 10, borderRadius: 6, display: "inline-block" }}
                   dangerouslySetInnerHTML={{ __html: barkod }} />
               : <div style={{ fontSize: 11.5, color: "var(--metin2)" }}>
                   Barkodsuz kitap perakendede satılamaz. Geçerli bir 13 haneli ISBN girilince burada vektör olarak üretilir.
@@ -12710,7 +12715,7 @@ function SurumGecmisi({ authFetch, stil, projeId, projeAdi, onGeriYuklendi, onay
   };
 
   return (
-    <div style={{ marginTop: 20, background: "#FFFFFF", border: "1px solid #E4DFD1", borderRadius: 14, padding: "14px 16px" }}>
+    <div style={{ marginTop: 20, background: "#fff", border: "1px solid #E4DFD1", borderRadius: 14, padding: "14px 16px" }}>
       <div onClick={() => setAcik(!acik)} style={{ cursor: "pointer", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
         {/* Emoji yerine çizgi ikon (23 Ağu 2026): 🛟 Windows'ta, Mac'te ve
             Android'de üç ayrı resim; siyah-beyaz çıktıda hiç yok. */}
@@ -12951,7 +12956,7 @@ function KitapStudyoTestAlani({ authFetch, stil, seciliProje, seciliId, sonOlcum
   const uygunGrup = ozet?.gruplar?.find((g) => g.gorselBasinaUsd != null && g.boyut === (seciliProje?.yayilimBoyutu || "3840x1920") && g.kalite === (seciliProje?.kalite || "low"));
 
   return (
-    <div style={{ marginTop: 16, marginBottom: 30, background: "#FFFFFF", border: "2px dashed #C9C2B2", borderRadius: 14, padding: "14px 16px" }}>
+    <div style={{ marginTop: 16, marginBottom: 30, background: "#fff", border: "2px dashed #C9C2B2", borderRadius: 14, padding: "14px 16px" }}>
       <div onClick={() => setAcik(!acik)} style={{ cursor: "pointer", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
         <svg viewBox="0 0 24 24" fill="none" stroke="#6F6F6C" strokeWidth="1.6"
           strokeLinecap="round" strokeLinejoin="round" width="16" height="16" aria-hidden="true">
@@ -16161,7 +16166,7 @@ function ManuelMudahale({ authFetch, authors }) {
               <div style={{ textAlign: "right" }}>
                 <div style={{ fontSize: 11, color: THEME.textMuted, marginBottom: 4 }}>Otomatik ödüller</div>
                 <button onClick={dondurToggle} style={{ fontSize: 12, fontWeight: 600, borderRadius: 6, padding: "6px 14px", cursor: "pointer", border: "none",
-                  background: durum.oyun_dondur ? THEME.danger : THEME.success, color: "#FFFFFF" }}>
+                  background: durum.oyun_dondur ? THEME.danger : THEME.success, color: "#fff" }}>
                   {durum.oyun_dondur ? "🔒 DONDURULDU (aç)" : "✓ AÇIK (dondur)"}
                 </button>
               </div>
@@ -16271,7 +16276,7 @@ function AiMaliyetOzeti({ authFetch }) {
             <button key={g} onClick={() => setGun(g)}
               style={{ padding: "6px 14px", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: "pointer",
                        border: gun === g ? "none" : `1px solid ${THEME.border}`, background: gun === g ? THEME.cyan : THEME.panelBg,
-                       color: gun === g ? "#FFFFFF" : THEME.textLight }}>
+                       color: gun === g ? "#fff" : THEME.textLight }}>
               {g} gün
             </button>
           ))}
@@ -16346,7 +16351,7 @@ function ReferanslarView({ authFetch }) {
 
   const kutu = { background: THEME.panelBg, border: `1px solid ${THEME.border}`, borderRadius: 8, padding: "14px 18px", marginBottom: 10 };
   const btn = (dolu, renk) => ({ padding: "7px 14px", borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: "pointer",
-    border: dolu ? "none" : `1px solid ${THEME.border}`, background: dolu ? (renk || THEME.cyan) : THEME.panelBg, color: dolu ? "#FFFFFF" : THEME.textLight });
+    border: dolu ? "none" : `1px solid ${THEME.border}`, background: dolu ? (renk || THEME.cyan) : THEME.panelBg, color: dolu ? "#fff" : THEME.textLight });
   const durumEtiket = { bekliyor: "Beklemede", kayit_oldu: "Kayıt Oldu", paket_aldi: "Paket Aldı" };
 
   return (
@@ -18902,7 +18907,7 @@ export default function AdminPanel() {
           >
             <span style={{ fontSize: 19 }}>🔔</span>
             {bildirimler.length > 0 && (
-              <span style={{ position: "absolute", top: 2, right: 4, background: THEME.danger, color: "#FFFFFF", borderRadius: 20, minWidth: 17, height: 17, fontSize: 10.5, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", padding: "0 4px" }}>
+              <span style={{ position: "absolute", top: 2, right: 4, background: THEME.danger, color: "#fff", borderRadius: 20, minWidth: 17, height: 17, fontSize: 10.5, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", padding: "0 4px" }}>
                 {bildirimler.length}
               </span>
             )}
