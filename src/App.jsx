@@ -17228,8 +17228,91 @@ function TelifOzetiKutu({ book }) {
   );
 }
 
+// ============ N11 Eşleştirme Önerisi (18 Kas 2026, yönetim kararı) ============
+// N11'de ISBN/stok kodu bulunamazsa sistem artık ismen OTOMATİK eşleştirmez. Benzer ürünler burada
+// ÖNERİ olarak çıkar; eşleşme yalnız yöneticinin "onayla" demesiyle kaydedilir. Reddedilen öneri bir daha çıkmaz.
+function N11OneriKutusu({ book, authFetch, flash, onYenile }) {
+  const [yukleniyor, setYukleniyor] = useState(false);
+  const [veri, setVeri] = useState(null);
+  const [hata, setHata] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const ara = async () => {
+    setYukleniyor(true); setHata("");
+    try {
+      const r = await authFetch(`/api/admin/books/${book.id}/n11-oneri`);
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { setVeri(null); setHata(d.error || "N11 araması yapılamadı."); }
+      else setVeri(d);
+    } catch { setVeri(null); setHata("Sunucuya bağlanılamadı."); }
+    finally { setYukleniyor(false); }
+  };
+
+  const gonder = async (yol, govde, basarili) => {
+    setBusy(true);
+    try {
+      const r = await authFetch(`/api/admin/books/${book.id}/${yol}`, { method: "POST", body: JSON.stringify(govde) });
+      const d = await r.json().catch(() => ({}));
+      const ok = r.ok && d.ok;
+      flash(ok, ok ? (d.mesaj || basarili) : (d.error || "İşlem yapılamadı."));
+      if (ok) { await ara(); if (onYenile) onYenile(); }
+    } catch { flash(false, "Sunucuya bağlanılamadı."); }
+    finally { setBusy(false); }
+  };
+
+  const sifirla = () => {
+    if (!window.confirm(`"${book.title}" için N11 satırı sıfırlanacak: stok başlangıca döner, N11 satışı 0 olur. MST ve diğer pazar yerlerine dokunulmaz. Onaylıyor musun?`)) return;
+    gonder("n11-reddet", { sifirla: true }, "N11 satırı sıfırlandı.");
+  };
+
+  const kutu = (renk, bg) => ({ background: bg, border: `1px solid ${renk}`, borderRadius: 8, padding: "9px 12px", fontSize: 12.5, color: THEME.textLight, lineHeight: 1.55, marginTop: 10 });
+
+  return (
+    <div style={{ borderTop: `1px solid ${THEME.border}`, marginTop: 12, paddingTop: 12 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+        <div style={{ fontSize: 11.5, color: THEME.textFaint, lineHeight: 1.5, flex: "1 1 260px" }}>
+          N11 eşleştirmesi yalnız ISBN / stok kodu ile yapılır. İsim benzerliği kendiliğinden eşleştirmez: benzer ürünleri aratıp sen onaylarsın. Onayladığın eşleşme KOD alanına yazılır.
+        </div>
+        <Btn small variant="ghost" disabled={yukleniyor || busy} onClick={ara}>{yukleniyor ? "Aranıyor..." : "🔎 N11'de ara"}</Btn>
+      </div>
+      {hata && <div style={kutu(THEME.danger, THEME.dangerBg)}>{hata}</div>}
+      {veri && veri.durum === "eslesti" && (
+        <div style={kutu(THEME.success, THEME.successBg)}>✓ N11'de eşleşti: <b>{veri.urun && veri.urun.ad}</b> · N11 stoğu {veri.urun && veri.urun.stok}</div>
+      )}
+      {veri && veri.durum === "eslesmedi" && (
+        <div>
+          <div style={{ fontSize: 12.5, color: THEME.textMuted, marginTop: 10 }}>
+            Bu kitap N11'de ISBN / stok koduyla bulunamadı.{veri.kodGirilmis ? " (Bu kitap için bir N11 kodu girilmiş ama N11'de o ürün görünmüyor.)" : ""}
+          </div>
+          {veri.supheli && veri.kayit && (
+            <div style={kutu(THEME.warn, THEME.warnBg)}>
+              <b>Dikkat:</b> kayıtta N11 için stok {veri.kayit.stok}, satış {veri.kayit.satis} görünüyor (başlangıç {veri.kayit.baslangic == null ? "—" : veri.kayit.baslangic}). Kitap N11'de gerçekten yoksa bu satış hayalidir; satırı sıfırlayabilirsin.
+              <div style={{ marginTop: 8 }}>
+                <Btn small variant="danger" disabled={busy} onClick={sifirla}>N11'de bu kitap yok — satırı sıfırla</Btn>
+              </div>
+            </div>
+          )}
+          {(veri.adaylar || []).length === 0 && <div style={{ fontSize: 12.5, color: THEME.textMuted, marginTop: 8 }}>İsim olarak benzer bir N11 ürünü bulunamadı.</div>}
+          {(veri.adaylar || []).map((a) => (
+            <div key={a.anahtar} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap", border: `1px solid ${THEME.border}`, background: THEME.panelBg, borderRadius: 8, padding: "9px 12px", marginTop: 8 }}>
+              <div style={{ flex: "1 1 240px", minWidth: 0 }}>
+                <div style={{ fontSize: 13, color: THEME.textLight, fontWeight: 600, wordBreak: "break-word" }}>{a.ad}</div>
+                <div style={{ fontSize: 11.5, color: THEME.textMuted, marginTop: 2 }}>N11 stoğu {a.stok} · isim benzerliği %{a.benzerlik}{a.kod ? ` · N11 kodu ${a.kod}` : ""}</div>
+              </div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <Btn small variant="success" disabled={busy} onClick={() => gonder("n11-onayla", { anahtar: a.anahtar }, "Eşleşme onaylandı.")}>✓ Bu ürün, onayla</Btn>
+                <Btn small variant="ghost" disabled={busy} onClick={() => gonder("n11-reddet", { anahtar: a.anahtar }, "Öneri reddedildi.")}>✗ Değil</Btn>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ============ Kitap Eşleştirme & Satış Editörü (başlangıç stok + platform kodları) ============
-function MatchingEditor({ book, onSave, flash }) {
+function MatchingEditor({ book, onSave, flash, authFetch, onYenile }) {
   const PLATFORMS = [
     { key: "mst", label: "MST (WooCommerce)" },
     { key: "trendyol", label: "Trendyol" },
@@ -17248,6 +17331,15 @@ function MatchingEditor({ book, onSave, flash }) {
     const o = {}; PLATFORMS.forEach((p) => { o[p.key] = kod[p.key] || ""; }); return o;
   });
   const [busy, setBusy] = useState(false);
+  // Panelden onaylanan N11 eşleşmesi book.platformCodes'a yazılır; alan eski değerde kalırsa
+  // sonraki "Kaydet" onu silerdi. Sunucudaki kodlar değişince alanı yeniden doldur.
+  const kodImza = JSON.stringify(book.platformCodes || {});
+  useEffect(() => {
+    const k = book.platformCodes || {};
+    const o = {}; PLATFORMS.forEach((p) => { o[p.key] = k[p.key] || ""; });
+    setKodlar(o);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [kodImza]);
 
   const kaydet = async () => {
     setBusy(true);
@@ -17282,6 +17374,7 @@ function MatchingEditor({ book, onSave, flash }) {
       <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 10 }}>
         <Btn small disabled={busy} onClick={kaydet}>{busy ? "Kaydediliyor..." : "Kaydet"}</Btn>
       </div>
+      {authFetch && <N11OneriKutusu book={book} authFetch={authFetch} flash={flash} onYenile={onYenile} />}
     </div>
   );
 }
@@ -17295,6 +17388,31 @@ function CredentialsPanel({ author, onSave, flash, onClose }) {
   const [email, setEmail] = useState(author.email || "");
   const [yeniSifre, setYeniSifre] = useState("");
   const [busy, setBusy] = useState(false);
+  // EKLENDİ (14 Kas 2026 — ALYA köprüsü): yazarın WhatsApp telefonu. ALYA,
+  // WhatsApp'tan yazan kişiyi bu numarayla yazar hesabına eşler. Ayrı uçtan
+  // (alya-kopru.js: /admin/authors/:id/telefon) okunur ve kaydedilir.
+  const [telefon, setTelefon] = useState("");
+  const [telefonIlk, setTelefonIlk] = useState(null);
+  const [telBusy, setTelBusy] = useState(false);
+  useEffect(() => {
+    let iptal = false;
+    (async () => {
+      try {
+        const d = await onSave(author.id, { __telefonOku: true });
+        if (!iptal && d && d.ok) { setTelefon(d.telefon || ""); setTelefonIlk(d.telefon || ""); }
+      } catch { /* köprü dosyası yayında değilse alan boş kalır */ }
+    })();
+    return () => { iptal = true; };
+  }, [author.id]);
+  const telefonKaydet = async () => {
+    setTelBusy(true);
+    try {
+      const d = await onSave(author.id, { __telefon: telefon.trim() });
+      if (d && d.ok) { setTelefon(d.telefon || ""); setTelefonIlk(d.telefon || ""); flash(true, d.mesaj || "Telefon kaydedildi."); }
+      else flash(false, d?.error || "Telefon kaydedilemedi.");
+    } catch { flash(false, "Sunucuya bağlanılamadı."); }
+    finally { setTelBusy(false); }
+  };
 
   const kaydet = async () => {
     setBusy(true);
@@ -17328,6 +17446,16 @@ function CredentialsPanel({ author, onSave, flash, onClose }) {
           </select>
         </Field>
       </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "2fr auto", gap: 12, alignItems: "end" }}>
+        <Field label="WHATSAPP TELEFONU (ALYA yazarı bu numaradan tanır)">
+          <input style={{ ...inputStyle, fontFamily: FONT_MONO }} value={telefon} onChange={(e) => setTelefon(e.target.value)} placeholder="0532 111 22 33" inputMode="tel" />
+        </Field>
+        <div style={{ paddingBottom: 14 }}>
+          <Btn small disabled={telBusy || telefonIlk === null || telefon.trim() === (telefonIlk || "")} onClick={telefonKaydet}>{telBusy ? "Kaydediliyor..." : "Telefonu kaydet"}</Btn>
+        </div>
+      </div>
+      <div style={{ fontSize: 11, color: THEME.textFaint, margin: "-8px 0 12px" }}>{telefonIlk === null ? "Telefon alanı için arka uçtaki ALYA köprüsü dosyasının yayında olması gerekir." : "Boş bırakıp kaydederseniz telefon silinir. Aynı numara iki yazara verilemez."}</div>
 
       <div style={{ height: 1, background: THEME.divider, margin: "6px 0 14px" }} />
       <div style={{ fontSize: 12, letterSpacing: "0.05em", color: THEME.textMuted, marginBottom: 12 }}>GİRİŞ BİLGİLERİ</div>
@@ -18340,7 +18468,7 @@ function AuthorDetail({ author, onBack, onAdvanceStage, onApproveCover, onEditSt
 
             {matchingBook === book.id && (
               <>
-                <MatchingEditor book={book} onSave={onUpdateMatching} flash={(ok, t) => setMsg({ ok, text: t })} />
+                <MatchingEditor book={book} onSave={onUpdateMatching} flash={(ok, t) => setMsg({ ok, text: t })} authFetch={authFetch} onYenile={onRefresh} />
                 {onDeleteBook && (
                   <div style={{ marginTop: 14, paddingTop: 12, borderTop: `1px solid ${THEME.border}` }}>
                     {silAcik === book.id ? (
@@ -18624,6 +18752,15 @@ export default function AdminPanel() {
   };
 
   const updateCredentials = async (id, body) => {
+    // ALYA köprüsü: yazar telefonu ayrı uçtan okunur ve kaydedilir
+    if (body && body.__telefonOku) {
+      const r = await authFetch(`/api/admin/authors/${id}/telefon`);
+      return await r.json().catch(() => ({}));
+    }
+    if (body && Object.prototype.hasOwnProperty.call(body, "__telefon")) {
+      const r = await authFetch(`/api/admin/authors/${id}/telefon`, { method: "PATCH", body: JSON.stringify({ telefon: body.__telefon }) });
+      return await r.json().catch(() => ({}));
+    }
     const res = await authFetch(`/api/admin/authors/${id}/credentials`, { method: "PATCH", body: JSON.stringify(body) });
     const data = await res.json().catch(() => ({}));
     if (res.ok) loadAuthors();
